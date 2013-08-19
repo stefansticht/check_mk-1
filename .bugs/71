@@ -1,0 +1,8 @@
+Title: Disk IO read/write: Zu einem Check zusammenfassen
+Component: checks
+State: open
+Date: 2010-12-22 11:06:47
+Class: feature
+
+Wir reden vom Linux-Check. Dann einen gemeinsamen PNP-Graphen mit dem
+Windows-Check machen. Ist doch doof, wenn In und Out getrennte Graphen geben.

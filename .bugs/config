@@ -1,0 +1,37 @@
+states = {
+    "open"       : tty_blue,
+    "done"       : tty_green,
+    "closed"     : tty_normal,
+    "wontfix"    : tty_magenta,
+    "works4me"   : tty_white,
+    "discuss"    : tty_red,
+}
+
+components = [ 
+  ( "core", "Core Modules, Setup, etc." ),
+  ( "checks", "Checks and Agent plugins" ),
+  ( "multisite", "Multisite GUI" ),
+  ( "livestatus", "Livestatus" ),
+  ( "ec", "Event Console" ),
+  ( "livecheck", "Livecheck part in Livestatus, livecheck helper" ),
+  ( "wato", "Check_MK's Web Administration Tool" ),
+  ( "bi", "BI - Business Intelligence" ),
+  ( "mobile", "Multisite Mobile GUI" ), 
+  ( "docu", "Documentation "),
+]
+
+classes = [ 
+  "cleanup",
+  "nastiness",
+  "bug",
+  "todo",
+  "phantasm",
+  "feature",
+]
+
+targetversions = [
+  "1.2.2",
+  "1.2.3",
+  "1.4.0",
+  "future",
+]
