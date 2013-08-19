@@ -396,6 +396,7 @@ register_rule(group,
                                       RegExp(label = _("Regular expression: ")),
                                       Checkbox(label = _("Case insensitive")),
                                       Checkbox(label = _("return CRITICAL if found, OK if not")),
+                                      Checkbox(label = _("Multiline string matching")),
                                   ])
                             ),
                             ( "post_data",

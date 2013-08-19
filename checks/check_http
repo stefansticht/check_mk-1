@@ -96,6 +96,8 @@ def check_http_arguments(params):
         args += ' %s' % quote_shell_string(settings['expect_regex'][0])
         if settings['expect_regex'][2]:
             args += ' --invert-regex'
+        if settings['expect_regex'][3]:
+            args = ' -l ' + args
 
     if "post_data" in settings:
         data, content_type = settings["post_data"]
