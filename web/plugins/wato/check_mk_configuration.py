@@ -251,6 +251,22 @@ register_configvar(group,
     domain = "multisite")
 
 register_configvar(group,
+    "sidebar_notify_interval",
+    Optional(
+        Float(
+            minvalue = 10.0,
+            default_value = 60.0,
+            unit = "sec",
+            display_format = "%.1f"
+        ),
+        title = _("Interval of sidebar popup notification updates"),
+        help = _("The sidebar can be configured to regularly check for pending popup notififcations. "
+                 "This is disabled by default."),
+        none_label = _('(disabled)'),
+    ),
+    domain = "multisite")
+
+register_configvar(group,
     "adhoc_downtime",
     Optional(
         Dictionary(
@@ -331,6 +347,20 @@ register_configvar(group,
                   " realize authentication in reverse proxy environments.")
     ),
     domain = "multisite")
+
+register_configvar(group,
+    "staleness_threshold",
+    Float(
+        title = _('Staleness value to mark hosts / services stale'),
+        help  = _('The staleness value of a host / service is calculated by measuring the '
+                  'configured check intervals a check result is old. A value of 1.5 means the '
+                  'current check result has been gathered one and a half check intervals of an object. '
+                  'This would mean 90 seconds in case of a check which is checked each 60 seconds.'),
+        minvalue = 1,
+        default_value = 1.5,
+    ),
+    domain = "multisite",
+)
 
 
 #   .--WATO----------------------------------------------------------------.
@@ -693,6 +723,7 @@ register_configvar(group,
                   'user accounts for gathering their attributes. The user options which get imported '
                   'into Check_MK from LDAP will be locked in WATO.'),
         elements = userdb.ldap_attribute_plugins_elements,
+        default_keys = ['email', 'alias', 'auth_expire' ],
     ),
     domain = "multisite",
     in_global_settings = False,
@@ -1202,7 +1233,10 @@ register_rule(group,
     "host_groups",
     GroupSelection(
         "host",
-        title = _("Assignment of hosts to host groups")),
+        title = _("Assignment of hosts to host groups"),
+        help = _("Hosts can be grouped together into host groups. The most common use case "
+                 "is to put hosts which belong together in a host group to make it possible "
+                 "to get them listed together in the status GUI.")),
     match = "all")
 
 register_rule(group,
@@ -1822,7 +1856,9 @@ register_rule(group,
                       title = _("Privacy protocol")),
                  TextAscii(title = _("Privacy pass phrase")),
                    ])],
-        title = _("SNMP communities of monitored hosts")))
+        title = _("SNMP communities of monitored hosts"),
+        help = _("By default Check_MK uses the community \"public\" to contact hosts via SNMP. This rule "
+                 "can be used to customize the the credentials to be used when contacting hosts via SNMP.")))
 
 register_rule(group,
     "snmp_character_encodings",
@@ -1850,6 +1886,14 @@ register_rule(group,
              "bulk walk, please use the rule set snmpv2c_hosts instead."))
 
 register_rule(group,
+    "snmp_without_sys_descr",
+    title = _("Hosts without system description OID"),
+    help = _("Devices which do not publish the system description OID "
+             ".1.3.6.1.2.1.1.1.0 are normally ignored by the SNMP inventory. "
+             "Use this ruleset to select hosts which should nevertheless "
+             "be checked."))
+
+register_rule(group,
     "snmpv2c_hosts",
     title = _("Hosts using SNMP v2c (and no bulk walk)"),
     help = _("There exist a few devices out there that behave very badly when using SNMP bulk walk. "
@@ -1866,7 +1910,8 @@ register_rule(group,
             ( "timeout",
               Integer(
                   title = _("Timeout between retries"),
-                  help = _("The default is 1 sec."),
+                  help = _("A request is sent to the SNMP daemon, than wait up to this "
+                           " number of seconds until retrying."),
                   default_value = 1,
                   minvalue = 1,
                   maxvalue = 60,

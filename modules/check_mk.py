@@ -274,6 +274,7 @@ snmp_hosts                           = [ (['snmp'], ALL_HOSTS) ]
 tcp_hosts                            = [ (['tcp'], ALL_HOSTS), (NEGATE, ['snmp'], ALL_HOSTS), (['!ping'], ALL_HOSTS) ]
 bulkwalk_hosts                       = []
 snmpv2c_hosts                        = []
+snmp_without_sys_descr               = []
 usewalk_hosts                        = []
 dyndns_hosts                         = [] # use host name as ip address for these hosts
 ignored_checktypes                   = [] # exclude from inventory
@@ -785,11 +786,12 @@ def snmp_scan(hostname, ipaddress):
 
     if opt_verbose:
         sys.stdout.write("Scanning host %s(%s) for SNMP checks..." % (hostname, ipaddress))
-    sys_descr = get_single_oid(hostname, ipaddress, ".1.3.6.1.2.1.1.1.0")
-    if sys_descr == None:
-        if opt_debug:
-            sys.stderr.write("no SNMP answer\n")
-        return []
+    if not in_binary_hostlist(hostname, snmp_without_sys_descr):
+        sys_descr = get_single_oid(hostname, ipaddress, ".1.3.6.1.2.1.1.1.0")
+        if sys_descr == None:
+            if opt_debug:
+                sys.stderr.write("no SNMP answer\n")
+            return []
 
     found = []
     for check_type, check in check_info.items():
@@ -1031,6 +1033,8 @@ def get_sorted_check_table(hostname):
 # be None in most cases -> to TCP connect on port 6556
 # HACK:
 special_agent_dir = agents_dir + "/special"
+special_agent_local_dir = local_agents_dir + "/special"
+
 def get_datasource_program(hostname, ipaddress):
     # First check WATO-style special_agent rules
     for agentname, ruleset in special_agents.items():
@@ -1038,7 +1042,12 @@ def get_datasource_program(hostname, ipaddress):
         if params: # rule match!
             # Create command line using the special_agent_info
             cmd_arguments = special_agent_info[agentname](params[0], hostname, ipaddress)
-            return '%s/agent_%s %s' % ( special_agent_dir, agentname, cmd_arguments)
+            if special_agent_local_dir and \
+                os.path.exists(special_agent_local_dir + "/agent_" + agentname):
+                path = special_agent_local_dir + "/agent_" + agentname
+            else:
+                path = special_agent_dir + "/agent_" + agentname
+            return path + " " + cmd_arguments
 
     programs = host_extra_conf(hostname, datasource_programs)
     if len(programs) == 0:
@@ -1794,10 +1803,25 @@ def create_nagios_servicedefs(outfile, hostname):
 
     def do_omit_service(hostname, description):
         if service_ignored(hostname, None, description):
-            return True 
+            return True
         if hostname != host_of_clustered_service(hostname, description):
             return True
         return False
+
+    def get_dependencies(hostname,servicedesc):
+        result = ""
+        for dep in service_deps(hostname, servicedesc):
+            result += """
+define servicedependency {
+  use\t\t\t\t%s
+  host_name\t\t\t%s
+  service_description\t%s
+  dependent_host_name\t%s
+  dependent_service_description %s
+}\n
+""" % (service_dependency_template, hostname, dep, hostname, servicedesc)
+
+        return result
 
     host_checks = get_check_table(hostname).items()
     host_checks.sort() # Create deterministic order
@@ -1935,7 +1959,8 @@ define service {
 }
 """ % (active_service_template, hostname, extra_service_conf_of(hostname, "Check_MK")))
         # Inventory checks - if user has configured them. Not for clusters.
-        if inventory_check_interval and not is_cluster(hostname):
+        if inventory_check_interval and not is_cluster(hostname) \
+            and not service_ignored(hostname,None,'Check_MK inventory'):
             outfile.write("""
 define service {
   use\t\t\t\t%s
@@ -1990,6 +2015,9 @@ define service {
 %s}
 """ % (template, hostname, make_utf8(description), simulate_command(command), extraconf))
 
+        # write service dependencies for legacy checks
+        outfile.write(get_dependencies(hostname,description))
+
     # legacy checks via active_checks
     actchecks = []
     needed_commands = []
@@ -2012,7 +2040,7 @@ define service {
             description = act_info["service_description"](params)
 
             if do_omit_service(hostname, description):
-                continue 
+                continue
 
             # compute argument, and quote ! and \ for Nagios
             args = act_info["argument_function"](params).replace("\\", "\\\\").replace("!", "\\!")
@@ -2041,6 +2069,8 @@ define service {
 %s}
 """ % (template, hostname, make_utf8(description), simulate_command(command), extraconf))
 
+            # write service dependencies for active checks
+            outfile.write(get_dependencies(hostname,description))
 
     # Legacy checks via custom_checks
     custchecks = host_extra_conf(hostname, custom_checks)
@@ -2060,7 +2090,7 @@ define service {
             command_line = entry.get("command_line", "")
 
             if do_omit_service(hostname, description):
-                continue 
+                continue
 
             if command_line:
                 plugin_name = command_line.split()[0]
@@ -2108,6 +2138,9 @@ define service {
 %s%s}
 """ % (template, hostname, make_utf8(description), simulate_command(command),
        (command_line and not freshness) and 1 or 0, extraconf, freshness))
+
+            # write service dependencies for custom checks
+            outfile.write(get_dependencies(hostname,description))
 
     # Levels for host check
     if is_cluster(hostname):
@@ -3158,7 +3191,7 @@ def manpage_browser_folder(cat, subtrees):
     execfile(modules_dir + "/catalog.py", globals())
     titles = []
     for e in subtrees:
-        title = manpage_catalog_titles.get(e,e) 
+        title = manpage_catalog_titles.get(e,e)
         count = manpage_num_entries(cat + (e,))
         if count:
             title += " (%d)" % count
@@ -3331,7 +3364,7 @@ def show_check_manual(checkname):
             return line.replace('{{', '{&#123;').replace('}}', '&#125;}').replace("{", "<b>").replace("}", "</b>")
 
         def print_sectionheader(line, title):
-            print "H1:" + title 
+            print "H1:" + title
 
         def print_subheader(line):
             print "H2:" + line
@@ -3875,12 +3908,13 @@ def do_snmptranslate(walk):
     translated_lines = []
 
     walk_lines = file(path_walk).readlines()
-    print("Processing %d lines (%d per dot)" %  (len(walk_lines), entries_per_cycle))
+    sys.stderr.write("Processing %d lines (%d per dot)\n" %  (len(walk_lines), entries_per_cycle))
     for i in range(0, len(walk_lines), entries_per_cycle):
-        sys.stdout.write(".")
-        sys.stdout.flush()
+        sys.stderr.write(".")
+        sys.stderr.flush()
         process_lines = walk_lines[i:i+entries_per_cycle]
         translated_lines.extend(translate(process_lines))
+    sys.stderr.write("\n")
 
     # Output formatted
     longest_translation = 40
@@ -5162,7 +5196,7 @@ if __name__ == "__main__":
                      "snmpget=", "profile", "keepalive", "create-rrd",
                      "no-cache", "update", "restart", "reload", "dump", "fake-dns=",
                      "man", "nowiki", "config-check", "backup=", "restore=",
-                     "check-inventory=", "paths", "cleanup-autochecks", "checks=", 
+                     "check-inventory=", "paths", "cleanup-autochecks", "checks=",
                      "cmc-file=", "browse-man", "list-man" ]
 
     non_config_options = ['-L', '--list-checks', '-P', '--package', '-M', '--notify',

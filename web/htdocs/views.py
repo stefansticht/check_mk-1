@@ -376,7 +376,7 @@ def page_edit_views(msg=None):
     html.write('<table class=data>')
     html.write("<tr>")
     html.write("<th>%s</th>" % _("Actions"))
-    html.write("<th>%s</th>" % _("Link Name"))
+    html.write("<th>%s</th>" % _("View Name"))
     html.write("<th>%s</th>" % _("Title"))
     html.write("<th>%s</th>" % _("Datasource"))
     html.write("<th>%s</th>" % _("Owner"))
@@ -420,7 +420,7 @@ def page_edit_views(msg=None):
                                  % viewname, _("Delete this view!"), "delete")
             html.write('</td>')
 
-            # Link name
+            # View Name
             html.write('<td>%s</td>' % viewname)
 
             # Title
@@ -579,39 +579,42 @@ def page_edit_view():
 
     forms.header(_("Basic Settings"))
 
-    forms.section(_("Title"))
-    vs['title'].render_input('view_title', view.get('title'))
-
-    forms.section(_("Link Name"))
+    forms.section(_("View Name"))
     html.text_input("view_name", size=12)
-    html.help(_("The link name will be used in URLs that point to a view, e.g. "
+    html.help(_("The view name will be used in URLs that point to a view, e.g. "
                 "<tt>view.py?view_name=<b>myview</b></tt>. It will also be used "
                 "internally for identifying a view. You can create several views "
-                "with the same title but only one per link name. If you create a "
-                "view that has the same link name as a builtin view, then your "
+                "with the same title but only one per view name. If you create a "
+                "view that has the same view name as a builtin view, then your "
                 "view will override that (shadowing it)."))
 
     forms.section(_("Datasource"), simple=True)
     datasource_title = multisite_datasources[datasourcename]["title"]
-    html.write("%s: <b>%s</b><br>\n" % (_('Datasource'), datasource_title))
+    html.write("%s: <b>%s</b><br />\n" % (_('Datasource'), datasource_title))
     html.hidden_field("datasource", datasourcename)
     html.help(_("The datasource of a view cannot be changed."))
+
+    forms.space()
+
+    forms.section(_("Title"))
+    vs['title'].render_input('view_title', view.get('title'))
 
     forms.section(_("Topic"))
     vs['topic'].render_input('view_topic', view.get('topic'))
     html.help(_("The view will be sorted under this topic in the Views snapin. "))
 
-    forms.section(_("Button"))
-    html.write(_('Text') + ': ')
+    forms.section(_("Description"))
+    vs['description'].render_input('view_description', view.get('description'))
+
+    forms.section(_("Button Text"))
     vs['linktitle'].render_input('view_linktitle', view.get('linktitle'))
     html.help(_("If you define a text here, then it will be used in "
                 "buttons to the view instead of of view title."))
-    html.write('<p>' + _('Icon') + ': ')
-    html.text_input("view_icon", size=14)
-    html.write('</p>')
 
-    forms.section(_("Description"))
-    vs['description'].render_input('view_description', view.get('description'))
+    forms.section(_("Button Icon"))
+    html.text_input("view_icon", size=14)
+
+    forms.space()
 
     forms.section(_("Visibility"))
     if config.may("general.publish_views"):
@@ -1538,6 +1541,13 @@ def render_view(view, rows, datasource, group_painters, painters,
         if bi.reused_compilation():
             html.add_status_icon("aggrcomp", _("Reused cached compiled BI aggregations (PID %d)") % pid)
 
+        if config.may('wato.users'):
+            try:
+                msg = file(defaults.var_dir + '/web/ldap_sync_fail.mk').read()
+                html.add_status_icon("ldap", _('Last LDAP sync failed! %s') % html.attrencode(msg))
+            except IOError:
+                pass
+
         html.bottom_focuscode()
         if 'Z' in display_options:
             html.bottom_footer()
@@ -2338,6 +2348,12 @@ def execute_hooks(hook):
             else:
                 pass
 
+def paint_painter(painter, row):
+    if "args" in painter:
+        return painter["paint"](row, *painter["args"])
+    else:
+        return painter["paint"](row)
+
 def prepare_paint(p, row):
     painter = p[0]
     linkview = p[1]
@@ -2348,10 +2364,7 @@ def prepare_paint(p, row):
         if not row:
             return "", ""  # no join information available for that column
 
-    if "args" in painter:
-        tdclass, content = painter["paint"](row, *painter["args"])
-    else:
-        tdclass, content = painter["paint"](row)
+    tdclass, content = paint_painter(painter, row)
 
     content = html.utf8_to_entities(content)
 
@@ -2402,11 +2415,19 @@ def row_id(view, row):
 
 def paint(p, row, tdattrs=""):
     tdclass, content = prepare_paint(p, row)
+
     if tdclass:
         html.write("<td %s class=\"%s\">%s</td>\n" % (tdattrs, tdclass, content))
     else:
         html.write("<td %s>%s</td>" % (tdattrs, content))
     return content != ""
+
+def paint_stalified(row, text):
+    if is_stale(row):
+        return "stale", text
+    else:
+        return "", text
+
 
 def substract_sorters(base, remove):
     for s in remove:
@@ -2562,10 +2583,10 @@ def register_events(row):
     if config.sounds != []:
         host_state = row.get("host_hard_state", row.get("host_state"))
         if host_state != None:
-            html.register_event({0:"up", 1:"down", 2:"unreachable"}[host_state])
+            html.register_event({0:"up", 1:"down", 2:"unreachable"}[saveint(host_state)])
         svc_state = row.get("service_last_hard_state", row.get("service_state"))
         if svc_state != None:
-            html.register_event({0:"up", 1:"warning", 2:"critical", 3:"unknown"}[svc_state])
+            html.register_event({0:"up", 1:"warning", 2:"critical", 3:"unknown"}[saveint(svc_state)])
 
 # The Group-value of a row is used for deciding wether
 # two rows are in the same group or not
@@ -2594,7 +2615,7 @@ def get_host_tags(row):
     return ""
 
 def is_stale(row):
-    return row.get('service_staleness', row.get('host_staleness', 0)) >= 1.5
+    return row.get('service_staleness', row.get('host_staleness', 0)) >= config.staleness_threshold
 
 def cmp_insensitive_string(v1, v2):
     c = cmp(v1.lower(), v2.lower())
@@ -2613,7 +2634,7 @@ def cmp_ip_address(column, r1, r2):
         except:
             return ip
     v1, v2 = split_ip(r1.get(column, '')), split_ip(r2.get(column, ''))
-    return cmp(v1, v2) 
+    return cmp(v1, v2)
 
 
 def cmp_simple_string(column, r1, r2):

@@ -25,7 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 import config, defaults
-import time, copy
+import time, copy, traceback
 
 try:
     # docs: http://www.python-ldap.org/doc/html/index.html
@@ -49,6 +49,8 @@ g_ldap_group_cache = {}
 
 # File for storing the time of the last success event
 g_ldap_sync_time_file = defaults.var_dir + '/web/ldap_sync_time.mk'
+# Exists when last ldap sync failed, contains exception text
+g_ldap_sync_fail_file = defaults.var_dir + '/web/ldap_sync_fail.mk'
 
 # LDAP attributes are case insensitive, we only use lower case!
 # Please note: This are only default values. The user might override this
@@ -93,7 +95,8 @@ ldap_filter_map = {
 
 def ldap_log(s):
     if config.ldap_debug_log is not None:
-        file(ldap_replace_macros(config.ldap_debug_log), "a").write('%s\n' % s)
+        file(ldap_replace_macros(config.ldap_debug_log), "a").write('%s %s\n' %
+                                            (time.strftime('%Y-%m-%d %H:%M:%S'), s))
 
 class MKLDAPException(MKGeneralException):
     pass
@@ -128,6 +131,7 @@ def ldap_connect_server(server):
         conn = ldap.ldapobject.ReconnectLDAPObject(uri)
         conn.protocol_version = config.ldap_connection['version']
         conn.network_timeout  = config.ldap_connection.get('connect_timeout', 2.0)
+        conn.retry_delay      = 0.5
 
         # When using the domain top level as base-dn, the subtree search stumbles with referral objects.
         # whatever. We simply disable them here when using active directory. Hope this fixes all problems.
@@ -153,7 +157,10 @@ def ldap_connect(enforce_new = False, enforce_server = None):
        and not "no_persistent" in config.ldap_connection \
        and ldap_connection \
        and config.ldap_connection == ldap_connection_options:
+        ldap_log('LDAP CONNECT - Using existing connecting')
         return # Use existing connections (if connection settings have not changed)
+    else:
+        ldap_log('LDAP CONNECT - Connecting...')
 
     ldap_test_module()
 
@@ -185,6 +192,7 @@ def ldap_connect(enforce_new = False, enforce_server = None):
             else:
                 errors.append(error_msg)
 
+        # Got no connection to any server
         if ldap_connection is None:
             raise MKLDAPException(_('The LDAP connector is unable to connect to the LDAP server.\n%s') %
                                         ('<br />\n'.join(errors)))
@@ -193,7 +201,9 @@ def ldap_connect(enforce_new = False, enforce_server = None):
         ldap_connection_options = config.ldap_connection
 
     except Exception:
-        ldap_connection = None # Invalidate connection on failure
+        # Invalidate connection on failure
+        ldap_connection         = None
+        ldap_connection_options = None
         raise
 
 # Bind with the default credentials
@@ -301,37 +311,56 @@ def ldap_search(base, filt = '(objectclass=*)', columns = [], scope = None):
     ldap_log('LDAP_SEARCH "%s" "%s" "%s" "%r"' % (base, scope, filt, columns))
     start_time = time.time()
 
-    result = []
-    try:
+    # In some environments, the connection to the LDAP server does not seem to
+    # be as stable as it is needed. So we try to repeat the query for three times.
+    tries_left = 2
+    success = False
+    while not success:
+        tries_left -= 1
+        try:
+            ldap_connect()
+            result = []
+            try:
+                search_func = config.ldap_connection.get('page_size') \
+                              and ldap_paged_async_search or ldap_async_search
+                for dn, obj in search_func(base, scope, filt, columns):
+                    if dn is None:
+                        continue # skip unwanted answers
+                    new_obj = {}
+                    for key, val in obj.iteritems():
+                        # Convert all keys to lower case!
+                        new_obj[key.lower().decode('utf-8')] = [ i.decode('utf-8') for i in val ]
+                    result.append((dn, new_obj))
+                success = True
+            except ldap.NO_SUCH_OBJECT, e:
+                raise MKLDAPException(_('The given base object "%s" does not exist in LDAP (%s))') % (base, e))
 
-        search_func = config.ldap_connection.get('page_size') \
-                      and ldap_paged_async_search or ldap_async_search
-        for dn, obj in search_func(base, scope, filt, columns):
-            if dn is None:
-                continue # skip unwanted answers
-            new_obj = {}
-            for key, val in obj.iteritems():
-                # Convert all keys to lower case!
-                new_obj[key.lower().decode('utf-8')] = [ i.decode('utf-8') for i in val ]
-            result.append((dn, new_obj))
-    except ldap.NO_SUCH_OBJECT, e:
-        raise MKLDAPException(_('The given base object "%s" does not exist in LDAP (%s))') % (base, e))
+            except ldap.FILTER_ERROR, e:
+                raise MKLDAPException(_('The given ldap filter "%s" is invalid (%s)') % (filt, e))
 
-    except ldap.FILTER_ERROR, e:
-        raise MKLDAPException(_('The given ldap filter "%s" is invalid (%s)') % (filt, e))
-
-    except ldap.SIZELIMIT_EXCEEDED:
-        raise MKLDAPException(_('The response reached a size limit. This could be due to '
-                                'a sizelimit configuration on the LDAP server.<br />Throwing away the '
-                                'incomplete results. You should change the scope of operation '
-                                'within the ldap or adapt the limit settings of the LDAP server.'))
+            except ldap.SIZELIMIT_EXCEEDED:
+                raise MKLDAPException(_('The response reached a size limit. This could be due to '
+                                        'a sizelimit configuration on the LDAP server.<br />Throwing away the '
+                                        'incomplete results. You should change the scope of operation '
+                                        'within the ldap or adapt the limit settings of the LDAP server.'))
+        except (ldap.SERVER_DOWN, ldap.TIMEOUT, MKLDAPException), e:
+            if tries_left:
+                ldap_log('  Received %r. Retrying with clean connection...' % e)
+                ldap_disconnect()
+                time.sleep(0.5)
+            else:
+                ldap_log('  Giving up.')
+                break
 
     duration = time.time() - start_time
+
+    if not success:
+        ldap_log('  FAILED')
+        raise MKLDAPException(_('Unable to successfully perform the LDAP search. '
+                                'Maybe there is a connection problem with the LDAP server.'))
+
     ldap_log('  RESULT length: %d, duration: %0.3f' % (len(result), duration))
     return result
-    #return ldap_connection.search_s(base, scope, filter, columns)
-    #for dn, obj in ldap_connection.search_s(base, scope, filter, columns):
-    #    html.log(repr(dn) + ' ' + repr(obj))
 
 # Returns the ldap filter depending on the configured ldap directory type
 def ldap_filter(key, handle_config = True):
@@ -455,6 +484,7 @@ def ldap_get_users(add_filter = ''):
         if config.ldap_userspec.get('lower_user_ids', False):
             user_id = user_id.lower()
 
+        ldap_user['dn'] = dn # also add the DN
         result[user_id] = ldap_user
 
     return result
@@ -475,10 +505,15 @@ def ldap_get_groups(add_filt = None):
         filt = '(&%s%s)' % (filt, add_filt)
     return ldap_search(ldap_replace_macros(config.ldap_groupspec['dn']), filt, ['cn'])
 
-def ldap_user_groups(username, attr = 'cn'):
-    # The given username might be wrong case. The ldap search is case insensitive,
-    # so the username read from ldap might differ. Fix it here.
-    user_dn, username = ldap_get_user(username, True)
+def ldap_user_groups(username, user_dn, attr = 'cn'):
+    # When configured to convert user_ids to lower case, all user ids here are lower case.
+    # Otherwise all user_ids are in the case which they are in LDAP. This should be ok
+    # for this function! I removed the snippet below to reduce the number of ldap queries.
+    # Before removal, this query was executed for every user again, just to fetch the DN
+    # and the username.
+    #   # The given username might be wrong case. The ldap search is case insensitive,
+    #   # so the username read from ldap might differ. Fix it here.
+    #   user_dn, username = ldap_get_user(username, True)
 
     if username in g_ldap_group_cache:
         if attr == 'cn':
@@ -687,8 +722,6 @@ ldap_attribute_plugins['pager'] = {
 # Register sync plugins for all custom user attributes (assuming simple data types)
 def register_user_attribute_sync_plugins():
     for attr, val in get_user_attributes():
-        html.log(attr)
-        html.log(val)
         ldap_attribute_plugins[attr] = {
             'title': val['valuespec'].title(),
             'help':  val['valuespec'].help(),
@@ -711,7 +744,7 @@ register_user_attribute_sync_plugins()
 def ldap_convert_groups_to_contactgroups(params, user_id, ldap_user, user):
     groups = []
     # 1. Fetch CNs of all LDAP groups of the user (use group_dn, group_filter)
-    ldap_groups = ldap_user_groups(user_id)
+    ldap_groups = ldap_user_groups(user_id, ldap_user['dn'])
 
     # 2. Fetch all existing group names in WATO
     cg_names = load_group_information().get("contact", {}).keys()
@@ -732,7 +765,7 @@ ldap_attribute_plugins['groups_to_contactgroups'] = {
 def ldap_convert_groups_to_roles(params, user_id, ldap_user, user):
     groups = []
     # 1. Fetch DNs of all LDAP groups of the user
-    ldap_groups = [ g.lower() for g in ldap_user_groups(user_id, 'dn') ]
+    ldap_groups = [ g.lower() for g in ldap_user_groups(user_id, ldap_user['dn'], 'dn') ]
 
     # 2. Load default roles from default user profile
     roles = config.default_user_profile['roles'][:]
@@ -813,8 +846,6 @@ def ldap_sync(add_to_changelog, only_username):
 
     start_time = time.time()
 
-    ldap_connect()
-
     ldap_log('  SYNC PLUGINS: %s' % ', '.join(config.ldap_active_plugins.keys()))
 
     # Unused at the moment, always sync all users
@@ -822,9 +853,10 @@ def ldap_sync(add_to_changelog, only_username):
     #if only_username:
     #    filt = '(%s=%s)' % (ldap_user_id_attr(), only_username)
 
-    import wato
-    users      = load_users(lock = True)
     ldap_users = ldap_get_users()
+
+    import wato
+    users = load_users(lock = True)
 
     # Remove users which are controlled by this connector but can not be found in
     # LDAP anymore
@@ -873,6 +905,12 @@ def ldap_sync(add_to_changelog, only_username):
     duration = time.time() - start_time
     ldap_log('SYNC FINISHED - Duration: %0.3f sec' % duration)
 
+    # delete the fail flag file after successful sync
+    try:
+        os.unlink(g_ldap_sync_fail_file)
+    except OSError:
+        pass
+
     save_users(users)
 
 # Calculates the attributes of the users which are locked for users managed
@@ -906,11 +944,25 @@ def ldap_page():
     except:
         last_sync_time = 0
 
-    if last_sync_time + config.ldap_cache_livetime > time.time():
+    # in case of sync problems, synchronize all 20 seconds, instead of the configured
+    # regular cache livetime
+    if os.path.exists(g_ldap_sync_fail_file):
+        cache_livetime = 20
+    else:
+        cache_livetime = config.ldap_cache_livetime
+
+    if last_sync_time + cache_livetime > time.time():
         return # No action needed, cache is recent enough
 
     # ok, cache is too old. Act!
-    ldap_sync(False, None)
+    try:
+        ldap_sync(False, None)
+    except:
+        # Do not let the exception through to the user. Instead write last
+        # error in a state file which is then visualized for the admin and
+        # will be deleted upon next successful sync.
+        file(g_ldap_sync_fail_file, 'w').write('%s\n%s' % (time.strftime('%Y-%m-%d %H:%M:%S'),
+                                                            traceback.format_exc()))
 
 multisite_user_connectors.append({
     'id':          'ldap',

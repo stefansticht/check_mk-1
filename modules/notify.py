@@ -319,7 +319,8 @@ def do_notify(args):
         crash_dir = var_dir + "/notify"
         if not os.path.exists(crash_dir):
             os.makedirs(crash_dir)
-        file(crash_dir + "/crash.log", "a").write("CRASH:\n%s\n\n" % format_exception())
+        file(crash_dir + "/crash.log", "a").write("CRASH (%s):\n%s\n" %
+            (time.strftime("%Y-%m-%d %H:%M:%S"), format_exception()))
 
 
 def notify_data_available():
@@ -476,7 +477,7 @@ def notify_notify(context):
         broken = time.localtime(timestamp)
         context["DATE"] = time.strftime("%Y-%m-%d", broken)
         context["SHORTDATETIME"] = time.strftime("%Y-%m-%d %H:%M:%S", broken)
-        context["LONGDATETIME"] = time.strftime("%a %b %d %H:%M:%S %Z %Y", broken) 
+        context["LONGDATETIME"] = time.strftime("%a %b %d %H:%M:%S %Z %Y", broken)
 
     # Handle interactive calls
     if notify_mode == 'fake-service':
@@ -484,10 +485,12 @@ def notify_notify(context):
     elif notify_mode == 'fake-host':
         set_fake_env('host', context)
 
-    context['HOSTURL'] = '/check_mk/view.py?view_name=hoststatus&host=%s' % urlencode(context['HOSTNAME'])
+    context['HOSTURL'] = '/check_mk/index.py?start_url=%s' % \
+                        urlencode('view.py?view_name=hoststatus&host=%s' % context['HOSTNAME'])
     if context['WHAT'] == 'SERVICE':
-        context['SERVICEURL'] = '/check_mk/view.py?view_name=service&host=%s&service=%s' % \
-                                 (urlencode(context['HOSTNAME']), urlencode(context['SERVICEDESC']))
+        context['SERVICEURL'] = '/check_mk/index.py?start_url=%s' % \
+                                    urlencode('view.py?view_name=service&host=%s&service=%s' %
+                                                 (context['HOSTNAME'], context['SERVICEDESC']))
 
     if notify_mode in [ 'fake-service', 'fake-host' ]:
         sys.exit(call_notification_script(plugin, [], context, True))
@@ -581,7 +584,7 @@ def should_notify(context, entry):
         else:
             sl = saveint(context.get('HOST_SL'))
 
-        if sl < from_sl or sl > to_sl: 
+        if sl < from_sl or sl > to_sl:
             notify_log(" - Skipping: service level %d not between %d and %d" % (sl, from_sl, to_sl))
             return False
 
@@ -671,7 +674,7 @@ def call_notification_script(plugin, parameters, context, write_into_spoolfile):
     # Export complete context to have all vars in environment.
     # Existing vars are replaced, some already existing might remain
     for key in context:
-        os.putenv('NOTIFY_' + key, context[key].encode('utf-8')) 
+        os.putenv('NOTIFY_' + key, context[key].encode('utf-8'))
 
     # Remove service macros for host notifications
     if context['WHAT'] == 'HOST':

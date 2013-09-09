@@ -134,35 +134,37 @@ function get_url(url, handler, data, errorHandler) {
         dyn = "?"+dyn;
     }
 
-    if (AJAX) {
-        AJAX.open("GET", url + dyn, true);
-        if (typeof handler === 'function')
-            AJAX.onreadystatechange = function() {
-                if (AJAX && AJAX.readyState == 4) {
-                    if (AJAX.status == 200) {
-                        handler(data, AJAX.responseText);
-                    }
-                    else if (AJAX.status == 401) {
-                        // This is reached when someone is not authenticated anymore
-                        // but has some webservices running which are still fetching
-                        // infos via AJAX. Reload the whole frameset or only the
-                        // single page in that case.
-                        if(top)
-                            top.location.reload();
-                        else
-                            document.location.reload();
-                    }
-                    else {
-                        if (typeof errorHandler !== 'undefined')
-                            errorHandler(data, AJAX.status);
-                    }
+    if (!AJAX) {
+        return null;
+    }
+
+    AJAX.open("GET", url + dyn, true);
+    if (typeof handler === 'function') {
+        AJAX.onreadystatechange = function() {
+            if (AJAX && AJAX.readyState == 4) {
+                if (AJAX.status == 200) {
+                    handler(data, AJAX.responseText);
+                }
+                else if (AJAX.status == 401) {
+                    // This is reached when someone is not authenticated anymore
+                    // but has some webservices running which are still fetching
+                    // infos via AJAX. Reload the whole frameset or only the
+                    // single page in that case.
+                    if(top)
+                        top.location.reload();
+                    else
+                        document.location.reload();
+                }
+                else {
+                    if (typeof errorHandler !== 'undefined')
+                        errorHandler(data, AJAX.status);
                 }
             }
-        AJAX.send(null);
-        return true;
-    } else {
-        return false;
+        }
     }
+
+    AJAX.send(null);
+    return AJAX;
 }
 
 function get_url_sync(url) {
@@ -864,7 +866,7 @@ function updateHeaderTime() {
         var day   = ("0" + t.getDate()).slice(-2);
         var month = ("0" + (t.getMonth() + 1)).slice(-2);
         var year  = t.getFullYear();
-        var date_format = oDate.getAttribute("format"); 
+        var date_format = oDate.getAttribute("format");
         oDate.innerHTML = date_format.replace(/yyyy/, year).replace(/mm/, month).replace(/dd/, day);
     }
     day    = null;
@@ -1735,7 +1737,42 @@ function vs_passwordspec_randomize(img) {
     oInput.value = password;
 }
 
+function vs_duallist_switch(field, varprefix) {
+    if (field.id != varprefix + '_selected') {
+        // The other field is the one without "_unselected" suffix
+        var other_id = varprefix + '_selected';
+        var positive = true;
+    } else {
+        // The other field is the one with "_unselected" suffix
+        var other_id = varprefix + '_unselected';
+        var positive = false;
+    }
 
+    var other_field = document.getElementById(other_id);
+    if (!other_field)
+        return;
+
+    var helper = document.getElementById(varprefix);
+    if (!helper)
+        return;
+
+    // Move the selected option to the other select field
+    var selected = field.options[field.selectedIndex];
+    field.removeChild(selected);
+    other_field.appendChild(selected);
+    selected.selected = false;
+
+    // add remove from internal helper field
+    if (positive)
+        var pos_field = other_field;
+    else
+        var pos_field = field;
+    var texts = [];
+    for (var i = 0; i < pos_field.options.length; i++) {
+        texts.push(pos_field.options[i].value);
+    }
+    helper.value = texts.join('|')
+}
 
 function help_enable() {
     var aHelp = document.getElementById('helpbutton');
@@ -1761,14 +1798,21 @@ function help_switch(how) {
         helpdivs[i].style.display = how ? "block" : "none";
     }
 
-    // small hack for wato ruleset lists, toggle the "nofloat" class
-    // on those objects to make the layout possible
+    // small hack for wato ruleset lists, toggle the "float" and "nofloat"
+    // classes on those objects to make the layout possible
     var rulesetdivs = document.getElementsByClassName('ruleset');
     for (var i = 0; i < rulesetdivs.length; i++) {
-        if (how)
-            add_class(rulesetdivs[i], 'nofloat');
-        else
-            remove_class(rulesetdivs[i], 'nofloat');
+        if (how) {
+            if (has_class(rulesetdivs[i], 'float')) {
+                remove_class(rulesetdivs[i], 'float');
+                add_class(rulesetdivs[i], 'nofloat');
+            }
+        } else {
+            if (has_class(rulesetdivs[i], 'nofloat')) {
+                remove_class(rulesetdivs[i], 'nofloat');
+                add_class(rulesetdivs[i], 'float');
+            }
+        }
     }
 
     get_url("ajax_switch_help.py?enabled=" + (how ? "yes" : ""));

@@ -37,7 +37,7 @@ subgroup_networking =   _("Networking")
 subgroup_storage =      _("Storage, Filesystems and Files")
 subgroup_os =           _("Operating System Resources")
 subgroup_printing =     _("Printers")
-subgroup_environment =  _("Temperature, Humidity, etc.")
+subgroup_environment =  _("Temperature, Humidity, Electrical Parameters, etc.")
 subgroup_applications = _("Applications, Processes &amp; Services")
 subgroup_virt =         _("Virtualization")
 subgroup_hardware =     _("Hardware, BIOS")
@@ -1062,6 +1062,60 @@ register_check_parameters(
     None
 )
 
+register_check_parameters(
+    subgroup_networking,
+    "vpn_tunnel",
+    _("VPN Tunnel"),
+    Dictionary(
+        elements = [
+            ( "tunnels",
+              ListOf(
+                  Tuple(
+                      title = ("VPN Tunnel Endpoints"),
+                      elements = [
+                      IPv4Address(
+                          title = _("IP-Address of Tunnel Endpoint"),
+                          allow_empty = False,
+                          ),
+                      TextAscii(
+                          title = _("Name of Tunnel"),
+                          ),
+                      MonitoringState(
+                          default_value = 2,
+                          title = _("State if this tunnel is not found"),
+                          )]),
+                  add_label = _("Add another Tunnel"),
+                  movable = False,
+                  title = _("VPN Tunnel"),
+                  )),
+            ( "state",
+              MonitoringState(
+                  title = _("Default state if inventorized, unregistered tunnel is not found"),
+                  help = _("Default state if a tunnel, which was inventorized but is not listed in this rule, "
+                      "is not longer present in the snmp data"),
+                  ),
+            ),
+        ],
+    ),
+    TextAscii( title = _("IP-Address of Tunnel Endpoint")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_networking,
+    "cisco_wlc_clients",
+    _("Cisco WLC WiFi client connections"),
+    Tuple(
+        title = _("Number of connections"),
+        help = _("Number of connections for a WiFi "),
+              elements = [
+                  Integer(title = _("Warning if above"),  label = _("connections")),
+                  Integer(title = _("Critical if above"), label = _("connections"))
+              ]
+    ),
+    TextAscii( title = _("Name of Wifi")),
+    "first"
+)
 
 register_check_parameters(
     subgroup_networking,
@@ -1199,7 +1253,7 @@ register_check_parameters(
     "tcp_connections",
     _("Monitor specific TCP/UDP connections and listeners"),
     Dictionary(
-        help = _("This rule allows to monitor the existance of specify TCP connections or "
+        help = _("This rule allows to monitor the existence of specific TCP connections or "
                  "TCP/UDP listeners."),
         elements = [
             ( "proto",
@@ -1283,13 +1337,100 @@ register_check_parameters(
     "first"
 )
 
+def get_filesystem_valuespec(what):
+    if what == "used":
+        title  = _("used space")
+        course = _("above")
+    else:
+        title  = _("free space")
+        course = _("below")
+
+
+    vs_subgroup =  [
+                    Tuple( title = _("Percentage %s") % title,
+                        elements = [
+                            Percentage(title = _("Warning if %s") % course, unit = _("%"), minvalue = 0.0),
+                            Percentage(title = _("Critical if %s") % course, unit = _("%"), minvalue = 0.0),
+                        ]
+                    ),
+                    Tuple( title = _("Absolute %s") % title,
+                        elements = [
+                            Integer(title = _("Warning if %s") % course, unit = _("MB"), minvalue = 0),
+                            Integer(title = _("Critical if %s") % course, unit = _("MB"), minvalue = 0),
+                        ]
+                    )
+                   ]
+
+    return Alternative(
+            title = _("Levels for filesystem %s") % title,
+            show_alternative_title = True,
+            default_value = (80.0, 90.0),
+                    elements = vs_subgroup + [
+                                ListOf(
+                                    Tuple(
+                                        orientation = "horizontal",
+                                        elements = [
+                                            Filesize(title = _("Filesystem larger than")),
+                                            Alternative(
+                                                title = _("Levels for %s") % title,
+                                                elements = vs_subgroup
+                                            )
+                                        ]
+                                    ),
+                                    title = _('Dynamic levels'),
+                                )],
+                    )
+
+def match_filesystem_level_type(value):
+    if type(value) == list:
+        for entry in value:
+            if entry[1][0] < 0 or entry[1][1] < 0:
+                return 1
+        else:
+            return 0
+    else:
+        if value[0] < 0 or value[1] < 0:
+            return 1
+        else:
+            return 0
+
+def transform_filesystem_levels(value):
+    tuple_convert = lambda val: tuple(map(lambda x: -x, val))
+
+    if type(value) == tuple:
+        return tuple_convert(value)
+    else:
+        result = []
+        for item in value:
+            result.append((item[0], tuple_convert(item[1])))
+        return result
+
+
 filesystem_elements = [
-    ( "levels",
-      Tuple(
-          title = _("Levels for filesystem usage"),
-          elements = [
-              Percentage(title = _("Warning if above"),  unit = _("% usage"), allow_int = True, default_value=80),
-              Percentage(title = _("Critical if above"), unit = _("% usage"), allow_int = True, default_value=90)])),
+    ("levels",
+        Alternative(
+            title = _("Levels for filesystem"),
+            show_alternative_title = True,
+            default_value = (80.0, 90.0),
+            match = match_filesystem_level_type,
+            elements = [
+                   get_filesystem_valuespec("used"),
+                   Transform(
+                            get_filesystem_valuespec("free"),
+                            title = _("Levels for filesystem free space"),
+                            allow_empty = False,
+                            forth = transform_filesystem_levels,
+                            back  = transform_filesystem_levels
+                    )
+                ]
+                )
+    ),
+    ( "flex_levels",
+      FixedValue(
+          None,
+          totext = "",
+          title = _("Hidden identifier key for flexible level usage")
+          )),
     (  "magic",
        Float(
           title = _("Magic factor (automatic level adaptation for large filesystems)"),
@@ -1352,11 +1493,12 @@ register_check_parameters(
     _("Filesystems (used space and growth)"),
     Dictionary(
         elements = filesystem_elements,
+        hidden_keys = ["flex_levels"],
     ),
     TextAscii(
         title = _("Mount point"),
         help = _("For Linux/UNIX systems, specify the mount point, for Windows systems "
-                 "the drive letter uppercase followed by a colon, e.g. <tt>C:</tt>"),
+                 "the drive letter uppercase followed by a colon and a slash, e.g. <tt>C:/</tt>"),
         allow_empty = False),
     "dict"
 )
@@ -1376,6 +1518,7 @@ register_check_parameters(
                 ]
             )),
         ],
+        hidden_keys = ["flex_levels"],
     ),
     TextAscii(
         title = _("Datastore Name"),
@@ -1423,8 +1566,8 @@ register_check_parameters(
                            "the given bounds. The error rate is computed by dividing number of "
                            "errors by the total number of packets (successful plus errors)."),
                   elements = [
-                      Percentage(title = _("Warning if above"), label = _("errors")),
-                      Percentage(title = _("Critical if above"), label = _("errors"))
+                      Percentage(title = _("Warning if above"), label = _("errors"), default_value = 0.01),
+                      Percentage(title = _("Critical if above"), label = _("errors"), default_value = 0.1)
                   ])),
              ( "speed",
                OptionalDropdownChoice(
@@ -1707,26 +1850,26 @@ register_check_parameters(
                  "You can change this behaviour on a per-state-base here."),
         optional_keys = False,
         elements = [
-           ( "states", 
+           ( "states",
              Dictionary(
                  title = _("Target states"),
                  optional_keys = False,
                  elements = [
-                     ( "poweredOn", 
+                     ( "poweredOn",
                        MonitoringState(
                            title = _("Powered ON"),
                            help = _("Check result if the host or VM is powered on"),
                            default_value = 0,
                        )
                     ),
-                    ( "poweredOff", 
+                    ( "poweredOff",
                        MonitoringState(
                            title = _("Powered OFF"),
                            help = _("Check result if the host or VM is powered off"),
                            default_value = 1,
                        )
                     ),
-                    ( "suspended", 
+                    ( "suspended",
                        MonitoringState(
                            title = _("Suspended"),
                            help = _("Check result if the host or VM is suspended"),
@@ -1764,6 +1907,24 @@ register_check_parameters(
         allow_empty = True
     ),
     None,
+)
+register_check_parameters(
+    subgroup_printing,
+    "windows_printer_queues",
+    _("Number of open jobs of a printer on windows" ),
+    Tuple(
+          help = _("This rule is applied to the number of print jobs "
+                   "currently waiting in windows printer queue."),
+          elements = [
+              Integer(title = _("Warning if above"), unit = _("jobs"), default_value = 40),
+              Integer(title = _("Critical if above"), unit = _("jobs"), default_value = 60),
+          ]
+    ),
+    TextAscii(
+        title = _("Printer Name"),
+        allow_empty = True
+    ),
+    None
 )
 
 register_check_parameters(
@@ -1883,7 +2044,7 @@ register_check_parameters(
         help = _("A tablespace is a container for segments (tables, indexes, etc). A "
                  "database consists of one or more tablespaces, each made up of one or "
                  "more data files. Tables and indexes are created within a particular "
-                 "tablespace. " 
+                 "tablespace. "
                  "This rule allows you to define checks on the size of tablespaces."),
         elements = [
             ("levels",
@@ -2443,8 +2604,8 @@ register_check_parameters(
         title = _("Device"),
         help = _("For a summarized throughput of all disks, specify <tt>SUMMARY</tt>, for a "
                  "sum of read or write throughput write <tt>read</tt> or <tt>write</tt> resp. "
-                 "A per-disk IO is specified by the drive letter and a colon on Windows "
-                 "(e.g. <tt>C:</tt>) or by the device name on Linux/UNIX (e.g. <tt>/dev/sda</tt>).")),
+                 "A per-disk IO is specified by the drive letter, a colon and a slash on Windows "
+                 "(e.g. <tt>C:/</tt>) or by the device name on Linux/UNIX (e.g. <tt>/dev/sda</tt>).")),
     "first"
 )
 
@@ -2715,7 +2876,73 @@ register_check_parameters(
         ]),
     TextAscii(
         title = _("Sensor ID"),
-        help = _("The identificator of the themal sensor.")),
+        help = _("The identifier of the themal sensor.")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "hw_single_temperature",
+    _("Host/Device temperature"),
+    Tuple(
+        help = _("Temperature levels for hardware devices with "
+                 "a single temperature sensor."),
+        elements = [
+            Integer(title = _("warning if above"), unit = u"°C", default_value = 35),
+            Integer(title = _("critical if above"), unit = u"°C", default_value = 40),
+        ]),
+    None,
+    "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "evolt",
+    _("Nominal Voltages"),
+    Tuple(
+        help = _("Voltage Levels for devices like UPS oder PDUs. "
+                 "Several phases may be addressed independently."),
+        elements = [
+            Integer(title = _("warning if below"), unit = "V", default_value = 210),
+            Integer(title = _("critical if below"), unit = "V", default_value = 180),
+        ]),
+    TextAscii(
+        title = _("Phase"),
+        help = _("The identifier of the phase the power is related to.")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "efreq",
+    _("Nominal Frequencies"),
+    Tuple(
+        help = _("Levels for the nominal frequencies of AC devices "
+                 "like UPSs or PDUs. Several phases may be addressed independently."),
+        elements = [
+            Integer(title = _("warning if below"), unit = "Hz", default_value = 40),
+            Integer(title = _("critical if below"), unit = "Hz", default_value = 45),
+        ]),
+    TextAscii(
+        title = _("Phase"),
+        help = _("The identifier of the phase the power is related to.")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "epower",
+    _("Electrical Power"),
+    Tuple(
+        help = _("Levels for the electrical power consumption of a device "
+                 "like a UPS or a PDU. Several phases may be addressed independently."),
+        elements = [
+            Integer(title = _("warning if below"), unit = "Watt", default_value = 20),
+            Integer(title = _("critical if below"), unit = "Watt", default_value = 1),
+        ]),
+    TextAscii(
+        title = _("Phase"),
+        help = _("The identifier of the phase the power is related to.")),
     "first"
 )
 
@@ -2725,7 +2952,9 @@ register_check_parameters(
     _("Hardware temperature (e.g. switches)"),
     Tuple(
         help = _("Temperature levels for hardware devices like "
-                 "Brocade switches."),
+                 "Brocade switches with (potentially) several "
+                 "temperature sensors. Sensor IDs can be selected "
+                 "in the rule."),
         elements = [
             Integer(title = _("warning if above"), unit = u"°C", default_value = 35),
             Integer(title = _("critical if above"), unit = u"°C", default_value = 40),
@@ -3482,7 +3711,7 @@ register_check_parameters(
                     help = _("Leave this empty, if the user does not matter"),
                     none_is_empty = True,
                 )),
-                ( "cpulevels", 
+                ( "cpulevels",
                   Tuple(
                     title = _("Levels on CPU utilization"),
                     elements = [

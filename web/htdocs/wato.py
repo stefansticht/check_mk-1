@@ -1313,7 +1313,7 @@ def show_hosts(folder):
         html.write("</td></tr>\n")
 
     # Show table of hosts in this folder
-    html.begin_form("hosts", None, "POST")
+    html.begin_form("hosts", method = "POST")
     html.write("<table class=data>\n")
 
     # Remember if that host has a target folder (i.e. was imported with
@@ -1847,7 +1847,7 @@ def mode_editfolder(phase, new):
         if len(lock_message) > 0:
             html.write("<div class=info>" + lock_message + "</div>")
 
-        html.begin_form("edithost")
+        html.begin_form("edithost", method = "POST")
 
         # title
         forms.header(_("Title"))
@@ -2248,7 +2248,7 @@ def show_service_table(host, firsttime):
 
     table.sort()
 
-    html.begin_form("checks", None, "POST")
+    html.begin_form("checks", method = "POST")
     fixall = 0
     if config.may("wato.services"):
         for entry in table:
@@ -2382,7 +2382,7 @@ def mode_search(phase):
     render_folder_path()
 
     ## # Show search form
-    html.begin_form("edithost")
+    html.begin_form("edithost", method = "POST")
     forms.header(_("General Properties"))
     forms.section(_("Hostname"))
     html.text_input("host")
@@ -2701,7 +2701,7 @@ def mode_bulk_inventory(phase):
         )
 
     else:
-        html.begin_form("bulkinventory", None, "POST")
+        html.begin_form("bulkinventory", method = "POST")
         html.hidden_fields()
 
         # Mode of action
@@ -2785,7 +2785,7 @@ def mode_bulk_edit(phase):
     "hosts share the same setting for this attribute. If you leave that selection, all hosts "
     "will keep their individual settings.") + "</p>")
 
-    html.begin_form("edithost", None, "POST")
+    html.begin_form("edithost", method = "POST")
     configure_attributes(False, hosts, "bulk", parent = g_folder)
     forms.end()
     html.button("_save", _("Save &amp; Finish"))
@@ -2853,7 +2853,7 @@ def mode_bulk_cleanup(phase):
     "default values.") % len(hostnames))
     html.write("</p>")
 
-    html.begin_form("bulkcleanup", None, "POST")
+    html.begin_form("bulkcleanup", method = "POST")
     forms.header(_("Attributes to remove from hosts"))
     if not bulk_cleanup_attributes(g_folder, hosts):
         forms.end()
@@ -3073,7 +3073,7 @@ def mode_parentscan(phase):
         )
 
     else:
-        html.begin_form("parentscan", None, "POST")
+        html.begin_form("parentscan", method = "POST")
         html.hidden_fields()
 
         # Mode of action
@@ -5280,7 +5280,7 @@ def mode_snapshot(phase):
         table.end()
 
         html.write("<h3>" + _("Restore from uploaded file") + "</h3>")
-        html.begin_form("upload_form", None, "POST")
+        html.begin_form("upload_form", method = "POST")
         html.upload_file("_upload_file")
         html.button("upload_button", _("Restore from file"), "submit")
         html.hidden_fields()
@@ -5621,7 +5621,7 @@ def mode_globalvars(phase):
         action = html.var("_action")
         if varname:
             domain, valuespec, need_restart, allow_reset, in_global_settings = g_configvars[varname]
-            def_value = default_values.get(varname, valuespec.canonical_value())
+            def_value = default_values.get(varname, valuespec.default_value())
 
             if action == "reset" and not isinstance(valuespec, Checkbox):
                 c = wato_confirm(
@@ -5631,8 +5631,9 @@ def mode_globalvars(phase):
                        (varname, valuespec.value_to_text(def_value)))
             else:
                 if not html.check_transaction():
-                        return
+                    return
                 c = True # no confirmation for direct toggle
+
             if c:
                 # if action == "reset":
                 #     del current_settings[varname]
@@ -6025,7 +6026,7 @@ def mode_groups(phase, what):
               what == "contact" and "users" or "groups",
               _("Contact groups are needed for assigning hosts and services to people (contacts)"))])
         else:
-            html.write("<div class=info>" + _("There are not defined any groups yet.") + "</div>")
+            html.write("<div class=info>" + _("No groups are defined yet.") + "</div>")
         return
 
     # Show member of contact groups
@@ -6867,13 +6868,13 @@ def mode_edit_site(phase):
               columns = 1,
               elements = [
                   ( "socket", vs_tcp_port ),
-                  ( "channels", 
+                  ( "channels",
                     Integer(
                         title = _("Number of channels to keep open"),
                         minvalue = 2,
                         maxvalue = 50,
                         default_value = 5)),
-                  ( "heartbeat", 
+                  ( "heartbeat",
                     Tuple(
                         title = _("Regular heartbeat"),
                         orientation = "float",
@@ -8159,6 +8160,8 @@ def mode_users(phase):
         html.context_button(_("Custom Attributes"), make_link([("mode", "user_attrs")]), "custom_attr")
         if 'wato_users' not in config.userdb_automatic_sync:
             html.context_button(_("Sync Users"), html.makeactionuri([("_sync", 1)]), "replicate")
+        if config.may("general.notify"):
+            html.context_button(_("Notify Users"), 'notify.py', "notification")
         return
 
     # Execute all connectors synchronisations of users. This must be done before
@@ -8201,7 +8204,7 @@ def mode_users(phase):
     entries = users.items()
     entries.sort(cmp = lambda a, b: cmp(a[1].get("alias", a[0]).lower(), b[1].get("alias", b[0]).lower()))
 
-    table.begin("users", None, empty_text = _("There are not defined any users yet."))
+    table.begin("users", None, empty_text = _("No users are defined yet."))
     online_threshold = time.time() - config.user_online_maxage
     for id, user in entries:
         table.row()
@@ -9612,7 +9615,7 @@ def mode_edit_hosttag(phase):
 
 
 
-    html.begin_form("hosttaggroup")
+    html.begin_form("hosttaggroup", method = 'POST')
     forms.header(_("Edit group") + (tag_id and " %s" % tag_id or ""))
 
     # Tag ID
@@ -10301,7 +10304,13 @@ def mode_rulesets(phase):
 
             something_shown = True
 
-            float_cls = (not config.wato_hide_help_in_lists and html.help_visible) and ' nofloat' or ''
+            float_cls = ''
+            if not config.wato_hide_help_in_lists:
+                if html.help_visible:
+                    float_cls = ' nofloat'
+                else:
+                    float_cls = ' float'
+
             url_vars = [("mode", "edit_ruleset"), ("varname", varname)]
             if only_host:
                 url_vars.append(("host", only_host))
@@ -10328,7 +10337,7 @@ def mode_rulesets(phase):
     html.write('</div>')
 
 def create_new_rule_form(rulespec, hostname = None, item = None, varname = None):
-    html.begin_form("new_rule", add_transid = False)
+    html.begin_form("new_rule", add_transid = False, method = "POST")
 
     html.write('<table>')
     if hostname:
@@ -10412,7 +10421,7 @@ def mode_edit_ruleset(phase):
             groupname = g_rulegroups[group][0]
             html.context_button(groupname,
                   make_link([("mode", "rulesets"), ("group", group), ("host", hostname)]), "back")
-        html.context_button(_("Used Rulesets"), 
+        html.context_button(_("Used Rulesets"),
              make_link([("mode", "rulesets"), ("group", "used"), ("host", hostname)]), "usedrulesets")
         if hostname:
             html.context_button(_("Services"),
@@ -10510,8 +10519,7 @@ def mode_edit_ruleset(phase):
                 alias_path = get_folder_aliaspath(folder, show_main = False)
                 last_folder = folder
 
-                folder_filter = html.var('folder')
-                if folder_filter and folder['.name'] != folder_filter:
+                if g_folder != g_root_folder and not folder_is_parent_of(folder, g_folder):
                     skip_this_folder = True
                     continue
 
@@ -11082,7 +11090,7 @@ def mode_edit_rule(phase, new = False):
             return "edit_ruleset"
 
         return ("edit_ruleset",
-           (new and _("Created new rule in ruleset '%s' in folder %s") 
+           (new and _("Created new rule in ruleset '%s' in folder %s")
                 or _("Editor rule in ruleset '%s' in folder %s")) %
                       (rulespec["title"], new_rule_folder["title"]))
 
@@ -11520,7 +11528,7 @@ def register_check_parameters(subgroup, checkgroup, title, valuespec, itemspec, 
             title = title,
             valuespec = valuespec,
             itemspec = itemspec,
-            itemtype = itemtype, 
+            itemtype = itemtype,
             itemname = itemname,
             itemhelp = itemhelp,
             itemenum = itemenum,
@@ -13273,7 +13281,7 @@ def mode_custom_attrs(phase, what):
         return None
 
     if not attrs:
-        html.write("<div class=info>" + _("There are not defined any custom attributes yet.") + "</div>")
+        html.write("<div class=info>" + _("No custom attributes are defined yet.") + "</div>")
         return
 
     table.begin(what + "attrs")

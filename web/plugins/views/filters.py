@@ -66,6 +66,9 @@ declare_filter(201, FilterText("service", _("Service (exact match)"),           
                           _("Exact match, used for linking"))
 
 
+declare_filter(101, FilterText("hostgroupnameregex",    _("Hostgroup)"),        "hostgroup",    "hostgroup_name",      "hostgroup_name",    "~~"),
+                               _("Search field allowing regular expressions and partial matches on the names of hostgroups"))
+
 declare_filter(101, FilterText("servicegroupnameregex", _("Servicegroup"),   "servicegroup", "servicegroup_name",   "servicegroup_name", "~~"),
                           _("Search field allowing regular expression and partial matches"))
 
@@ -73,8 +76,6 @@ declare_filter(101, FilterText("servicegroupname", _("Servicegroup (enforced)"),
                           _("Exact match, used for linking"))
 
 declare_filter(202, FilterText("output",  _("Status detail"), "service", "service_plugin_output", "service_output", "~~"))
-
-
 
 class FilterIPAddress(Filter):
     def __init__(self):
@@ -111,12 +112,10 @@ declare_filter(102, FilterIPAddress())
 
 
 # Helper that retrieves the list of host/service/contactgroups via Livestatus
+# use alias by default but fallback to name if no alias defined
 def all_groups(what):
     groups = dict(html.live.query("GET %sgroups\nColumns: name alias\n" % what))
-    names = groups.keys()
-    names.sort()
-    # use alias by default but fallback to name if no alias defined
-    return [ (name, groups[name] or name) for name in names ]
+    return [ (name, groups[name] or name) for name in groups.keys() ]
 
 class FilterGroupCombo(Filter):
     def __init__(self, what, title, enforce):
@@ -136,7 +135,7 @@ class FilterGroupCombo(Filter):
         choices = all_groups(self.what.split("_")[-1])
         if not self.enforce:
             choices = [("", "")] + choices
-        html.select(self.htmlvars[0], choices)
+        html.sorted_select(self.htmlvars[0], choices)
         if not self.enforce:
             html.write(" <nobr>")
             html.checkbox(self.htmlvars[1], label=_("negate"))
@@ -361,11 +360,11 @@ declare_filter(232, FilterNagiosExpression("service", "in_downtime",            
             "Filter: service_scheduled_downtime_depth = 0\nFilter: host_scheduled_downtime_depth = 0\nAnd: 2\n"))
 
 declare_filter(232, FilterNagiosExpression("host", "host_staleness",                _("Host is stale"),
-            "Filter: host_staleness >= 1.5\n",
-            "Filter: host_staleness < 1.5\n"))
+            "Filter: host_staleness >= %0.2f\n" % config.staleness_threshold,
+            "Filter: host_staleness < %0.2f\n" % config.staleness_threshold))
 declare_filter(232, FilterNagiosExpression("service", "service_staleness",          _("Service is stale"),
-            "Filter: service_staleness >= 1.5\n",
-            "Filter: service_staleness < 1.5\n"))
+            "Filter: service_staleness >= %0.2f\n" % config.staleness_threshold,
+            "Filter: service_staleness < %0.2f\n" % config.staleness_threshold))
 
 class FilterSite(Filter):
     def __init__(self, name, enforce):
@@ -713,7 +712,7 @@ class FilterHostTags(Filter):
                 title = tag_entry[1]
                 if tag is None:
                     tag = ''
-                
+
                 if type(title) == unicode:
                     title = title.encode("utf-8")
                 grouped[entry[0]].append([tag, title])

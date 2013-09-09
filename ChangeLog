@@ -65,11 +65,30 @@
     * windows_agent: increased maximum local/plugin script output length to 512kB
                      (output buffer now grows dynamically)
     * jolokia_metrics: fixed incorrect plugin output for high warn/crit levels
+    * hyperv: Added a check for checking state changes.
+    * df / esx_vsphere_datastore: now able to set absolute levels and levels depending
+                                  on total disk space of used and free space
+    * cisco_wlc: New check for monitoring cisco wireless lan access points 
+    * cisco_wlc_clients: New check for the nummber of clients in a wlc wifi
+    * df: Negative integer levels for MB left on a device
+    * win_printers: Monitoring of printer queue on a windows printserver
+    * cisco_qos: Updated to be able to mintor IOS XR 4.2.1 (on a ASR9K device)
+    * FIX: hr_mem: handle virtual memory correct on some devices
+    * FIX: apache_status agent plugin: now also works, if prog name contains slashes
+    * FIX: check_dns: parameter -A does not get an additional string
+    * FIX: cisco_qos: Catch policies without post/drop byte information
+    * FIX: cisco_qos: Catch policies without individual bandwidth limits
+    * mk-job: /var/lib/check_mk_agent/job directory is now created with mode 1777 so 
+              mk-job can be used by unprivileged users too
 
     Notifications:
     * notify.py: Matching service level: Use the hosts service level if a
                  service has no service level set
     * notify.py: fixed bug with local notification spooling
+    * HTML notifications: Now adding optional links to host- and service names
+      when second argument notification script is configured to the base url of the
+      monitoring installation (e.g. http://<host>/<site>/ in case of OMD setups)
+    * HTML notifications: Added time of state change
 
     Multisite:
     * User accounts can now be locked after a specified amount of auth
@@ -114,6 +133,19 @@
     * Improved filtering of the foldertree snapin by user permissions (when a user is
       only permitted on one child folder, the upper folder is removed from the
       hierarchy)
+    * "Unchecked Services" view now uses the staleness of services for filtering
+    * Globe dashlets make use of the parameter "id" to make it possible to
+      provide unique ids in the render HTML code to the dashlets
+    * Multisite can now track wether or not a user is online, this need to be
+      enabled e.g. via Global Settings in WATO (Save last access times of
+      users)
+    * Added popup message notification system to make it possible to notify
+      multisite users about various things. It is linked on WATO Users page at
+      the moment. An image will appear for a user in the sidebar footer with
+      the number of pending messages when there are pending messages for a user.
+      To make the sidebar check for new messages on a regular base, you need
+      to configure the interval of sidebar popup notification updates e.g. via
+      WATO Global Settings.
     * FIX: better error message in case of exception in SNMP handling
     * FIX: Inventory screen: Now shows custom checks
     * FIX: Fixed locking problem of multisite pages related to user loading/saving
@@ -137,6 +169,8 @@
     * FIX: More consistent handling of folderpath select in rule editor
     * FIX: Now correctly handling depends_on_tags on page rendering for
            inherited values
+    * FIX: Changed several forms from GET to POST to prevent "Request-URI too
+           large" error messages during submitting forms
 
     Notifications:
     * Flexible Notification can now filter service levels
@@ -302,6 +336,9 @@
     * FIX: Fixed missing roles in auth.php (in some cases) which resulted in
            non visible pnp graphs and missing nagvis permissions
     * FIX: Fixed label color of black toner perfometers when fuel is low
+    * FIX: Fixed wrong default settings of view filters in localized multisite
+    * FIX: Fixed exception when enabling sounds for views relying on 
+           e.g. alert statistics source
 
     WATO:
     * FIX: fix layout of Auxiliary tags table
@@ -310,6 +347,7 @@
     * FIX: automation users can now be deleted again (bug was introduced in 1.2.2p1)
     * FIX: fix logwatch pattern analyzer message "The host xyz is not
            managed by WATO." after direct access via snapin
+    * FIX: Fixed first toggle of flags in global settings when default is set to True
 
     Event Console:
     * FIX: apply rewriting of application/hostname also when cancelling events

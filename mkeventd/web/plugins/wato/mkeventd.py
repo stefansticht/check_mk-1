@@ -258,6 +258,9 @@ vs_mkeventd_rule = Dictionary(
           Checkbox(
             title = _("Automatic Deletion"),
             label = _("Delete event immediately after the actions"),
+            help = _("Incoming messages might trigger actions (when configured above), "
+                     "afterwards only an entry in the event history will be left. There "
+                     "will be no \"open event\" to be handled by the administrators."),
           )
         ),
         ( "count",
@@ -1556,7 +1559,7 @@ if mkeventd_enabled:
                  default_value = False),
         domain = "mkeventd",
     )
-                 
+
 
     register_configvar(group,
         "hostname_translation",

@@ -1,18 +1,9 @@
 Title: apache_status agent plugin: Problem at split if more than one slash in output
 Component: checks
-State: open
-Date: 2013-08-09 14:57:53
-Targetversion: 1.2.3
 Class: bug
-
-came in via feedback@  //  original email still available in feedback/gitbug folder
-
-Date: Thu, 13 Jun 2013 12:42:59 +0200
-From: Wouter de Geus <wouter-check_mk.org@owl-ict.nl>
-To: feedback@check-mk.org
-Subject: Agent plugin apache_status process detection
-
-Hej,
+State: done
+Date: 2013-08-09 14:57:53
+Targetversion: 1.2.3i2
 
 I just installed the agents plugin apache_status (the version from release 1.2.2p2) on several of my machines.
 On one of the machines it bugs however:
@@ -41,9 +32,11 @@ tcp6       0      0 :::443                  :::*                    LISTEN      
 Note the ./ts3server_li entries.
 Since there is more than 1 slash in the line, the split will return more than the expected 2 results.
 
-I thought I'd report this bug 
+2013-09-02 11:45:03: changed state open -> done
+agent plugin apache_status now also works, if prog name contains slashes
 
-Regards,
+2013-09-05: User did test, positive:
+I've tried the new apache_status plugin on the server where it previously failed and it now seems to work 
+So good job 
+On servers that had no issues it still works as before as far as I can see (I've tested it on 3 servers).
 
-Wouter.
--- Wouter de Geus Owl ICT wouter@owl-ict.nl http://www.owl-ict.nl/ 

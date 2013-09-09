@@ -1086,7 +1086,7 @@ class CascadingDropdown(ValueSpec):
                 vp = varprefix + "_%d" % nr
                 # Form already submitted once (and probably in complain state)
                 if cur_val != None:
-                    def_val_2 = vs.default_value() # not used anyway, form already submitted
+                    def_val_2 = vs.from_html_vars(vp)
                     if cur_val == str(nr):
                         disp = ""
                     else:
@@ -1264,16 +1264,19 @@ class MultiSelect(ListChoice):
     def __init__(self, **kwargs):
         ListChoice.__init__(self, **kwargs)
 
-    def render_input(self, varprefix, value):
-        self.load_elements()
-        html.write("<select multiple name='%s'>" % varprefix)
-        for nr, (key, title) in enumerate(self._elements):
-            if key in value:
+    def _render_field(self, name, choices, selected = []):
+        html.write("<select multiple name=\"%s\">\n" % name)
+        for key, title in choices:
+            if key in selected:
                 sel = " selected"
             else:
                 sel = ""
             html.write('<option value="%s"%s>%s</option>\n' % (key, sel, title))
-        html.write("</select>")
+        html.write("</select>\n")
+
+    def render_input(self, varprefix, value):
+        self.load_elements()
+        self._render_field(varprefix, self._elements, value)
 
     def from_html_vars(self, varprefix):
         self.load_elements()
@@ -1284,8 +1287,46 @@ class MultiSelect(ListChoice):
                 value.append(key)
         return value
 
+# Implements a choice of items which is realized with
+# two ListChoices select fields. One contains all available
+# items and one contains all selected items.
+class DualListChoice(ListChoice):
+    def __init__(self, **kwargs):
+        ListChoice.__init__(self, **kwargs)
 
+    def render_input(self, varprefix, value):
+        self.load_elements()
+        selected   = []
+        unselected = []
+        for e in self._elements:
+            if e[0] in value:
+                selected.append(e)
+            else:
+                unselected.append(e)
 
+        html.write('<table><tr><td>')
+        html.write(_('Available:'))
+        html.write('</td><td>')
+        html.write(_('Selected:'))
+        html.write('</td></tr><tr><td>')
+        html.sorted_select(varprefix + '_unselected', unselected,
+                           attrs = {'size': 5, 'style': 'height:auto'},
+                           onchange = 'vs_duallist_switch(this, \'%s\');' % varprefix)
+        html.write('</td><td>')
+        html.sorted_select(varprefix + '_selected', selected,
+                           attrs = {'size': 5, 'style': 'height:auto', 'multiple': 'multiple'},
+                           onchange = 'vs_duallist_switch(this, \'%s\');' % varprefix)
+        html.write('</td></tr></table>')
+        html.hidden_field(varprefix, '|'.join([k for k, v in selected]), id = varprefix, add_var = True)
+
+    def from_html_vars(self, varprefix):
+        self.load_elements()
+        selected = html.var(varprefix, '').split('|')
+        value = []
+        for key, title in self._elements:
+            if key in selected:
+                value.append(key)
+        return value
 
 # A type-save dropdown choice with one extra field that
 # opens a further value spec for entering an alternative
@@ -1446,7 +1487,7 @@ class AbsoluteDate(ValueSpec):
         self._label = kwargs.get("label")
         self._include_time = kwargs.get("include_time", False)
         self._format = kwargs.get("format", self._include_time and "%F %T" or "%F")
-        self._default_value = kwargs.get("default_value", None) 
+        self._default_value = kwargs.get("default_value", None)
 
     def default_value(self):
         if self._default_value != None:
@@ -1504,7 +1545,7 @@ class AbsoluteDate(ValueSpec):
             else:
                 html.write(" ")
             html.number_input(varprefix + "_min", mmin, size=2)
-            
+
             if self._show_titles:
                 html.write('</td><td>')
             else:
@@ -1512,7 +1553,7 @@ class AbsoluteDate(ValueSpec):
             html.number_input(varprefix + "_sec", sec, size=2)
             if self._show_titles:
                 html.write('</td>')
-            
+
         if self._show_titles:
             html.write('</tr></table>')
 
@@ -1849,6 +1890,7 @@ class Alternative(ValueSpec):
         self._elements = kwargs["elements"]
         self._match = kwargs.get("match") # custom match function
         self._style = kwargs.get("style", "radio") # alternative: "dropdown"
+        self._show_alternative_title = kwargs.get("show_alternative_title")
 
     # Return the alternative (i.e. valuespec)
     # that matches the datatype of a given value. We assume
@@ -1933,7 +1975,10 @@ class Alternative(ValueSpec):
     def value_to_text(self, value):
         vs = self.matching_alternative(value)
         if vs:
-            return vs.value_to_text(value)
+            output = ""
+            if self._show_alternative_title and vs.title():
+                output = "%s<br>" % vs.title()
+            return output + vs.value_to_text(value)
         else:
             return _("invalid:") + " " + str(value)
 
@@ -2079,6 +2124,10 @@ class Dictionary(ValueSpec):
                 self._optional_keys = False
         else:
             self._optional_keys = True
+        if "hidden_keys" in kwargs:
+            self._hidden_keys = kwargs["hidden_keys"]
+        else:
+            self._hidden_keys = []
 
         self._columns = kwargs.get("columns", 1) # possible: 1 or 2
         self._render = kwargs.get("render", "normal") # also: "form" -> use forms.section()
@@ -2115,6 +2164,8 @@ class Dictionary(ValueSpec):
         if headers_sup:
             html.write('<tr>')
         for param, vs in self._get_elements():
+            if param in self._hidden_keys:
+                continue
             if not oneline:
                 html.write('<tr><td class=dictleft>')
             div_id = varprefix + "_d_" + param
@@ -2181,6 +2232,9 @@ class Dictionary(ValueSpec):
     def render_input_form_header(self, varprefix, value, title, sections):
         forms.header(title, narrow=self._form_narrow)
         for param, vs in self._get_elements():
+            if param in self._hidden_keys:
+                continue
+
             if sections and param not in sections:
                 continue
 
