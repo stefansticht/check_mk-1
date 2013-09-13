@@ -1,5 +1,4 @@
-#!/usr/bin/python
-# -*- encoding: utf-8; py-indent-offset: 4 -*-
+<?php
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -24,32 +23,22 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+# +------------------------------------------------------------------+
+# | This file has been contributed by:                               |
+# |                                                                  |
+# | Michael Nieporte <Michael.Nieporte@uk-essen.de>                  |
+# +------------------------------------------------------------------+
 
-def inventory_dmi_sysinfo(checkname, info):
-    if len(info) > 0 and info[0] == ['System', 'Information']:
-        return [(None, None)]
+$opt[1] = "--vertical-label \"Percent\" --title \"$servicedesc\" ";
 
-def check_dmi_sysinfo(item, param, info):
-    if len(info) == 0 or info[0] != ['System', 'Information']:
-        return (3, "Invalid information")
-    data = {}
-    for line in info:
-        line = " ".join(line)
-        if ":" in line:
-            key, value = line.split(":", 1)
-            data[key.strip()] = value.strip()
-
-    return (0, "Manufacturer: %s, Product-Name: %s, Version: %s, S/N: %s" % (
-                 data.get("Manufacturer", "Unknown"),
-                 data.get("Product Name", "Unknown"),
-                 data.get("Version", "Unknown"),
-                 data.get("Serial Number", "Unknown"),
-            ))
-
-
-
-check_info["dmi_sysinfo"] = {
-    'check_function':          check_dmi_sysinfo,
-    'inventory_function':      inventory_dmi_sysinfo,
-    'service_description':     'DMI Sysinfo',
-}
+$def[1] = "DEF:var1=$RRDFILE[1]:$DS[1]:MAX ";
+$def[1] .= "LINE2:var1#2080ff:\"Humidity\:\" ";
+$def[1] .= "GPRINT:var1:LAST:\"%2.0lf%%\" ";
+$def[1] .= "GPRINT:var1:AVERAGE:\"(Avg\: %2.0lf%%,\" ";
+$def[1] .= "GPRINT:var1:MIN:\"Min\: %2.0lf%%,\" ";
+$def[1] .= "GPRINT:var1:MAX:\"Max\: %2.0lf%%)\" ";
+$def[1] .= "HRULE:$CRIT[1]#FFFF00 ";
+$def[1] .= "HRULE:$WARN[1]#FF0000 ";
+$def[1] .= "HRULE:$MIN[1]#FFFF00 ";
+$def[1] .= "HRULE:$MAX[1]#FF0000 ";
+?>

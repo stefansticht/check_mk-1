@@ -24,32 +24,50 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+def check_form_submit_arguments(params):
+    description, settings = params
+    args = ''
 
-def inventory_dmi_sysinfo(checkname, info):
-    if len(info) > 0 and info[0] == ['System', 'Information']:
-        return [(None, None)]
+    if "virthost" in settings:
+        args += ' -H %s' % quote_shell_string(settings["virthost"])
 
-def check_dmi_sysinfo(item, param, info):
-    if len(info) == 0 or info[0] != ['System', 'Information']:
-        return (3, "Invalid information")
-    data = {}
-    for line in info:
-        line = " ".join(line)
-        if ":" in line:
-            key, value = line.split(":", 1)
-            data[key.strip()] = value.strip()
+    if "port" in settings:
+        args += ' -p %d' % settings["port"]
 
-    return (0, "Manufacturer: %s, Product-Name: %s, Version: %s, S/N: %s" % (
-                 data.get("Manufacturer", "Unknown"),
-                 data.get("Product Name", "Unknown"),
-                 data.get("Version", "Unknown"),
-                 data.get("Serial Number", "Unknown"),
-            ))
+    if "uri" in settings:
+        args += ' -u %s' % quote_shell_string(settings["uri"])
+
+    if settings.get("ssl"):
+        args += ' -s'
+
+    if "timeout" in settings:
+        args += ' -t %d' % settings["timeout"]
+
+    if "expect_regex" in settings:
+        args += ' -e %s' % quote_shell_string(settings["expect_regex"])
+
+    if "form_name" in settings:
+        args += ' -f %s' % quote_shell_string(settings["form_name"])
+
+    if "query" in settings:
+        args += ' -q %s' % quote_shell_string(settings["query"])
+
+    if "num_succeeded" in settings:
+        args += ' -n %s' % ','.join(map(str, settings["num_succeeded"]))
+
+    if not settings.get('hosts'):
+        args += " -I $HOSTADDRESS$"
+    else:
+        for address in settings['hosts']:
+            args += " -I %s" % quote_shell_string(address)
+
+    return args
 
 
-
-check_info["dmi_sysinfo"] = {
-    'check_function':          check_dmi_sysinfo,
-    'inventory_function':      inventory_dmi_sysinfo,
-    'service_description':     'DMI Sysinfo',
+active_check_info['form_submit'] = {
+    "command_line"        : '$USER1$/check_form_submit $ARG1$',
+    "argument_function"   : check_form_submit_arguments,
+    "service_description" : lambda params: "FORM %s" % params[0],
+    "has_perfdata"        : False,
 }
+
