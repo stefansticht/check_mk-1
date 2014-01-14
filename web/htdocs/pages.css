@@ -323,7 +323,7 @@ table.data tr.data > td {
     height: 22px;
     vertical-align: middle;
 }
-table.data tr.data td:last-child {
+table.data tr.data > td:last-child {
     border-right-style: none;
 }
 
@@ -874,6 +874,11 @@ div.help table.help td {
 
 div.help table.help td.tt {
     font-family: courier, monospace;
+}
+
+div.help tt {
+    font-family: courier, monospace;
+    color: #000099;
 }
 
 /*--Various----------------------------------------------------------------.

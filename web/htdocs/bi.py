@@ -78,8 +78,8 @@ CRIT = 2
 UNKNOWN = 3
 UNAVAIL = 4
 
-service_state_names = { OK:"OK", WARN:"WARN", CRIT:"CRIT", UNKNOWN:"UNKNOWN", PENDING:"PENDING", UNAVAIL:"UNAVAILABLE"}
-host_state_names = { 0:"UP", 1:"DOWN", 2:"UNREACHABLE" }
+service_state_names = { OK:_("OK"), WARN:_("WARN"), CRIT:_("CRIT"), UNKNOWN:_("UNKNOWN"), PENDING:_("PENDING"), UNAVAIL:_("UNAVAILABLE")}
+host_state_names = { 0:_("UP"), 1:_("DOWN"), 2:_("UNREACHABLE") }
 
 AGGR_HOST  = 0
 AGGR_MULTI = 1
@@ -1245,8 +1245,6 @@ def aggr_countok(nodes, needed_for_ok=2, needed_for_warn=1):
 
     # counts can be specified as integer (e.g. '2') or
     # as percentages (e.g. '70%').
-
-
     if num_ok >= aggr_countok_convert(needed_for_ok, len(states)):
         return { "state" : 0, "output" : "" }
     elif num_ok >= aggr_countok_convert(needed_for_warn, len(states)):
@@ -1459,7 +1457,7 @@ def render_tree_foldable(row, boxes, omit_root, expansion_level, only_problems, 
 
             h += aggr_render_node(tree, tree[2]["title"], mc, show_host)
             if not is_empty:
-                h += '<ul id="%d:%s" %sclass="subtree">' % (expansion_level, path_id, style)
+                h += '<ul id="%d:%s" %sclass="subtree">' % (expansion_level or 0, path_id, style)
                 if not omit_content:
                     for node in tree[3]:
                         estate = node[1] != None and node[1] or node[0]
@@ -1531,7 +1529,7 @@ def render_assume_icon(site, host, service):
          (_("Assume another state for this item (reload page to activate)"),
          # MIST: DAS HIER MUSS verfünftig für Javascript encodiert werden.
          # Das Ausgangsmaterial sind UTF-8 kodierte str-Objekte.
-          site, host, service != None and service or '')
+          site, host, service != None and service.replace('\\', '\\\\') or '')
     current = str(ass).lower()
     return u'<img state="%s" class=assumption %s src="images/assume_%s.png">\n' % (current, mousecode, current)
 

@@ -171,37 +171,54 @@ multisite_painters["aggr_hosts_services"] = {
 }
 
 multisite_painter_options["aggr_expand"] = {
- "title"   : _("Initial expansion of aggregations"),
- "default" : "0",
- "values"  : [ ("0", "collapsed"), ("1", "first level"), ("2", "two levels"), ("3", "three levels"), ("999", "complete")]
+    'valuespec' : DropdownChoice(
+        title = _("Initial expansion of aggregations"),
+        default_value = "0",
+        choices = [
+            ("0",   _("collapsed")),
+            ("1",   _("first level")),
+            ("2",   _("two levels")),
+            ("3",   _("three levels")),
+            ("999", _("complete"))
+        ]
+    )
 }
 
 multisite_painter_options["aggr_onlyproblems"] = {
- "title"   : _("Show only problems"),
- "default" : "0",
- "values"  : [ ("0", "show all"), ("1", "show only problems")]
+    'valuespec' : DropdownChoice(
+        title = _("Show only problems"),
+        default_value = "0",
+        choices = [
+            ("0", _("show all")),
+            ("1", _("show only problems"))
+        ],
+    )
 }
 
 multisite_painter_options["aggr_treetype"] = {
- "title"   : _("Type of tree layout"),
- "default" : "foldable",
- "values"  : [
-    ("foldable",     _("foldable")),
-    ("boxes",        _("boxes")),
-    ("boxes-omit-root", _("boxes (omit root)")),
-    ("bottom-up",    _("bottom up")),
-    ("top-down",     _("top down"))]
+    'valuespec' : DropdownChoice(
+        title = _("Type of tree layout"),
+        default_value = "foldable",
+        choices = [
+            ("foldable",        _("foldable")),
+            ("boxes",           _("boxes")),
+            ("boxes-omit-root", _("boxes (omit root)")),
+            ("bottom-up",       _("bottom up")),
+            ("top-down",        _("top down")),
+        ],
+    )
 }
 
 multisite_painter_options["aggr_wrap"] = {
- "title"   : _("Handling of too long texts"),
- "default" : "wrap",
- "values"  : [ ("wrap", "wrap"), ("nowrap", "don't wrap")]
+    'valuespec' : DropdownChoice(
+         title = _("Handling of too long texts"),
+         default_value = "wrap",
+         choices = [
+            ("wrap",   _("wrap")),
+            ("nowrap", _("don't wrap")),
+        ],
+    )
 }
-
-
-
-
 
 def paint_aggr_tree_ltr(row, mirror):
     wrap = get_painter_option("aggr_wrap")
@@ -321,15 +338,20 @@ class BIGroupFilter(Filter):
 
 declare_filter( 90,  BIGroupFilter())
 
+# how is either "regex" or "exact"
 class BITextFilter(Filter):
-    def __init__(self, what):
+    def __init__(self, what, how="regex", suffix=""):
+        self.how = how
         self.column = "aggr_" + what
         label = ''
         if what == 'name':
             label = _('Aggregation name')
         elif what == 'output':
             label = _('Aggregation output')
-        Filter.__init__(self, self.column, label, "aggr", [self.column], [self.column])
+        if how == "exact":
+            label += _(" (exact match)")
+        Filter.__init__(self, self.column + suffix,
+                        label, "aggr", [self.column + suffix], [self.column])
 
     def variable_settings(self, row):
         return [ (self.htmlvars[0], row[self.column]) ]
@@ -344,10 +366,15 @@ class BITextFilter(Filter):
         val = html.var(self.htmlvars[0])
         if not val:
             return rows
-        reg = re.compile(val.lower())
-        return [ row for row in rows if reg.search(row[self.column].lower()) ]
+        if self.how == "regex":
+            reg = re.compile(val.lower())
+            return [ row for row in rows if reg.search(row[self.column].lower()) ]
+        else:
+            return [ row for row in rows if row[self.column] == val ]
 
-declare_filter(120, BITextFilter("name"))
+
+declare_filter(120, BITextFilter("name", suffix="_regex"))
+declare_filter(120, BITextFilter("name", how="exact"))
 declare_filter(121, BITextFilter("output"))
 
 class BIHostFilter(Filter):
@@ -429,8 +456,8 @@ class BIStatusFilter(Filter):
             defval = ""
         else:
             defval = "on"
-        for varend, text in [('0', 'OK'), ('1', 'WARN'), ('2', 'CRIT'),
-                             ('3', 'UNKN'), ('-1', 'PENDING'), ('n', _('no assumed state set'))]:
+        for varend, text in [('0', _('OK')), ('1', _('WARN')), ('2', _('CRIT')),
+                             ('3', _('UNKN')), ('-1', _('PENDING')), ('n', _('no assumed state set'))]:
             if self.code != 'a' and varend == 'n':
                 continue # no unset for read and effective state
             if varend == 'n':

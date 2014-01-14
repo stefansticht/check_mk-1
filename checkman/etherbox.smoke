@@ -1,4 +1,4 @@
-title: Etherbox Sensor Smoke
+title: Etherbox / MessPC: Sensor Smoke
 catalog: hw/environment
 agents: snmp
 license: GPL
@@ -8,6 +8,7 @@ description:
 
 item:
  The port number of the sensor followed by the sensor type
+
  Example: "2.6" A smoke sensor(type 6) on port 2
 
 perfdata:

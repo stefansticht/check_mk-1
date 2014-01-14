@@ -1,3 +1,560 @@
+1.2.5i1:
+    Core & Setup:
+    * 0386 Added all active checks to check_mk -L output...
+    * 0087 FIX: Fixed possible locking issue when using datasource program with long output...
+    * 0313 FIX: Avoid duplicate reading of configuration file on --create-rrd...
+    * 0379 FIX: check_mk -c: Now also rewrites the location of conf.d directory
+    * 0354 FIX: Catch exception when check plugins do not return a state...
+    * 0398 FIX: Tolerate debug output in check plugins when using CMC...
+    * 0314 FIX: Fix CMC not executing any Check_MK checks after config reload...
+    * 0401 FIX: Fix rule precedence in WATO-configured manual checks...
+    * 0402 FIX: Fix exception in case of missing agent sections of cluster-aware checks...
+    * 0426 FIX: Fixed processing of cached agent plugins / local scripts...
+
+    Checks & Agents:
+    * 0306 esx_vsphere_counters: added missing ramdisk levels sfcbtickets
+    * 0073 moxa_iologik_register: new check to monitor moxa e2000 series registers
+    * 0105 apc_humidity: New Check for humidity levels on APC Devices
+    * 0106 3ware_units: The verifying state is now handled as ok...
+    * 0086 timemachine: new check checking the age of latest backup by timemachine on MAC OS
+    * 0074 raritan_pdu_plugs: new check for Raritan PX-2000 family PDUs...
+    * 0107 stulz_alerts, stulz_powerstate, stulz_temp, stulz_humidity: New Checks for Stulz clima devices
+    * 0075 raritan_pdu_inlet: new check to monitor inlet sensors of the Raritan PX-2000 PDUs
+    * 0315 hitachi_hnas_quorumdevice, hitachi_hnas_pnode, hitachi_hnas_vnode: New checks for Hitachi HNAS devices
+    * 0316 hitachi_hnas_cpu: New check for CPU utilization of Hitachi HNAS devices
+    * 0373 wut_webtherm: Supporting several other devices now
+    * 0377 check_http: Certificate Age mode now supports SNI...
+    * 0317 emc_isilon: New checks for EMC Isilon Storage System
+    * 0395 cmctc.temp: also detect older CMC devices
+    * 0396 cmciii_access cmciii_io cmciii_psm_current cmciii_psm_plugs: Support other firmeware versions as well...
+    * 0111 kemp_loadmaster_ha, kemp_loadmaster_realserver, kemp_loadmaster_services: New Checks for Kemp Loadbalancer
+    * 0318 hitachi_hnas_fan: New check for fans in Hitachi HNAS systems
+    * 0319 hitachi_hnas_psu, hitachi_hnas_psu: New checks for Hitachi HNAS storage systems
+    * 0320 hitachi_hnas_fpga: new check for Hitachi HNAS storage systems
+    * 0321 brocade_mlx: enhancing checks (BR-MLX modules, more OK states)...
+    * 0323 emcvnx_hwstatus, emcvnx_hba, emcvnx_disks: new checks for EMC VNX storage systems
+    * 0254 agent_vsphere: Make handling of spaces in hostnames of ESX configurable...
+    * 0077 cmciii.psm_current, cmciii_psm_plugs, cmciii_io, cmciii.access, cmciii.temp, cmciii.can_current, cmciii.sensor, cmciii.state: new sub checks included in one new check cmcmiii superseding and improving several previous checks of the Rittal CMCIII device...
+            NOTE: Please refer to the migration notes!
+    * 0078 job: check now monitors the time since last start of the job, limits can be configured in WATO
+    * 0079 f5_bigip_conns: new check to monitor number of current connections
+    * 0324 hitachi_hnas_cifs: new check for the number of users using a CIFS share
+    * 0455 hitachi_hnas_span: new check for Spans (Storage Pools) in Hitachi HNAS storage systems
+    * 0103 FIX: services: Fixed bug with service inventory defined in main.mk...
+    * 0299 FIX: borcade_mlx_fan: Prettified output, handling "other" state now
+    * 0300 FIX: cisco_fru_power: Trying not to inventorize not plugged in FRUs...
+    * 0305 FIX: apache_status: Fixed exception when agent reports HTML code as apache-status data...
+    * 0104 FIX: mssql: Server instances with underline in name are now supported....
+    * 0240 FIX: Virtualmachine names with space no longer have missing piggyback data...
+    * 0310 FIX: apache_status: Improved handling of unexpeted data sent by agents...
+    * 0088 FIX: esx_vsphere_datastores: fixed error with reported capacity of 0 bytes...
+    * 0243 FIX: cisco_qos: no longer crashes when the qos policy name is not set...
+    * 0326 FIX: hr_fs printer_supply: Improved translation of wrong encoded chars...
+    * 0059 FIX: agent_vpshere: new option for supporting ESX 4.1...
+    * 0334 FIX: cisco_fantray: Fixed error on Cisco devices which do not support this check...
+    * 0355 FIX: heartbeat_crm: Now handling "Failed actions:" output in agent...
+    * 0357 FIX: megaraid_bbu: Fixed expected state checking...
+    * 0358 FIX: df: now ignores filesystems with a reported size of '-'...
+    * 0360 FIX: multipath: Inventory handles non loaded kernel module now...
+    * 0339 FIX: blade_bays blade_blades blade_blowers blade_health blade_mediatray blade_powerfan blade_powermod: fix scan function...
+    * 0340 FIX: blade_health: fix check, it was totally broken...
+    * 0363 FIX: mysql_capacity: Did use wrong calculated warn / crit thresholds...
+    * 0364 FIX: brocade_mlx*: Several cleanups, fixed bug in brocade_mlx_fan where only the first worst state was shown in output
+    * 0365 FIX: RPMs: Cleaning up xinetd checkmk.rpmnew file after updating package...
+    * 0366 FIX: heartbeat_crm: Agent code is now compatible to pacemaker 1.1.9...
+    * 0367 FIX: Now using /dev/null instead of closing stdin in linux agent...
+    * 0342 FIX: postgres_stat_database: make agent compatible with PostgreSQL 8.4.x...
+    * 0343 FIX: postgres_sessions: make agent plugin compatible with PostgreSQL 9.2...
+    * 0369 FIX: cups_queues: Fixed bug checking the last queue reported by agent...
+    * 0370 FIX: brocade_mlx_module*: Improved output of checks
+    * 0372 FIX: megaraid_ldisks: Ignoring adapters without configured logical disks...
+    * 0345 FIX: Linux agent: fix detaching of background plugins...
+    * 0378 FIX: agent_vsphere.pysphere: Trying to deal with permissions only on some guests/hosts
+    * 0245 FIX: Inline SNMP no longer throws an exception when using SNMPv3 credentials...
+    * 0380 FIX: jolokia_metrics.mem: PNP-Template now handles non existant max values...
+    * 0381 FIX: win_printers: Fixed creation of duplicate services...
+    * 0347 FIX: smart.stats: Remove duplicate disks...
+    * 0349 FIX: winperf.cpuusage: update man page: this check is deprecated
+    * 0383 FIX: solaris_mem: Is now compatible to more systems...
+    * 0109 FIX: cisco_fantray: Prevent inventory for not available fans
+    * 0110 FIX: cisco_fru_power:  Prevent inventory for not available FRUs
+    * 0350 FIX: nfsmounts: correctly handle mount points with spaces...
+    * 0387 FIX: df*: Negative filesystem space levels get a more clear text in check output...
+    * 0351 FIX: local: Catch invalid state codes and map to 3 (UNKNOWN)...
+    * 0397 FIX: mrpe: tolerate performance variable names with spaces...
+    * 0399 FIX: check_ftp: cleanup configuration via WATO, remove Hostname field...
+    * 0435 FIX: esx_vsphere_sensors: Fix garbled output in case of placeholder VMs...
+    * 0251 FIX: agent_vsphere / check_mk agent: fixed outdated systemtime of check_mk agent...
+    * 0439 FIX: postfix_mailq: Linux agent better detects Postfix installation...
+    * 0440 FIX: heartbeat_crm: Inventory more gracefully handles case where agent output is invalid...
+    * 0113 FIX: blade_blades: Now only make inventory for blades that are powered on...
+    * 0441 FIX: megaraid_bbu: Fix several false alarms and cases where inventory failed
+    * 0442 FIX: dell_om_disks: Treat global hot spare disks as OK, instead of WARN...
+    * 0443 FIX: brocade_fcport: cope with firmware that does not provide speed information...
+    * 0322 FIX: timemachine: Check now also works if there are spaces in the name of the backup volume or the hostname
+    * 0253 FIX: windows agent: fixed crash on processing eventlog records...
+    * 0403 FIX: mem.used: Prefer statgrab on FreeBSD for supporting more than 4GB...
+    * 0404 FIX: cups_queues: fix exception in case of alternative time format...
+    * 0444 FIX: timemachine: do not inventorize check when timemachine is not used
+    * 0116 FIX: cisco_vpn_tunnel: Fixed typo that lead to an exception
+    * 0118 FIX: stulz_humidity: Fixed coloring in pnp template...
+    * 0119 FIX: stulz_humidity: Fixed lower thresholds...
+
+    Multisite:
+    * 0371 Added log class filter to hostsvcevents view
+    * 0352 Avoid Livestatus connections on pages that do not need them...
+    * 0390 Added an icon selector to the view editor...
+    * 0391 Added sorter / filter for host/service service levels...
+    * 0247 New mkp package for web applications: iNag / nagstatus / nagios status.dat...
+    * 0429 Implemented role permissions for dashboards...
+    * 0430 It is now possible to define custom time ranges in PNP graph search...
+    * 0302 FIX: Fixed highlight of choosen elements in foldertee/views snapin in Chrome/IE
+    * 0239 FIX: Fixed incorrect html formatting when displaying host or service comments...
+    * 0307 FIX: Increased performance of multisite GUI with a large userbase...
+    * 0312 FIX: Hiding views related to not existing datasources, like the EC now...
+    * 0325 FIX: Removed CSV export icon from availability views...
+    * 0327 FIX: Most forms did now work with "Profile Requests" enabled...
+    * 0333 FIX: Fixed too long page title during performing several actions...
+    * 0356 FIX: Fixed exception caused by utf8 chars in tooltip text...
+    * 0368 FIX: Generating selection id is hopefully now compatible to more systems...
+    * 0374 FIX: Fixed syntax error in exception handler of LDAP search code...
+    * 0375 FIX: LDAP: Now handling user-ids with umlauts...
+    * 0246 FIX: brocade_fcport: fixed error in pnp-template...
+    * 0393 FIX: LDAP: Enabled paged LDAP search by default now with a page size of 1000...
+    * 0394 FIX: LDAP: Auth expiration plugin now checks users for being disabled (in AD)...
+    * 0436 FIX: Fix broken Site status switching via sidebar snapin...
+    * 0420 FIX: LDAP: Roles/Groups are now synced even if case of DNs do not match...
+    * 0421 FIX: UserDB: Fixed lost passwords when changing users in large user databases...
+    * 0423 FIX: Users are not logged out anymore during changing their own passwords...
+    * 0424 FIX: Improved error handling in case of incorrect auth config in distributed WATO environments
+    * 0425 FIX: Fix login loop bug in distributed environments with different auth secrets
+    * 0117 FIX: Availability button is now visible for users without the right to edit views
+
+    WATO:
+    * 0308 Multisite can now set rotation view permissions for NagVis...
+    * 0329 Removed Distributed WATO peer mode...
+            NOTE: Please refer to the migration notes!
+    * 0244 New features for WATO page Backup & Restore...
+    * 0382 Active HTTP check now supports multiline regexp matching...
+    * 0112 Explicit mapping of clustered services can now be done with WATO...
+    * 0437 Convert WATO rule for debug_log into simple Checkbox...
+    * 0428 Changed user profiles (e.g. pw changes) are now replicated in distributed setups...
+    * 0114 User Custom Attributes can now be exported to the core...
+    * 0057 FIX: Fix exception in WATO host editor on custom tag without topic...
+    * 0241 FIX: Improved sorting of WATO folders in dropdown menu...
+    * 0019 FIX: Fixed wording in WATO rule for MSSQL check
+    * 0242 FIX: Parameters for clustered services can now be configured on the cluster host...
+    * 0309 FIX: Trying to prevent read/write conflicts with a large user base...
+    * 0311 FIX: Fixed "Inventory failed" message when trying an inventory on clusters via WATO...
+    * 0330 FIX: Improved performance of WATO slave push with a large user base...
+    * 0331 FIX: LDAP diagnostic LOG can now have the $OMD_SITE$ macro configured via WATO...
+    * 0332 FIX: Own host tag groups without topics resulted in two groups "Host tags" in the rule editor
+    * 0361 FIX: The page linked by "new rule" can now be bookmarked again
+    * 0341 FIX: Avoid rare exception in WATO when deleting a host...
+    * 0376 FIX: LDAP: Default configuration of attributes is reflected within WATO now
+    * 0346 FIX: Fix folder visibility in WATO for unpriviledged users...
+    * 0385 FIX: Better error handling for invalid service regex in rule conditions...
+    * 0389 FIX: Showing LDAP settings on site specific global settings page now...
+    * 0400 FIX: WATO BI editor now supports percentages for count_ok...
+    * 0392 FIX: LDAP: Improved error messages of LDAP configuration test...
+    * 0415 FIX: LDAP: The LDAP Settings dialog is now disabled when the LDAP Connector is disabled
+    * 0416 FIX: When doing user sync on user page rendering, contact group memberships are shown correctly now...
+    * 0417 FIX: LDAP: Fixed "Sync-Plugin: Roles" test with OpenLDAP
+    * 0248 FIX: Backup & Restore: Snapshot comments now support unicode character...
+    * 0418 FIX: LDAP: Fixed broken role sync plugin with OpenLDAP...
+    * 0419 FIX: LDAP: The default user profile roles are only assigned to users without roles...
+    * 0249 FIX: Backup & Restore: fixed bug when uploading legacy snapshots...
+    * 0250 FIX: Fixed error on creating very large WATO snapshots...
+    * 0422 FIX: Fixed numbers shown in log entries of bulk inventory...
+    * 0252 FIX: ESX vSphere configuration: Fixed non-working configuration parameters...
+
+    Notifications:
+    * 0362 sms: now searching PATH for sendsms and smssend commands...
+    * 0108 FIX: Prevent service notification on host alerts...
+    * 0058 FIX: Fix email notifications containing non-ASCII characters in some situtations...
+
+    Reporting & Availability:
+    * 0018 New option for displaying a legend for the colors used in the timeline...
+    * 0338 FIX: Introduce time limit on availability queries...
+
+    Event Console:
+    * 0301 Handling messages of special syslog format correctly...
+    * 0388 Moved Event Console related settings to own settings page...
+    * 0303 FIX: Old log entries were shown in event history first...
+    * 0304 FIX: Escaping several unwanted chars from incoming log messages...
+    * 0089 FIX: CSV export of event console was broken...
+    * 0359 FIX: Fixed exception in event simulator when one match group did not match
+    * 0384 FIX: Trying to prevent problem when restarting mkeventd...
+    * 0427 FIX: Fixed exception when handling connections from event unix socket...
+
+    Livestatus:
+    * 0337 New header for limiting the execution time of a query...
+    * 0335 FIX: Parse state of downtime notification log entries correctly...
+    * 0336 FIX: Limit the number of lines read from a single logfile...
+    * 0344 FIX: Fix semantics of columns num_services_hard_*...
+
+
+1.2.3i7:
+    Core & Setup:
+    * 0011 Introduce optional lower limit for predicted levels...
+    * 0217 FIX: More verbose error output for SNMP errors on the command line...
+    * 0288 FIX: Error messages of datasource programs (e.g. VSphere Agent) are now visible within WATO...
+    * 0010 FIX: Fix computation of hour-of-the-day and day-of-month prediction...
+    * 0292 FIX: Inline SNMP: Check_MK check helpers are closing UDP sockets now...
+
+    Checks & Agents:
+    * 0060 cisco_fantray: new check for monitoring fan trays of Cisco Nexus switches
+    * 0061 cisco_cpu: check now recognizes new object cpmCPUTotal5minRev...
+    * 0063 veeam_client: new check to monitor status of veeam clients with special agent plugin...
+    * 0064 veeam_jobs: new check to monitor the backup jobs of the veeam backup tool...
+    * 0047 fritz.conn fritz.config fritz.uptime fritz.wan_if fritz.link: New checks for monitoring Fritz!Box devices...
+    * 0027 esx_vsphere_sensors: it is now possible override the state of sensors...
+    * 0090 apc_ats_status: New Check for monitoring APC Automatic Transfer Switches
+    * 0080 Added new checks for Brocade NetIron MLX switching / routing devices...
+    * 0091 apc_ats_output: new check for output measurements on APC ATS devices
+    * 0068 check_sql: support for mssql databases included
+    * 0208 fileinfo.groups: Added minimum/maximum file size parameters...
+    * 0093 check_http: Default service description prefix can be avoided...
+    * 0004 df: dynamic filesystem levels now reorder levels automatically...
+    * 0069 veeam_client: limits for time since last backup introduced
+    * 0214 Logwatch: context lines can now be disabled using nocontext=1...
+    * 0038 casa_cpu_mem casa_cpu_temp casa_cpu_util casa_fan casa_power: New checks for casa Cable Modem Termination Systems...
+    * 0097 arc_raid_status: New check for Areca RAID controllers
+    * 0070 cmciii_lcp_airin cmciii_lcp_airout cmciii_lcp_fans cmciii_lcp_waterflow cmciii_lcp_waterin cmciii_lcp_waterout: new checks for the Rittal CMC-III LCP device
+    * 0098 apc_inrow_airflow, apc_inrow_fanspeed, apc_inrow_temp: New checks for APC inrow devices
+    * 0099 apc_mod_pdu_modules: New check for APC Modular Power Distribution Unit
+    * 0072 cmciii_pu_access cmciii_pu_canbus cmciii_pu_io cmciii_pu_temp: New checks for the Rittal CMC-III PU Unit
+    * 0100 juniper_cpu: New check for CPU utilization on Juniper switches
+    * 0236 windows_agent: each script can now be configured to run sync / async...
+    * 0101 liebert_chiller_status: New check for Liebert Chiller devices
+    * 0083 brocade_mlx: Temperature sensors of one module now in one common check...
+    * 0008 df: Solaris agent now also supports samfs
+    * 0084 brocade_mlx: single checks now instead of sub checks...
+    * 0291 winperf_ts_sessions: New check to monitor Microsoft Terminal Server sessions...
+    * 0102 modbus_value: New check and Agent to modbus devices...
+    * 0013 Solaris Agent: implement cached async plugins and local checks...
+    * 0238 vsphere monitoring: new option to skip placeholder vms in agent output...
+    * 0016 Linux+Windows agent: allow spooling plugin outputs via files...
+    * 0017 local: New state type P for state computation based on perfdata...
+    * 0085 brocade_mlx: now handles more different module states...
+    * 0024 FIX: cisco_wlc: removed check configuration parameter ap_model...
+    * 0003 FIX: ps: Remove exceeding [ and ] in service description when using process inventory...
+    * 0037 FIX: checkman browser (cmk -m) was not working properly in network subtree...
+    * 0283 FIX: Interface Checks: ignore invalid error counts while interface is down...
+    * 0081 FIX: Fixed corruption in SNMP walks created with cmk --snmpwalk...
+    * 0286 FIX: esx_vsphrere_counters.ramdisk: Better handling for non existant ramdisks...
+    * 0290 FIX: winperf_processor mem.win: Handling no/empty agent responses correctly now...
+    * 0293 FIX: esx_vsphere_counters_ramdisk_sizes: Handles ram disk "ibmscratch" by default now
+    * 0012 FIX: Solaris Agent: fixed broken fileinfo section...
+    * 0297 FIX: mk-job is now also usable on CentOS 5+...
+    * 0298 FIX: win_dhcp_pools: Fixed wrong percentage calculation
+    * 0237 FIX: tsm_sessions: fixed invalid check output during backups...
+
+    Multisite:
+    * 0001 New filters for selecting several host/service-groups at once...
+    * 0050 New concept of favorite hosts and services plus matching filters and views...
+    * 0211 GUI Notify: Added notify method "popup" to really create popup windows...
+    * 0215 Added option to make HTML escape in plugin outputs configurable...
+    * 0071 livedump: new option to include contact_groups instead of contacts when dumping configuration
+    * 0043 FIX: LDAP: Improved error reporting during synchronisation...
+    * 0044 FIX: LDAP: Fixed error with empty groups during non nested group sync...
+    * 0045 FIX: LDAP: Fixed error when synchronizing non nested groups to roles...
+    * 0046 FIX: Fixed editing contactgroup assignments of hosts or folders with "-" in names...
+    * 0049 FIX: Fixed useless I/O during page processing...
+    * 0203 FIX: Changed sidebar reload interval to be more random...
+    * 0204 FIX: Reduced I/O on logins with access time recording or failed login counts...
+    * 0206 FIX: Fixed logwatch permission check when using liveproxy for normal users...
+    * 0210 FIX: LDAP: Fixed problem syncing contactgroups of a user with umlauts in CN
+    * 0035 FIX: Convert HTTP(S) links in plugin output into clickable icon...
+    * 0006 FIX: Checkboxes for hosts/services were missing on modified views...
+    * 0284 FIX: Context help toggled on/off randomly...
+    * 0285 FIX: Fixed bookmarking of absolute URLs or PNP/NagVis URLs in sidebar snapin...
+    * 0296 FIX: Fixed moving of snapins while in scrolled sidebar...
+
+    WATO:
+    * 0053 New rule for configuring the display_name of a service...
+    * 0216 Supporting float values as SNMP timeout value now...
+    * 0082 Improved online help for LDAP connections...
+    * 0009 Automatically schedule inventory check after service config change...
+    * 0294 Added "services" button to host diagnose page
+    * 0048 FIX: Tests on host diagnose page are executed parallel now...
+    * 0033 FIX: Fixed problem when saving settings in WATOs host diagnostic page...
+    * 0205 FIX: NagVis related permissions of roles can be edited again...
+    * 0207 FIX: Explicit communities were not saved in all cases...
+    * 0094 FIX: Hide SNMPv3 credentials in WATO...
+    * 0212 FIX: Fixed broken site edit page in case a TCP socket has been configured...
+    * 0095 FIX: Fixed problem with portnumber in Wato Distributed Monitoring dialog
+    * 0213 FIX: LDAP: Various small improvements for handling the LDAP user connector...
+    * 0039 FIX: Fixed exception on displaying WATO helptexts in the global settings...
+    * 0219 FIX: Fixed display problems in WATO folders with long contact group names
+    * 0220 FIX: Added HTML escaping to several global settings attributes...
+    * 0234 FIX: Improved handling of interface inventory states / types...
+    * 0289 FIX: Renamed "Hosts & Folders" page to "Hosts"
+    * 0295 FIX: Fixed problem with new created tag groups with "/" in title...
+
+    Notifications:
+    * 0005 Added notification script for sending SMS via mobilant.com...
+    * 0032 FIX: Fixed problem when forwarding notification mails in windows...
+    * 0218 FIX: Fixed rendering of HTML mails for Outlook (at least 2013)...
+
+    BI:
+    * 0287 FIX: Fixed assuming states of services with backslashes in descriptions...
+
+    Reporting & Availability:
+    * 0051 Option for showing timeline directly in availability table...
+    * 0052 Visual colorization of availability according to levels...
+    * 0054 New labelling options for availability table...
+    * 0055 Allow grouping by host, host group or service group...
+    * 0056 New concept of service periods in availability reporting...
+    * 0002 You can now annotate events in the availability reporting...
+    * 0014 FIX: Fix styling of tables: always use complete width...
+    * 0015 FIX: Fixed summary computation in availability when grouping is used...
+
+    Event Console:
+    * 0026 FIX: snmptd_mkevent.py: fixed crash on startup
+    * 0036 FIX: Fixed bug where multsite commands did not work properly...
+
+    Livestatus:
+    * 0067 livedump: new option to mark the mode at the beginning of the dump and documentation fixes...
+    * 0023 FIX: Fixed incorrect starttime of table statehist entries...
+    * 0034 FIX: Availability no longer showes incorrect entries when only one logfile exists...
+    * 0233 FIX: Fixed missing entries in log file and availability view...
+
+
+1.2.3i6:
+    Core & Setup:
+    * 0041 FIX: setup.py now handles non existing wwwuser gracefully...
+
+    Checks & Agents:
+    * 0040 Add agent plugin to test local hostname resolving...
+    * 0020 FIX: Inventory problem with inventory_processes parameter...
+
+    Multisite:
+    * 0000 Improved performance of LDAP sync by refactoring the group sync code
+
+    WATO:
+    * 0042 FIX: Removed debug outputs from service inventory...
+
+
+1.2.3i5:
+    Core:
+    * Automatically remove duplicate checks when monitoring with Agent+SNMP
+       at the same time. TCP based ones have precedence.
+    * inventory check of SNMP devices now does scan per default (configurable)
+    * FIX: inventory check now honors settings for exit code
+    * FIX: avoid exception nodes of cluster have different agent type
+    * FIX: continue inventory, if one check does not support it
+    * FIX: fix configuration of explicit SNMP community, allow unicode
+    * FIX: avoid invalid cache of 2nd and up hosts in bulk inventory
+    * FIX: fixed error handling in SNMP scan, inventory check fails now
+           if SNMP agent is not responding
+    * FIX: Ignore snmp_check_interval cache in interactive situations (e.g.  -nv)
+    * FIX: check_mk config generation: on computing the checks parameters
+           there is no longer a small chance that existing rules get modified
+
+    Event Console:
+    * check_mkevents now available as C binary: check_mkevents_c
+    * FIX: use default values for unset variables in actions
+
+    Multisite:
+    * Speed-O-Meter: now measure only service checks. Host checks
+      are omitted, since they do not really matter and make the
+      results less useful when using CMC.
+    * Added host aliases filter to some views (host/service search)
+    * It is now possible to enforce checkboxes in views upon view loading
+      (needs to be confgured per view via the view editor)
+    * Wiki Sidebar Snapin: showing navigation and quicksearch. OMD only.
+    * Sidebar can now be folded. Simply click somewhere at the left 10 pixels.
+    * Foldable sections now have an animated triangle icon that shows the folding state
+    * Added new snapin "Folders", which interacts with the views snapin when
+      both are enabled. You can use it to open views in a specific folder context
+    * LDAP: Added option to make group and role sync plugin handle nested
+            groups (only in Active Directory at the moment). Enabling this
+	    feature might increase the sync time a lot - use only when really needed.
+    * FIX: Fixed encoding problem in webservice column output
+    * FIX: Fix output format python for several numeric columns
+    * FIX: Fixed searching hosts by aliases/adresses
+    * FIX: Remove duplicate entries from Quicksearch
+    * FIX: Avoid timed browser reload after execution of exections
+    * FIX: Hosttag filter now works in service related views
+    * FIX: Added code to prevent injection of bogus varnames
+           (This might break code which uses some uncommon chars for varnames)
+    * FIX: Fixed computation of perfometer values, which did not care about
+           the snmp_check_interval. Simplyfied computation of perfometer values
+    * FIX: LDAP: Custom user attributes can now be synced again
+
+    BI:
+    * FIX: Fix exception when showing BI tree in reporting time warp
+    * FIX: Fixed blue triangle link: would show more aggregations,
+       if one name was the prefix of another
+
+    Notifications:
+    * Blacklisting for services in the felixble notification system
+    * FIX: mail with graph plugin: set explicit session.save_path for php
+           Fixes instances where the php command couldn't fetch any graphs
+
+    Checks & Agents:
+    * diskstat: removed (ever incorrect) latency computation for Linux
+    * statgrab_load: support predictive levels, add perf-o-meter
+    * ucd_cpu_load: support predictive levels
+    * hpux_cpu, blade_bx_load: support predictive levels, add perf-o-meter,
+       make WATO-configable
+    * check_sql: Database port can now be explicitly set
+    * steelhead_perrs: New check for Rivergate Gateways
+    * alcatel_power: Check for power supplies on Alcatel switches
+    * qnap_disks: New check for Hardisks in Qnap devices
+    * Dell Open Manage: SNNP Checks for Physical Disks, CPU and Memory
+    * check_tcp: Now able to set custom service description
+    * Apache ActiveMQ: New Special Agent and Check to query ActiveMQ Queues
+    * check_ftp: can now be configured via Wato
+    * windows_tasks: New check to  monitor the Windows Task Scheduler
+    * sensatronics_temp: New check for Sensatronic E4 Temperatur Sensor
+    * akcp_sensor_drycontact: New Check for AKCP drycontact Sensors
+    * esx_vsphere_vm.heartbeat: Heartbeat status alert level now configurable
+    * ps:  new configuration option: handle_count (windows only)
+    * FIX: Windows agent: gracefully handle garbled logstate.txt
+    * FIX: esx_vsphere_counters: added missing ramdisk type upgradescratch
+    * FIX: esx_vsphere_hostsystem: fixed bug in handling of params
+    * FIX: local: tolerate invalid output lines
+    * FIX: hp_proliant: Correct handling of missing snmp data
+    * FIX: logwatch.ec: No longer forwards "I" lines to event console
+    * FIX: check_dns: default to querying the DNS server on the localhost itself
+    * FIX: ps: do not output perfdata of CPU averaging (use ps.perf for that)
+    * FIX: nfsexports: also support systems with rpcbind instead of portmap
+    * FIX: ups_in_freq: corrected spelling of service description
+    * FIX: ups_bat_temp: renamed service description to "Temperature Battery",
+           in order to make it consistent with the other temperature checks
+    * FIX: hp_blade_blades: Fixed crash on inventory when receiving
+           unexpected snmp data
+    * FIX: apache_status: If ReqPerSec and BytesPerSec are not reported by
+           the agent, no PNP graphs for them are drawn.
+           (This is the case if ExtendedStatus set to Off in Apache config)
+    * FIX: oracle_jobs: fixed issues with incorrect column count in check output
+    * FIX: if/if64/...: layout fix in PNP template for packets
+
+
+    WATO:
+    * You can now have site-specific global settings when using
+      distributed WATO (available in the "Distributed Monitoring")
+    * bulk inventory: display percentage in progress bar
+    * New option for full SNMP scan in bulk inventory
+    * bulk operations now also available when checkboxes are off
+    * LDAP: Added test to validate the configured role sync groups
+    * LDAP: The sync hooks during activate changes can now be enabled/disabled
+      by configuration (Global Settings)
+    * Disabled replication type "peer" in site editor.
+    * Added "permanently ignore" button to inventory services dialog which 
+      links directly to the disabled services view
+    * Added diagnose page linked from host edit dialog. This can be used to test
+      connection capabilities of hosts
+    * The rule "Process inventory" now offers the same configuration options 
+      as its manual check equivalent "State and count of processes"
+    * New configuration option handle_count (windows only) in the rules
+      "Process inventory" and "State and count of processes"
+    * FIX: correct display of number of hosts in bulk inventory
+    * FIX: nailed down ".siteid" exception when added new site
+    * FIX: fixed setting for locking mode from 'ait' to 'wait'
+    * FIX: avoid removal of tags from rules when not yet acknowledged
+    * FIX: avoid need for apache restart when adding new service levels
+    * FIX: fix encoding problem on GIT integration
+
+    Livestatus:
+    * Removed "livecheck". It never was really stable. Nagios4 has something
+      similar built in. And also the Check_MK Micro Core.
+    * table statehist: no longer computes an unmonitored state for hosts and
+                       services on certain instances.
+                       (showed up as no hosts/services in the multisite gui)
+    * table statehist: fixed SIGSEGV chance on larger queries
+
+1.2.3i4:
+    Core:
+    * Create inventory check also for hosts without services, if they
+          have *no* ping tag.
+
+    WATO:
+    * Bulk inventory: speed up by use of cache files and doing stuff in
+          groups of e.g. 10 hosts at once
+    * Multisite connection: new button for cloning a connection
+
+    Checks & Agents:
+    * Linux agent RPM: remove dependency to package "time". That package
+         is just needed for the binary mk-job, which is useful but not
+         neccessary.
+
+    Multisite:
+    * FIX: fix broken single-site setups due to new caching
+
+1.2.3i3:
+    Core:
+    * FIX: fixed typo in core startup message "logging initial states"
+    * FIX: livestatus table statehist: fixed rubbish entries whenever
+           logfile instances got unloaded
+
+    Livestatus:
+    * FIX: check_mk snmp checks with a custom check interval no longer
+           have an incorrect staleness value
+
+    Notifications:
+    * mkeventd: new notification plugin for forwarding notifications
+       to the Event Console. See inline docu in share/check_mk/notification/mkeventd
+       for documentation.
+    * FIX: cleanup environment from notifications (needed for CMC)
+
+    Checks & Agents:
+    * Windows agent: increased maximum plugin output buffer size to 2MB
+    * check_icmp: New WATO rule for custom PING checks
+    * agent_vsphere: now able to handle < > & ' " in login credentials
+    * if/if64 and friends: add 95% percentiles to graphs
+    * services: inventory now also matches against display names of services
+    * esx_vsphere_hostsystem.multipath: now able to set warn/crit levels
+    * cpu_netapp: added Perf-O-Meter and PNP template
+    * cisco_cpu: added Perf-O-Meter and PNP template
+    * apc_symmetra: add input voltage to informational output
+    * agent_vsphere: new debug option --tracefile
+    * FIX: windows_agent: fixed bug in cleanup of open thread handles
+    * FIX: cups default printer is now monitored again in linux agent
+    * FIX: host notification email in html format: fixed formating error
+           (typo in tag)
+    * FIX: netapp_volumes: better output when volume is missing
+    * FIX: winperf_phydisk: handle case where not performance counters are available
+    * FIX: check_mk_agent.linux: limit Livestatus check to 3 seconds
+    * FIX: esx_vsphere_vm: fixed exception when memory info for vm is missing
+    * FIX: esx_vsphere_hostsystem: Fixed typo in check output
+    * FIX: psperf.bat/ps: Plugin output processing no longer crashes when
+           the ps service is clustered
+
+    Multisite:
+    * Filtering in views by Hostalias is possible now too
+       (however the filter is not displayed in any standard view - user needs
+       to enable it by customizing the needed views himself)
+    * FIX: add missing service icons to view "All Services with this descr..."
+    * FIX: ldap attribute plugins: fixed crash when parameters are None
+    * FIX: avoid duplicate output of log message in log tables
+    * FIX: fixed problem with ldap userid encoding
+    * FIX: removed state-based colors from all Perf-O-Meters
+    * FIX: brocade_fcport pnp-template: fixed incorrect display of average values
+    * FIX: all log views are now correctly sorted from new to old
+
+    Livestatus-Proxy:
+    * Implement caching of non-status requests (together with Multisite)
+    * FIX: fix exception when printing error message
+    * FIX: honor wait time (now called cooling period) after failed TCP connection
+    * FIX: fix hanging if client cannot accept large chunks (seen on RH6.4)
+
+    WATO:
+    * Rule "State and count of processes": New configuration options:
+           virtual and resident memory levels
+    * Added title of tests to LDAP diagnose table
+    * Bulk inventory: new checkbox to only include hosts that have a failed
+        inventory check.
+    * Bulk inventory: yet another checkbox for skipping hosts where the
+        Check_MK service is currently critical
+    * New rule: Multipath Count (used by esx_vsphere_hostsystem.multipath)
+    * FIX: The rule "State and count of processes" is no longer available
+           in "Parameters for inventorized check". This rule was solely
+           intented for "Manual checks" configuration
+    * FIX: Trying to prevent auth.php errors while file is being updated
+
 1.2.3i2:
     Core:
     * New option -B for just generating the configuration
@@ -12,8 +569,14 @@
        to Karl Golland)
     * New man page browser for console (cmk -m)
     * New option explicit_snmp_communities to override rule based SNMP settings
-    * livestatus: new service column staleness: indicator for outdated service checks
-    * livestatus: new host    column staleness: indicator for outdated host checks
+    * Preparations for significant SNMP monitoring performance improvement
+      (It's named Inline SNMP, which is available as special feature via subscriptions)
+    * Allow to specify custom host check via WATO (arbitrary command line)
+    * Implement DNS caching. This can be disabled with use_dns_cache = False
+
+    Livestatus:
+    * new service column staleness: indicator for outdated service checks
+    * new host    column staleness: indicator for outdated host checks
 
     Checks & Agents:
     * esx_hostystem multipath: criticize standby paths only if not equal to active paths
@@ -26,7 +589,6 @@
     * windows_agent: Now available as 64 bit version
     * agent_vsphere: fix problem where sensors were missing when
       you queried multiple host systems via vCenter
-    * apache_status: fix exception if parameter is None
     * cached checks: no longer output cached data if the age of the
                      cache file is twice the maximum cache age
     * windows agent: no longer tries to execute directories
@@ -74,6 +636,29 @@
     * New active check, check_form_submit, to submit HTML forms and check the resulting page
     * mk-job: /var/lib/check_mk_agent/job directory is now created with mode 1777 so 
               mk-job can be used by unprivileged users too
+    * ADD: etherbox: new check for etherbox (messpc) sensors.
+           currently supported: temperature, humidity, switch contact and smoke sensors
+    * cisco_wlc_client: now supports low/high warn and crit levels
+    * cisco_wlc: now supports configuration options for missing AP
+    * agent_vsphere: completely rewritten, now considerably faster
+                     vCenter is still queried by old version
+    * windows_agent: windows eventlog informational/audit logs now reported with O prefix
+    * mk_logwatch: ignored loglines now reported with an "." prefix (if required)
+    * apache_status: Nopw also supports multithreaded mpm
+    * windows_agent: now able to suppress context messages in windows eventlogs
+    * agent_vsphere: completely rewritten, now considerably faster
+                     vCenter is still queried by old version
+    * windows_agent: windows eventlog informational/audit logs now reported with O prefix
+    * mk_logwatch: ignored loglines now reported with an "." prefix (if required)
+    * check_mk-if.pnp: fixed bug with pnp template on esx hosts without perfdata
+    * jolokia checks (JVM): uptime, threads, sessions, requests, queue
+      now configurable via WATO
+    * vSphere checks: secret is not shown to the user via WATO anymore
+    * WATO rule to check state of physical switch (currently used by etherbox check)
+    * cisco_wlc: Allows to configure handling of missing AP
+    * logwatch.ec: show logfiles from that we forwarded messages
+    * FIX: blade_blades: Fixed output of "(UNKNOWN)" even if state is OK
+    * FIX: apache_status: fix exception if parameter is None
     * FIX: hr_mem: handle virtual memory correct on some devices
     * FIX: apache_status agent plugin: now also works, if prog name contains slashes
     * FIX: check_dns: parameter -A does not get an additional string
@@ -83,11 +668,11 @@
     * FIX: esx_vsphere_datastores: Fix incomplete performance data and Perf-O-Meter
     * FIX: cleaned up fileinfo.groups pattern handling, manual configuration
       is now possible using WATO
-    * ADD: etherbox: new check for etherbox (messpc) sensors.
-           currently supported: temperature, humidity, switch contact and smoke sensors
-    * cisco_wlc_client: now supports low/high warn and crit levels
-    * cisco_wlc: now supports configuration options for missing AP
-
+    * FIX: check_mk-ipmi.php: PNP template now displays correct units as delivered
+           by the check plugin
+    * FIX: check_disk_smb: Remove $ from share when creating service description.
+           Otherwise Nagios will not accept the service description.
+    * FIX: mrpe: gracefully handle invalid exit code of plugin
 
     Notifications:
     * notify.py: Matching service level: Use the hosts service level if a
@@ -99,13 +684,14 @@
     * HTML notifications: Added time of state change
 
     Multisite:
+    * Finally good handling of F5 / browser reloads -> no page switching to
+      start page anymore (at least in modern browsers)
     * User accounts can now be locked after a specified amount of auth
       failures (lock_on_logon_failures can be set to a number of tries)
     * Column Perf-O-Meter is now sortable: it sorts after the *first*
       performance value. This might not always be the one you like, but
       its far better than nothing.
     * logwatch: Logwatch icon no longer uses notes_url
-    * check_mk-if.pnp: fixed bug with pnp template on esx hosts without perfdata
     * Inventory screen: Host inventory also displays its clustered services
     * Rules: Renamed "Ignored services" to "Disabled services"
              Renamed "Ignored checks" to "Disabled checks"
@@ -125,7 +711,7 @@
     * LDAP: Moved configuration to dedicated page which also provides some
       testing mechanisms for the configuration
     * Added option to enable browser scrollbar to the multisite sidebar (only
-      via "sidebar_show_scrollbar = True" in multisite.mk 
+      via "sidebar_show_scrollbar = True" in multisite.mk
     * Added option to disable automatic userdb synchronizations in multisite
     * Implemented search forms for most data tables
     * New icons in view footers: export as CSV, export as JSON
@@ -154,6 +740,9 @@
       To make the sidebar check for new messages on a regular base, you need
       to configure the interval of sidebar popup notification updates e.g. via
       WATO Global Settings.
+    * Event views: changed default horizon from 31 to 7 days
+    * New option for painting timestamp: as Unix Epoch time
+    * New filters: Host state type and Service state type
     * FIX: better error message in case of exception in SNMP handling
     * FIX: Inventory screen: Now shows custom checks
     * FIX: Fixed locking problem of multisite pages related to user loading/saving
@@ -164,9 +753,6 @@
 
     WATO:
     * Allow to configure check-/retry_interval in second precision
-    * vSphere secret is not shown to the user via WATO anymore
-    * New rules for jolokia check (JVM): uptime, threads, sessions,
-                                         requests, queue
     * Custom user attributes can now be managed using WATO
     * Allow GIT to be used for change tracking (enable via global option)
     * Hosts/Folders: SNMP communities can now be configured via the host
@@ -175,18 +761,20 @@
       Host/Service/Contact Groups, Timeperiods and Roles
     * Removed "do not connect" option from site socket editor. Use the
       checkbox "Disable" to disable the site for multisite.
+    * Converted table of Event Console Rules to new implementation, make it sortable
     * FIX: do validation of check items in rule editor
     * FIX: More consistent handling of folderpath select in rule editor
     * FIX: Now correctly handling depends_on_tags on page rendering for
            inherited values
     * FIX: Changed several forms from GET to POST to prevent "Request-URI too
            large" error messages during submitting forms
-    * FIX: automation snmp scan now adhere rules for shoddy snmp devices 
+    * FIX: automation snmp scan now adhere rules for shoddy snmp devices
            which have no sys description
-    * ADD: Rule to check state of physical switch (currently used by etherbox check)
     * FIX: Cisco ruleset "Cisco WLC WiFi client connections" has been generalized to
            "WLC WiFi client connections"
-    * ADD: new ruleset cisco_wlc: Allows to configure handling of missing AP
+    * FIX: Snapshot handling is a little more robust agains manually created
+           files in snapshot directory now
+    * FIX: Slightly more transparent handling of syntax errors when loading rules.mk
 
     Notifications:
     * Flexible Notification can now filter service levels
@@ -235,7 +823,7 @@
 
     Event Console:
     * New rule feature: automatically delete event after actions
-    * New filter for maximum services level (minimum already existed)
+    * New filter for maximum service level (minimum already existed)
     * New global setting: hostname translation (allows e.g. to drop domain name)
     * New rule match: only apply rule within specified time period
 
@@ -305,14 +893,15 @@
     * logwatch: Agent can now rewrite Messages
     * apache_status: New rule: set levels for number of remaining open slots
     * mrpe: handle long plugin output correctly, including performance data
+    * cisco_qos: parameters now configurable via WATO
 
     Notifications:
     * notify.py: unique spoolfiles name no longer created with uuid
-    * Warn user if only_services does never match 
+    * Warn user if only_services does never match
 
     Livestatus:
     * Table statehist: Improved detection of vanished hosts and services.
-                       Now able to detect and remove nonsense check plugin output 
+                       Now able to detect and remove nonsense check plugin output
     * FIX: able to handle equal comment_id between host and service
     * livestatus.log: show utf-8 decoding problems only with debug logging >=2
     * livestatus: fixed incorrect output formatting of comments_with_info column
@@ -325,11 +914,10 @@
     * New editor for Business Intelligence rules
     * Rule Editor: Now able to show infeffective rules
     * Valuespec: CascadingDropdown now able to process choice values from functions
-    * cisco_qos parameters now configurable via WATO
     * Removed global option logwatch_forward_to_ec, moved this to the
       logwatch_ec ruleset. With this option the forwarding can now be enabled
       for each logfile on a host
-    * Configuration of an alternativ host check command
+    * Configuration of an alternative host check command
     * Inventory: Display link symbol for ps ruleset
     * New rule for notification_options of hosts and services
     * FIX: Rulesets: correct display of rules within subfolders
@@ -339,6 +927,10 @@
 1.2.2p3:
     Core:
     * FIX: get_average(): Gracefully handle time anomlies of target systems
+    * FIX: notifications: /var/lib/check_mk/notify directory is now created 
+           correctly during setup from tgz file. (Without it notifications
+           did not get sent out.)
+    * FIX: add missing $DESTDIR to auth.serials in setup.sh
 
     Checks & Agents:
     * FIX: winperf_processor: fix case where CPU percent is exactly 100%
@@ -348,6 +940,12 @@
     * FIX: zpool_status: Ignoring "No known data errors" text
     * FIX: dmi_sysinfo: Handling ":" in value correctly
     * FIX: check_http: Fixed syntax error when monitoring certificates
+    * FIX: check_dns: parameter -A does not get an additional string
+    * FIX: diskstat: Fixed wrong values for IO/s computation on linux hosts
+    * FIX: blade_healts: Fixed wrong index checking resulting in exceptions
+    * FIX: notifications: /var/lib/check_mk/notify directory is now created 
+           correctly during setup from tgz file. (Without it notifications
+           did not get sent out.)
 
     Multisite:
     * FIX: LDAP: Disabling use of referrals in active directory configuration
@@ -359,6 +957,10 @@
            e.g. alert statistics source
     * FIX: Folder Tree Snapin: make folder filter also work for remote
            folders that do not exist locally
+    * FIX: correctly display sub-minute check/retry intervals
+    * FIX: fix logic of some numeric sorters
+    * FIX: Improved user provided variable validation in view code
+    * FIX: Escaping html code in plugin output painters
 
     WATO:
     * FIX: fix layout of Auxiliary tags table
@@ -368,9 +970,21 @@
     * FIX: fix logwatch pattern analyzer message "The host xyz is not
            managed by WATO." after direct access via snapin
     * FIX: Fixed first toggle of flags in global settings when default is set to True
+    * FIX: fix exception and loss of hosts in a folder when deleting all site connections
+           of a distributed WATO setup
+    * FIX: avoid Python exception for invalid parameters even in debug mode
+    * FIX: check_ldap: Removed duplicate "-H" definition
+    * FIX: Fixed some output encoding problem in snapshot restore / deletion code
+    * FIX: Improved user provided variable validation in snapshot handling code
+    * FIX: Improved user provided variable validation in inventory dialog
 
     Event Console:
     * FIX: apply rewriting of application/hostname also when cancelling events
+    * FIX: check_mkevents now uses case insensitive host name matching
+
+    Livestatus:
+    * FIX: fixed incorrect output formatting of comments_with_info column
+    * FIX: statehist table: fixed memory leak
 
 1.2.2p2:
     Core:

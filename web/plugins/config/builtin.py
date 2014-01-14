@@ -202,6 +202,9 @@ pagetitle_date_format = None
 # appear in a stale state
 staleness_threshold = 1.5
 
+# Escape HTML in plugin output / log messages
+escape_plugin_output = True
+
 #     _   _               ____  ____
 #    | | | |___  ___ _ __|  _ \| __ )
 #    | | | / __|/ _ \ '__| | | |  _ \
@@ -210,10 +213,18 @@ staleness_threshold = 1.5
 #
 
 user_connectors       = ['htpasswd']
-userdb_automatic_sync = [ 'wato_users', 'page' ]
-ldap_connection       = {}
-ldap_userspec         = {}
-ldap_groupspec        = {}
+userdb_automatic_sync = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ]
+ldap_connection       = {
+    'type'            : 'ad',
+    'page_size'       : 1000,
+}
+ldap_userspec         = {
+    'scope'           : 'sub',
+    'user_id_umlauts' : 'replace',
+}
+ldap_groupspec        = {
+    'scope'           : 'sub',
+}
 ldap_active_plugins   = {'email': {}, 'alias': {}, 'auth_expire': {}}
 ldap_cache_livetime   = 300
 ldap_debug_log        = None

@@ -105,6 +105,7 @@ opt_cleanup_autochecks       = False
 fake_dns                     = False
 opt_keepalive                = False
 opt_cmc_relfilename          = "config"
+opt_keepalive_fd             = None
 
 # register SIGINT handler for consistenct CTRL+C handling
 def interrupt_handler(signum, frame):
@@ -278,14 +279,15 @@ def get_host_info(hostname, ipaddress, checkname):
 	is_snmp_error = False
         for node in nodes:
             # If an error with the agent occurs, we still can (and must)
-            # try the other node.
+            # try the other nodes.
             try:
                 ipaddress = lookup_ipaddress(node)
                 new_info = get_realhost_info(node, ipaddress, checkname, cluster_max_cachefile_age)
-                if add_nodeinfo:
-                    new_info = [ [node] + line for line in new_info ]
-                info += new_info
-                at_least_one_without_exception = True
+                if new_info != None:
+                    if add_nodeinfo:
+                        new_info = [ [node] + line for line in new_info ]
+                    info += new_info
+                    at_least_one_without_exception = True
             except MKSkipCheck:
                 at_least_one_without_exception = True
             except MKAgentError, e:
@@ -305,7 +307,7 @@ def get_host_info(hostname, ipaddress, checkname):
         return info
     else:
         info = get_realhost_info(hostname, ipaddress, checkname, check_max_cachefile_age)
-        if add_nodeinfo:
+        if info != None and add_nodeinfo:
             return [ [ None ] + line for line in info ]
         else:
             return info
@@ -341,6 +343,7 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
         cache_path = tcp_cache_dir + "/" + cache_relpath
         check_interval = check_interval_of(hostname, check_type)
         if not ignore_check_interval \
+           and not opt_dont_submit \
            and check_interval is not None and os.path.exists(cache_path) \
            and cachefile_age(cache_path) < check_interval * 60:
             # cache file is newer than check_interval, skip this check
@@ -367,7 +370,11 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
         else:
             table = get_snmp_table(hostname, ipaddress, oid_info)
         store_cached_checkinfo(hostname, check_type, table)
-        write_cache_file(cache_relpath, repr(table) + "\n")
+        # only write cache file in non interactive mode. Otherwise it would
+        # prevent the regular checking from getting status updates during
+        # interactive debugging, for example with cmk -nv.
+        if not opt_dont_submit:
+            write_cache_file(cache_relpath, repr(table) + "\n")
         return table
 
     # Note: even von SNMP-tagged hosts TCP based checks can be used, if
@@ -547,13 +554,15 @@ def read_cache_file(relpath, max_cache_age):
                     sys.stderr.write("Using data from cachefile %s.\n" % cachefile)
                 return result
         elif opt_debug:
-            sys.stderr.write("Skipping cache file %s: Too old\n" % cachefile)
+            sys.stderr.write("Skipping cache file %s: Too old "
+                             "(age is %d sec, allowed is %d sec)\n" %
+                   (cachefile, cachefile_age(cachefile), max_cache_age))
 
     if simulation_mode and not opt_no_cache:
         raise MKGeneralException("Simulation mode and no cachefile present.")
 
     if opt_no_tcp:
-        raise MKGeneralException("Host is unreachable")
+        raise MKGeneralException("Host is unreachable, no usable cache file present")
         #Cache file '%s' missing or too old. TCP disallowed by you." % cachefile)
 
 
@@ -605,26 +614,31 @@ def get_agent_info(hostname, ipaddress, max_cache_age):
 
 # Get data in case of external program
 def get_agent_info_program(commandline):
+    import subprocess
     if opt_verbose:
         sys.stderr.write("Calling external program %s\n" % commandline)
     try:
-        sout = os.popen(commandline + " 2>/dev/null")
-        output = sout.read()
-        exitstatus = sout.close()
+        p = subprocess.Popen(commandline, shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        stdout, stderr = p.communicate()
+        exitstatus = p.returncode
     except Exception, e:
         raise MKAgentError("Could not execute '%s': %s" % (commandline, e))
 
     if exitstatus:
-        if exitstatus >> 8 == 127:
+        if exitstatus == 127:
             raise MKAgentError("Program '%s' not found (exit code 127)" % (commandline,))
         else:
-            raise MKAgentError("Agent exited with code %d" % (exitstatus >> 8,))
-    return output
+            raise MKAgentError("Agent exited with code %d: %s" % (exitstatus, stderr))
+    return stdout
 
 # Get data in case of TCP
-def get_agent_info_tcp(hostname, ipaddress):
+def get_agent_info_tcp(hostname, ipaddress, port = None):
     if not ipaddress:
         raise MKGeneralException("Cannot contact agent: host '%s' has no IP address." % hostname)
+
+    if port is None:
+        port = agent_port_of(hostname)
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -633,8 +647,8 @@ def get_agent_info_tcp(hostname, ipaddress):
             pass # some old Python versions lack settimeout(). Better ignore than fail
         if opt_debug:
             sys.stderr.write("Connecting via TCP to %s:%d.\n" % (
-                    ipaddress, agent_port_of(hostname)))
-        s.connect((ipaddress, agent_port_of(hostname)))
+                    ipaddress, port))
+        s.connect((ipaddress, port))
         try:
             s.setblocking(1)
         except:
@@ -648,8 +662,7 @@ def get_agent_info_tcp(hostname, ipaddress):
                 break
         s.close()
         if len(output) == 0: # may be caused by xinetd not allowing our address
-            raise MKAgentError("Empty output from agent at TCP port %d" %
-                  agent_port_of(hostname))
+            raise MKAgentError("Empty output from agent at TCP port %d" % port)
         return output
     except MKAgentError, e:
         raise
@@ -657,7 +670,7 @@ def get_agent_info_tcp(hostname, ipaddress):
         raise
     except Exception, e:
         raise MKAgentError("Cannot get data from TCP port %s:%d: %s" %
-                           (ipaddress, agent_port_of(hostname), e))
+                           (ipaddress, port, e))
 
 
 # Gets all information about one host so far cached.
@@ -949,127 +962,9 @@ def do_check(hostname, ipaddress, only_check_types = None):
         sys.stdout.write(nagios_state_names[status] + " - " + output)
         sys.exit(status)
 
-
-# Reset some global variable to their original value. This
-# is needed in keepalive mode.
-# We could in fact do some positive caching in keepalive
-# mode - e.g. the counters of the hosts could be saved in memory.
-def cleanup_globals():
-    global g_agent_already_contacted
-    g_agent_already_contacted = {}
-    global g_hostname
-    g_hostname = "unknown"
-    global g_counters
-    g_counters = {}
-    global g_infocache
-    g_infocache = {}
-    global g_broken_agent_hosts
-    g_broken_agent_hosts = set([])
-    global g_broken_snmp_hosts
-    g_broken_snmp_hosts = set([])
-    global g_inactive_timerperiods
-    g_inactive_timerperiods = None
-    global g_walk_cache
-    g_walk_cache = {}
-
-
-# Diagnostic function for detecting global variables that have
-# changed during checking. This is slow and canno be used
-# in production mode.
-def copy_globals():
-    import copy
-    global_saved = {}
-    for varname, value in globals().items():
-        # Some global caches are allowed to change.
-        if varname not in [ "g_service_description", "g_multihost_checks", "g_check_table_cache", "g_singlehost_checks", "total_check_outout" ] \
-            and type(value).__name__ not in [ "function", "module", "SRE_Pattern" ]:
-            global_saved[varname] = copy.copy(value)
-    return global_saved
-
-
 # Keepalive-mode for running cmk as a check helper.
 class MKCheckTimeout(Exception):
     pass
-
-def do_check_keepalive():
-    global g_initial_times
-
-    def check_timeout(signum, frame):
-        raise MKCheckTimeout()
-
-    signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
-
-    global total_check_output
-    total_check_output = ""
-    if opt_debug:
-        before = copy_globals()
-
-    ipaddress_cache = {}
-
-    while True:
-        cleanup_globals()
-        hostname = sys.stdin.readline()
-        g_initial_times = os.times()
-        if not hostname:
-            break
-        hostname = hostname.strip()
-        if hostname == "*":
-            if opt_debug:
-                sys.stdout.write("Restarting myself...\n")
-            sys.stdout.flush()
-            os.execvp("cmk", sys.argv)
-        elif not hostname:
-            break
-
-        timeout = int(sys.stdin.readline())
-        try: # catch non-timeout exceptions
-            try: # catch timeouts
-                signal.signal(signal.SIGALRM, check_timeout)
-                signal.alarm(timeout)
-                if ';' in hostname:
-                    hostname, ipaddress = hostname.split(";", 1)
-                elif hostname in ipaddress_cache:
-                    ipaddress = ipaddress_cache[hostname]
-                else:
-                    if is_cluster(hostname):
-                        ipaddress = None
-                    else:
-                        try:
-                            ipaddress = lookup_ipaddress(hostname)
-                        except:
-                            raise MKGeneralException("Cannot resolve hostname %s into IP address" % hostname)
-                    ipaddress_cache[hostname] = ipaddress
-
-                status = do_check(hostname, ipaddress)
-                signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
-                signal.alarm(0)
-            except MKCheckTimeout:
-                signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
-                status = 3
-                total_check_output = "UNKNOWN - Check_MK timed out after %d seconds\n" % timeout
-
-            sys.stdout.write("%03d\n%08d\n%s" %
-                 (status, len(total_check_output), total_check_output))
-            sys.stdout.flush()
-            total_check_output = ""
-            cleanup_globals()
-
-            # Check if all global variables are clean, but only in debug mode
-            if opt_debug:
-                after = copy_globals()
-                for varname, value in before.items():
-                    if value != after[varname]:
-                        sys.stderr.write("WARNING: global variable %s has changed: %r ==> %s\n"
-                               % (varname, value, repr(after[varname])[:50]))
-                new_vars = set(after.keys()).difference(set(before.keys()))
-                if (new_vars):
-                    sys.stderr.write("WARNING: new variable appeared: %s" % ", ".join(new_vars))
-
-        except Exception, e:
-            if opt_debug:
-                raise
-            sys.stdout.write("UNKNOWN - %s\n3\n" % e)
-
 
 
 def check_unimplemented(checkname, params, info):
@@ -1147,7 +1042,7 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
     g_hostname = hostname
     num_success = 0
     error_sections = set([])
-    check_table = get_sorted_check_table(hostname)
+    check_table = get_sorted_check_table(hostname, remove_duplicates=True)
     problems = []
 
     for checkname, item, params, description, info in check_table:
@@ -1213,11 +1108,19 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
                     print "Cannot compute check result: %s" % e
                 dont_submit = True
             except Exception, e:
-                result = (3, "invalid output from agent, invalid check parameters or error in implementation of check %s. Please set <tt>debug_log</tt> to a filename in <tt>main.mk</tt> for enabling exception logging." % checkname)
+                text = "invalid output from agent, invalid check parameters or error in implementation of check %s." % checkname
+                if not debug_log:
+                    text += " Please enable \"Log exceptions in check plugins\" for further information."
+                else:
+                    debug_log_file = debug_log
+                    if debug_log_file == True:
+                        debug_log_file = log_dir + "/crashed-checks.log"
+                    text += " A trace has been written to %s." % debug_log_file
+                result = 3, text
                 if debug_log:
                     try:
                         import traceback, pprint
-                        l = file(debug_log, "a")
+                        l = file(debug_log_file, "a")
                         l.write(("Invalid output from plugin or error in check:\n"
                                 "  Check_MK Version: %s\n"
                                 "  Date:             %s\n"
@@ -1321,6 +1224,9 @@ def convert_perf_data(p):
 
 
 def submit_check_result(host, servicedesc, result, sa):
+    if not result:
+        result = 3, "Check plugin did not return any result"
+
     if len(result) >= 3:
         state, infotext, perfdata = result[:3]
     else:
@@ -1466,7 +1372,7 @@ def pnp_cleanup(s):
 #   | These functions are used in some of the checks.                      |
 #   +----------------------------------------------------------------------+
 
-# Generic function for checking a value against levels. This also support
+# Generic function for checking a value against levels. This also supports
 # predictive levels.
 # value:   currently measured value
 # dsname:  name of the datasource in the RRD that corresponds to this value
@@ -1593,10 +1499,13 @@ def get_bytes_human_readable(b, base=1024.0, bytefrac=True, unit="B"):
         return '%s%.0f%s' % (prefix, b, unit)
 
 # Similar to get_bytes_human_readable, but optimized for file
-# sizes
+# sizes. Really only use this for files. We assume that for smaller
+# files one wants to compare the exact bytes of a file, so the
+# threshold to show the value as MB/GB is higher as the one of
+# get_bytes_human_readable().
 def get_filesize_human_readable(size):
     if size < 4 * 1024 * 1024:
-        return str(size)
+        return "%dB" % int(size)
     elif size < 4 * 1024 * 1024 * 1024:
         return "%.2fMB" % (float(size) / (1024 * 1024))
     else:
@@ -1637,12 +1546,12 @@ def get_age_human_readable(secs):
     if mins < 120:
         return "%d min" % mins
     hours, mins = divmod(mins, 60)
-    if hours < 12:
+    if hours < 12 and mins > 0:
         return "%d hours, %d min" % (hours, mins)
-    if hours < 48:
+    elif hours < 48:
         return "%d hours" % hours
     days, hours = divmod(hours, 24)
-    if days < 7:
+    if days < 7 and hours > 0:
         return "%d days, %d hours" % (days, hours)
     return "%d days" % days
 

@@ -82,7 +82,8 @@ ldap_filter_map = {
     },
 }
 
-#   .----------------------------------------------------------------------.
+#.
+#   .-General LDAP code----------------------------------------------------.
 #   |                      _     ____    _    ____                         |
 #   |                     | |   |  _ \  / \  |  _ \                        |
 #   |                     | |   | | | |/ _ \ | |_) |                       |
@@ -194,8 +195,8 @@ def ldap_connect(enforce_new = False, enforce_server = None):
 
         # Got no connection to any server
         if ldap_connection is None:
-            raise MKLDAPException(_('The LDAP connector is unable to connect to the LDAP server.\n%s') %
-                                        ('<br />\n'.join(errors)))
+            raise MKLDAPException(_('LDAP connection failed:\n%s') %
+                                        ('\n'.join(errors)))
 
         # on success, store the connection options the connection has been made with
         ldap_connection_options = config.ldap_connection
@@ -219,12 +220,12 @@ def ldap_default_bind(conn):
                                 'Please fix this in the '
                                 '<a href="wato.py?mode=ldap_config">LDAP connection settings</a>.'))
 
-def ldap_bind(username, password, catch = True, conn = None):
+def ldap_bind(user_dn, password, catch = True, conn = None):
     if conn is None:
         conn = ldap_connection
-    ldap_log('LDAP_BIND %s' % username)
+    ldap_log('LDAP_BIND %s' % user_dn)
     try:
-        conn.simple_bind_s(username, password)
+        conn.simple_bind_s(user_dn, password)
         ldap_log('  SUCCESS')
     except ldap.LDAPError, e:
         ldap_log('  FAILED (%s)' % e)
@@ -315,6 +316,7 @@ def ldap_search(base, filt = '(objectclass=*)', columns = [], scope = None):
     # be as stable as it is needed. So we try to repeat the query for three times.
     tries_left = 2
     success = False
+    last_exc = None
     while not success:
         tries_left -= 1
         try:
@@ -330,7 +332,7 @@ def ldap_search(base, filt = '(objectclass=*)', columns = [], scope = None):
                     for key, val in obj.iteritems():
                         # Convert all keys to lower case!
                         new_obj[key.lower().decode('utf-8')] = [ i.decode('utf-8') for i in val ]
-                    result.append((dn, new_obj))
+                    result.append((dn.lower(), new_obj))
                 success = True
             except ldap.NO_SUCH_OBJECT, e:
                 raise MKLDAPException(_('The given base object "%s" does not exist in LDAP (%s))') % (base, e))
@@ -344,6 +346,7 @@ def ldap_search(base, filt = '(objectclass=*)', columns = [], scope = None):
                                         'incomplete results. You should change the scope of operation '
                                         'within the ldap or adapt the limit settings of the LDAP server.'))
         except (ldap.SERVER_DOWN, ldap.TIMEOUT, MKLDAPException), e:
+            last_exc = e
             if tries_left:
                 ldap_log('  Received %r. Retrying with clean connection...' % e)
                 ldap_disconnect()
@@ -356,8 +359,14 @@ def ldap_search(base, filt = '(objectclass=*)', columns = [], scope = None):
 
     if not success:
         ldap_log('  FAILED')
-        raise MKLDAPException(_('Unable to successfully perform the LDAP search. '
-                                'Maybe there is a connection problem with the LDAP server.'))
+        if config.debug:
+            raise MKLDAPException(_('Unable to successfully perform the LDAP search '
+                                    '(Base: %s, Scope: %s, Filter: %s, Columns: %s): %s') %
+                                    (html.attrencode(base), html.attrencode(scope),
+                                    html.attrencode(filt), html.attrencode(','.join(columns)),
+                                    last_exc))
+        else:
+            raise MKLDAPException(_('Unable to successfully perform the LDAP search (%s)') % last_exc)
 
     ldap_log('  RESULT length: %d, duration: %0.3f' % (len(result), duration))
     return result
@@ -390,11 +399,50 @@ def ldap_replace_macros(tmpl):
 
     return dn
 
+def ldap_rewrite_user_id(user_id):
+    if config.ldap_userspec.get('lower_user_ids', False):
+        user_id = user_id.lower()
+
+    umlauts = config.ldap_userspec.get('user_id_umlauts', 'replace')
+    new = ""
+    for c in user_id:
+        if c == u'ü':
+            new += 'ue'
+        elif c == u'ö':
+            new += 'oe'
+        elif c == u'ä':
+            new += 'ae'
+        elif c == u'ß':
+            new += 'ss'
+        elif c == u'Ü':
+            new += 'UE'
+        elif c == u'Ö':
+            new += 'OE'
+        elif c == u'Ä':
+            new += 'AE'
+        else:
+            new += c
+    if umlauts == 'replace':
+        user_id = new
+    elif umlauts == 'skip' and user_id != new:
+        return None # This makes the user being skipped
+
+    return user_id
+
 def ldap_user_id_attr():
     return config.ldap_userspec.get('user_id', ldap_attr('user_id'))
 
 def ldap_member_attr():
     return config.ldap_groupspec.get('member', ldap_attr('member'))
+
+def ldap_bind_credentials_configured():
+    return config.ldap_connection.get('bind', ('', ''))[0] != ''
+
+def ldap_user_base_dn_configured():
+    return config.ldap_userspec.get('dn', '') != ''
+
+def ldap_group_base_dn_configured():
+    return config.ldap_groupspec.get('dn', '') != ''
 
 def ldap_user_base_dn_exists():
     try:
@@ -421,11 +469,9 @@ def ldap_get_user(username, no_escape = False):
 
     if result:
         dn = result[0][0]
-        user_id = result[0][1][ldap_user_id_attr()][0]
-
-        if config.ldap_userspec.get('lower_user_ids', False):
-            user_id = user_id.lower()
-
+        user_id = ldap_rewrite_user_id(result[0][1][ldap_user_id_attr()][0])
+        if user_id is None:
+            return None
         g_ldap_user_cache[username] = (dn, user_id)
 
         if no_escape:
@@ -479,75 +525,110 @@ def ldap_get_users(add_filter = ''):
         if ldap_user_id_attr() not in ldap_user:
             raise MKLDAPException(_('The configured User-ID attribute "%s" does not '
                                     'exist for the user "%s"') % (ldap_user_id_attr(), dn))
-        user_id = ldap_user[ldap_user_id_attr()][0]
-
-        if config.ldap_userspec.get('lower_user_ids', False):
-            user_id = user_id.lower()
-
-        ldap_user['dn'] = dn # also add the DN
-        result[user_id] = ldap_user
+        user_id = ldap_rewrite_user_id(ldap_user[ldap_user_id_attr()][0])
+        if user_id:
+            ldap_user['dn'] = dn # also add the DN
+            result[user_id] = ldap_user
 
     return result
 
 def ldap_group_base_dn_exists():
+    group_base_dn = ldap_replace_macros(config.ldap_groupspec['dn'])
+    if not group_base_dn:
+        return False
+
     try:
-        result = ldap_search(ldap_replace_macros(config.ldap_groupspec['dn']), columns = ['dn'], scope = 'base')
+        result = ldap_search(group_base_dn, columns = ['dn'], scope = 'base')
     except Exception, e:
         return False
+
     if not result:
         return False
     else:
         return len(result) == 1
 
-def ldap_get_groups(add_filt = None):
+def ldap_get_groups(specific_dn = None):
     filt = ldap_filter('groups')
-    if add_filt:
-        filt = '(&%s%s)' % (filt, add_filt)
-    return ldap_search(ldap_replace_macros(config.ldap_groupspec['dn']), filt, ['cn'])
+    dn   = ldap_replace_macros(config.ldap_groupspec['dn'])
 
-def ldap_user_groups(username, user_dn, attr = 'cn'):
-    # When configured to convert user_ids to lower case, all user ids here are lower case.
-    # Otherwise all user_ids are in the case which they are in LDAP. This should be ok
-    # for this function! I removed the snippet below to reduce the number of ldap queries.
-    # Before removal, this query was executed for every user again, just to fetch the DN
-    # and the username.
-    #   # The given username might be wrong case. The ldap search is case insensitive,
-    #   # so the username read from ldap might differ. Fix it here.
-    #   user_dn, username = ldap_get_user(username, True)
-
-    if username in g_ldap_group_cache:
-        if attr == 'cn':
-            return g_ldap_group_cache[username][0]
+    if specific_dn:
+        # When using AD, the groups can be filtered by the DN attribute. With
+        # e.g. OpenLDAP this is not possible. In that case, change the DN.
+        if config.ldap_connection['type'] == 'ad':
+            filt = '(&%s(distinguishedName=%s))' % (filt, specific_dn)
         else:
-            return g_ldap_group_cache[username][1]
+            dn = specific_dn
 
-    # posixGroup objects use the memberUid attribute to specify the group memberships.
-    # This is the username instead of the users DN. So the username needs to be used
-    # for filtering here.
-    if ldap_member_attr().lower() == 'memberuid':
-        user_filter = username
+    return ldap_search(dn, filt, ['cn'])
+
+def ldap_group_members(filters, filt_attr = 'cn', nested = False):
+    cache_key = '%s-%s-%s' % (filters, nested and 'n' or 'f', filt_attr)
+    if cache_key in g_ldap_group_cache:
+        return g_ldap_group_cache[cache_key]
+
+    # When not searching for nested memberships, it is easy when using the an AD base LDAP.
+    # The group objects can be queried using the attribute distinguishedname. Therefor we
+    # create an alternating match filter to match that attribute when searching by DNs.
+    # In OpenLDAP the distinguishedname is no user attribute, therefor it can not be used
+    # as filter expression. We have to do one ldap query per group. Maybe, in the future,
+    # we change the role sync plugin parameters to snapins to make this part a little easier.
+    if not nested:
+        groups = {}
+        filt = ldap_filter('groups')
+        member_attr = ldap_member_attr().lower()
+
+        if config.ldap_connection['type'] == 'ad' or filt_attr != 'distinguishedname':
+            if filters:
+                add_filt = '(|%s)' % ''.join([ '(%s=%s)' % (filt_attr, f) for f in filters ])
+                filt = '(&%s%s)' % (filt, add_filt)
+
+            for dn, obj in ldap_search(ldap_replace_macros(config.ldap_groupspec['dn']), filt, ['cn', member_attr]):
+                groups[dn] = {
+                    'cn'      : obj['cn'][0],
+                    'members' : [ m.encode('utf-8').lower() for m in obj.get(member_attr,[]) ],
+                }
+        else:
+            # Special handling for OpenLDAP when searching for groups by DN
+            for f_dn in filters:
+                for dn, obj in ldap_search(ldap_replace_macros(f_dn), filt, ['cn', member_attr]):
+                    groups[f_dn] = {
+                        'cn'      : obj['cn'][0],
+                        'members' : [ m.encode('utf-8').lower() for m in obj.get(member_attr,[]) ],
+                    }
+
     else:
-        user_filter = user_dn
+        # Nested querying is more complicated. We have no option to simply do a query for group objects
+        # to make them resolve the memberships here. So we need to query all users with the nested
+        # memberof filter to get all group memberships of that group. We need one query for each group.
+        groups = {}
+        for filter_val in filters:
+            if filt_attr == 'cn':
+                result = ldap_search(ldap_replace_macros(config.ldap_groupspec['dn']),
+                                     '(&%s(cn=%s))' % (ldap_filter('groups'), filter_val),
+                                     columns = ['dn'])
+                if not result:
+                    continue # Skip groups which can not be found
+                dn = result[0][0]
+                cn = filter_val
+            else:
+                dn = filter_val
+                # in case of asking with DNs in nested mode, the resulting objects have the
+                # cn set to None for all objects. We do not need it in that case.
+                cn = None
 
-    # Apply configured group ldap filter and only reply with groups
-    # having the current user as member
-    add_filt = '(%s=%s)' % (ldap_member_attr(), ldap.filter.escape_filter_chars(user_filter))
+            filt = '(&%s(memberOf:1.2.840.113556.1.4.1941:=%s))' % (ldap_filter('users'), dn)
+            groups[dn] = {
+                'members' : [],
+                'cn'      : cn,
+            }
+            for user_dn, obj in ldap_search(ldap_replace_macros(config.ldap_userspec['dn']), filt, columns = ['dn']):
+                groups[dn]['members'].append(user_dn.lower)
 
-    # First get all groups
-    groups_cn = []
-    groups_dn = []
-    for dn, group in ldap_get_groups(add_filt):
-        groups_cn.append(group['cn'][0])
-        groups_dn.append(dn)
+    g_ldap_group_cache[cache_key] = groups
+    return groups
 
-    g_ldap_group_cache.setdefault(username, (groups_cn, groups_dn))
-
-    if attr == 'cn':
-        return groups_cn
-    else:
-        return groups_dn
-
-#   .----------------------------------------------------------------------.
+#.
+#   .-Attributes-----------------------------------------------------------.
 #   |              _   _   _        _ _           _                        |
 #   |             / \ | |_| |_ _ __(_) |__  _   _| |_ ___  ___             |
 #   |            / _ \| __| __| '__| | '_ \| | | | __/ _ \/ __|            |
@@ -577,7 +658,7 @@ def ldap_attribute_plugins_elements():
             elements.append((key, FixedValue(
                 title    = plugin['title'],
                 help     = plugin['help'],
-                value    = None,
+                value    = {},
                 totext   = 'no_param_txt' in plugin and plugin['no_param_txt'] \
                               or _('This synchronization plugin has no parameters.'),
             )))
@@ -595,7 +676,7 @@ def ldap_needed_attributes():
     for key, params in config.ldap_active_plugins.items():
         plugin = ldap_attribute_plugins[key]
         if 'needed_attributes' in plugin:
-            attrs.update(plugin['needed_attributes'](params))
+            attrs.update(plugin['needed_attributes'](params or {}))
     return list(attrs)
 
 def ldap_convert_simple(user_id, ldap_user, user, user_attr, attr):
@@ -604,7 +685,7 @@ def ldap_convert_simple(user_id, ldap_user, user, user_attr, attr):
     else:
         return {}
 
-def ldap_convert_mail(params, user_id, ldap_user, user):
+def ldap_convert_mail(plugin, params, user_id, ldap_user, user):
     mail = ''
     if ldap_user.get(params.get('attr', ldap_attr('mail'))):
         mail = ldap_user[params.get('attr', ldap_attr('mail'))][0].lower()
@@ -635,9 +716,9 @@ ldap_attribute_plugins['email'] = {
 ldap_attribute_plugins['alias'] = {
     'title': _('Alias'),
     'help':  _('Populates the alias attribute of the WATO user by syncrhonizing an attribute '
-               'from the LDAP user account. By default the LDAP attribute &quot;cn&quot; is used.'),
+               'from the LDAP user account. By default the LDAP attribute <tt>cn</tt> is used.'),
     'needed_attributes': lambda params: [ params.get('attr', ldap_attr('cn')) ],
-    'convert':           lambda params, user_id, ldap_user, user: \
+    'convert':           lambda plugin, params, user_id, ldap_user, user: \
                              ldap_convert_simple(user_id, ldap_user, user, 'alias',
                                                  params.get('attr', ldap_attr('cn'))),
     'lock_attributes':   [ 'alias' ],
@@ -653,7 +734,16 @@ ldap_attribute_plugins['alias'] = {
 # Checks wether or not the user auth must be invalidated (increasing the serial).
 # In first instance, it must parse the pw-changed field, then check wether or not
 # a date has been stored in the user before and then maybe increase the serial.
-def ldap_convert_auth_expire(params, user_id, ldap_user, user):
+def ldap_convert_auth_expire(plugin, params, user_id, ldap_user, user):
+    # Special handling for active directory: Is the user enabled / disabled?
+    if config.ldap_connection['type'] == 'ad' and ldap_user.get('useraccountcontrol'):
+        # see http://www.selfadsi.de/ads-attributes/user-userAccountControl.htm for details
+        if saveint(ldap_user['useraccountcontrol'][0]) & 2:
+            return {
+                'locked': True,
+                'serial': user.get('serial', 0) + 1,
+            }
+
     changed_attr = params.get('attr', ldap_attr('pw_changed'))
     if not changed_attr in ldap_user:
         raise MKLDAPException(_('The "Authentication Expiration" attribute (%s) could not be fetched '
@@ -675,12 +765,20 @@ def ldap_convert_auth_expire(params, user_id, ldap_user, user):
 
     return {}
 
+def ldap_attrs_auth_expire(params):
+    attrs = [ params.get('attr', ldap_attr('pw_changed')) ]
+
+    # Fetch user account flags to check locking
+    if config.ldap_connection['type'] == 'ad':
+        attrs.append('useraccountcontrol')
+    return attrs
+
 ldap_attribute_plugins['auth_expire'] = {
     'title': _('Authentication Expiration'),
     'help':  _('This plugin fetches all information which are needed to check wether or '
                'not an already authenticated user should be deauthenticated, e.g. because '
                'the password has changed in LDAP or the account has been locked.'),
-    'needed_attributes': lambda params: [ params.get('attr', ldap_attr('pw_changed')) ],
+    'needed_attributes': ldap_attrs_auth_expire,
     'convert':           ldap_convert_auth_expire,
     # When a plugin introduces new user attributes, it should declare the output target for
     # this attribute. It can either be written to the multisites users.mk or the check_mk
@@ -693,7 +791,7 @@ ldap_attribute_plugins['auth_expire'] = {
             title = _("LDAP attribute to be used as indicator"),
             help  = _("When the value of this attribute changes for a user account, all "
                       "current authenticated sessions of the user are invalidated and the "
-                      "user must login again. By default this field uses the fields whcih "
+                      "user must login again. By default this field uses the fields which "
                       "hold the time of the last password change of the user."),
             default_value = lambda: ldap_attr('pw_changed'),
         )),
@@ -702,11 +800,11 @@ ldap_attribute_plugins['auth_expire'] = {
 
 ldap_attribute_plugins['pager'] = {
     'title': _('Pager'),
-    'help':  _('This plugin synchronizes a field of the users ldap account to the pager attribute '
-               'of the WATO user accounts, which is then forwarded to Nagios and can be used'
-               'for notifications. By default the LDAP attribute &quot;mobile&quot; is used.'),
+    'help':  _('This plugin synchronizes a field of the users LDAP account to the pager attribute '
+               'of the WATO user accounts, which is then forwarded to the monitoring core and can be used'
+               'for notifications. By default the LDAP attribute <tt>mobile</tt> is used.'),
     'needed_attributes': lambda params: [ params.get('attr', ldap_attr('mobile')) ],
-    'convert':           lambda params, user_id, ldap_user, user: \
+    'convert':           lambda plugin, params, user_id, ldap_user, user: \
                              ldap_convert_simple(user_id, ldap_user, user, 'pager',
                                                  params.get('attr', ldap_attr('mobile'))),
     'lock_attributes':   ['pager'],
@@ -725,15 +823,15 @@ def register_user_attribute_sync_plugins():
         ldap_attribute_plugins[attr] = {
             'title': val['valuespec'].title(),
             'help':  val['valuespec'].help(),
-            'needed_attributes': lambda params: [ params.get('attr', ldap_attr(attr)) ],
-            'convert':           lambda params, user_id, ldap_user, user: \
-                                         ldap_convert_simple(user_id, ldap_user, user, attr,
-                                                        params.get('attr', ldap_attr(attr))),
+            'needed_attributes': lambda params: [ params.get('attr', ldap_attr(attr)).lower() ],
+            'convert':           lambda plugin, params, user_id, ldap_user, user: \
+                                         ldap_convert_simple(user_id, ldap_user, user, plugin,
+                                                        params.get('attr', ldap_attr(plugin)).lower()),
             'lock_attributes': [ attr ],
             'parameters': [
                 ('attr', TextAscii(
                     title = _("LDAP attribute to sync"),
-                    help  = _("The LDAP attribute which contents shal be synced into this custom attribute."),
+                    help  = _("The LDAP attribute whose contents shall be synced into this custom attribute."),
                     default_value = lambda: ldap_attr(attr),
                 )),
             ],
@@ -741,16 +839,16 @@ def register_user_attribute_sync_plugins():
 
 register_user_attribute_sync_plugins()
 
-def ldap_convert_groups_to_contactgroups(params, user_id, ldap_user, user):
-    groups = []
-    # 1. Fetch CNs of all LDAP groups of the user (use group_dn, group_filter)
-    ldap_groups = ldap_user_groups(user_id, ldap_user['dn'])
-
-    # 2. Fetch all existing group names in WATO
+def ldap_convert_groups_to_contactgroups(plugin, params, user_id, ldap_user, user):
+    # 1. Fetch all existing group names in WATO
     cg_names = load_group_information().get("contact", {}).keys()
 
-    # Only add groups which are already contactgroups in wato
-    return {'contactgroups': [ g for g in ldap_groups if g in cg_names]}
+    # 2. Load all LDAP groups which have a CN matching one contact
+    #    group which exists in WATO
+    ldap_groups = ldap_group_members(cg_names, nested = params.get('nested', False))
+
+    # 3. Only add groups which the user is member of
+    return {'contactgroups': [ g['cn'] for dn, g in ldap_groups.items() if ldap_user['dn'] in g['members']]}
 
 ldap_attribute_plugins['groups_to_contactgroups'] = {
     'title': _('Contactgroup Membership'),
@@ -759,47 +857,85 @@ ldap_attribute_plugins['groups_to_contactgroups'] = {
                'contactgroup must match the common name (cn) of the LDAP group.'),
     'convert':           ldap_convert_groups_to_contactgroups,
     'lock_attributes':   ['contactgroups'],
-    'no_param_txt': _('Add user to all contactgroups where the common name matches the group name.'),
+    'parameters': [
+        ('nested', FixedValue(
+                title    = _('Handle nested group memberships (Active Directory only at the moment)'),
+                help     = _('Once you enable this option, this plugin will not only handle direct '
+                             'group memberships, instead it will also dig into nested groups and treat '
+                             'the members of those groups as contact group members as well. Please mind '
+                             'that this feature might increase the execution time of your LDAP sync.'),
+                value    = True,
+                totext   = _('Nested group memberships are resolved'),
+            )
+        )
+    ],
 }
 
-def ldap_convert_groups_to_roles(params, user_id, ldap_user, user):
-    groups = []
-    # 1. Fetch DNs of all LDAP groups of the user
-    ldap_groups = [ g.lower() for g in ldap_user_groups(user_id, ldap_user['dn'], 'dn') ]
+def ldap_convert_groups_to_roles(plugin, params, user_id, ldap_user, user):
+    # Load the needed LDAP groups, which match the DNs mentioned in the role sync plugin config
+    ldap_groups = dict(ldap_group_members([ dn for role_id, dn in params.items() if isinstance(dn, str) ],
+                                     filt_attr = 'distinguishedname', nested = params.get('nested', False)))
 
-    # 2. Load default roles from default user profile
-    roles = config.default_user_profile['roles'][:]
+    roles = set([])
 
-    # 3. Loop all roles mentioned in params (configured to be synchronized)
+    # Loop all roles mentioned in params (configured to be synchronized)
     for role_id, dn in params.items():
-        if dn.lower() in ldap_groups and role_id not in roles:
-            roles.append(role_id)
+        if not isinstance(dn, str):
+            continue # skip non configured ones
+        dn = dn.lower() # lower case matching for DNs!
 
-    return {'roles': roles}
+        # if group could be found and user is a member, add the role
+        if dn in ldap_groups and ldap_user['dn'] in ldap_groups[dn]['members']:
+            roles.add(role_id)
+
+    # Load default roles from default user profile when the user got no role
+    # by the role sync plugin
+    if not roles:
+        roles = config.default_user_profile['roles'][:]
+
+    return {'roles': list(roles)}
 
 def ldap_list_roles_with_group_dn():
     elements = []
     for role_id, role in load_roles().items():
         elements.append((role_id, LDAPDistinguishedName(
             title = role['alias'] + ' - ' + _("Specify the Group DN"),
-            help  = _("Distinguished Name of the LDAP group to add users this role. This group must "
-                      "be defined within the scope of the "
+            help  = _("Distinguished Name of the LDAP group to add users this role. "
+                      "e. g. <tt>CN=cmk-users,OU=groups,DC=example,DC=com</tt><br> "
+                      "This group must be defined within the scope of the "
                       "<a href=\"wato.py?mode=ldap_config&varname=ldap_groupspec\">LDAP Group Settings</a>."),
             size  = 80,
             enforce_suffix = ldap_replace_macros(config.ldap_groupspec.get('dn', '')),
         )))
+
+    elements.append(
+        ('nested', FixedValue(
+                title    = _('Handle nested group memberships (Active Directory only at the moment)'),
+                help     = _('Once you enable this option, this plugin will not only handle direct '
+                             'group memberships, instead it will also dig into nested groups and treat '
+                             'the members of those groups as contact group members as well. Please mind '
+                             'that this feature might increase the execution time of your LDAP sync.'),
+                value    = True,
+                totext   = _('Nested group memberships are resolved'),
+            )
+        )
+    )
     return elements
 
 ldap_attribute_plugins['groups_to_roles'] = {
     'title': _('Roles'),
     'help':  _('Configures the roles of the user depending on its group memberships '
-               'in LDAP.'),
+               'in LDAP.<br><br>'
+               'Please note: Additionally the user is assigned to the '
+               '<a href="wato.py?mode=edit_configvar&varname=default_user_profile&site=&folder=">Default Roles</a>. '
+               'Deactivate them if unwanted.'),
     'convert':           ldap_convert_groups_to_roles,
     'lock_attributes':   ['roles'],
     'parameters':        ldap_list_roles_with_group_dn,
 }
 
-#   .----------------------------------------------------------------------.
+#.
+#   .-Hooks----------------------------------------------------------------.
 #   |                     _   _             _                              |
 #   |                    | | | | ___   ___ | | _____                       |
 #   |                    | |_| |/ _ \ / _ \| |/ / __|                      |
@@ -837,6 +973,9 @@ def ldap_sync(add_to_changelog, only_username):
     # Store time of the last sync. Don't store after sync since parallel
     # requests to e.g. the page hook would cause duplicate calculations
     file(g_ldap_sync_time_file, 'w').write('%s\n' % time.time())
+
+    if not config.ldap_connection or not ldap_user_base_dn_configured():
+        return # silently skip sync without configuration
 
     # Flush ldap related before each sync to have a caching only for the
     # current sync process
@@ -879,7 +1018,7 @@ def ldap_sync(add_to_changelog, only_username):
 
         # Gather config from convert functions of plugins
         for key, params in config.ldap_active_plugins.items():
-            user.update(ldap_attribute_plugins[key]['convert'](params, user_id, ldap_user, user))
+            user.update(ldap_attribute_plugins[key]['convert'](key, params or {}, user_id, ldap_user, user))
 
         if not mode_create and user == users[user_id]:
             continue # no modification. Skip this user.
@@ -898,9 +1037,21 @@ def ldap_sync(add_to_changelog, only_username):
             wato.log_pending(wato.SYNCRESTART, None, "edit-users",
                              _("LDAP Connector: Created user %s" % user_id))
         else:
+            details = []
+            if added:
+                details.append(_('Added: %s') % ', '.join(added))
+            if removed:
+                details.append(_('Removed: %s') % ', '.join(removed))
+            if changed:
+                if 'ldap_pw_last_changed' in changed and 'serial' in changed:
+                    details.append(_('Password Changed'))
+                    changed.remove('ldap_pw_last_changed')
+                    changed.remove('serial')
+                if changed:
+                    details.append(('Changed: %s') % ', '.join(changed))
+
             wato.log_pending(wato.SYNCRESTART, None, "edit-users",
-                 _("LDAP Connector: Modified user %s (Added: %s, Removed: %s, Changed: %s)" %
-                    (user_id, ', '.join(added), ', '.join(removed), ', '.join(changed))))
+                 _("LDAP Connector: Modified user %s (%s)") % (user_id, ', '.join(details)))
 
     duration = time.time() - start_time
     ldap_log('SYNC FINISHED - Duration: %0.3f sec' % duration)

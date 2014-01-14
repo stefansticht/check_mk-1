@@ -26,9 +26,9 @@ var browser         = navigator.userAgent.toLowerCase();
 var weAreIEF__k     = ((browser.indexOf("msie") != -1) && (browser.indexOf("opera") == -1));
 var weAreOpera      = browser.indexOf("opera") != -1;
 var weAreFirefox    = browser.indexOf("firefox") != -1 || browser.indexOf("namoroka") != -1;
-var contentLocation = null;
-if(contentFrameAccessible())
-    var contentLocation = parent.frames[1].document.location;
+var g_content_loc   = null;
+
+var sidebar_folded = false;
 
 //
 // Sidebar styling and scrolling stuff
@@ -159,8 +159,7 @@ function snapinDrag(event) {
   // Drag the snapin
   snapinDragging.style.position = 'absolute';
   var newTop = event.clientY  - snapinOffset[0] - snapinScrollTop;
-  /*if (weAreIEF__k)
-      newTop += document.getElementById('side_content').scrollTop;*/
+  newTop += document.getElementById('side_content').scrollTop;
   snapinDragging.style.top      = newTop + 'px';
   snapinDragging.style.left     = (event.clientX - snapinOffset[1]) + 'px';
   snapinDragging.style.zIndex   = 200;
@@ -283,7 +282,8 @@ function getSnapinList() {
 }
 
 function getSnapinCoords(obj) {
-  var snapinTop = snapinDragging.offsetTop + document.getElementById('side_content').scrollTop;
+  var snapinTop = snapinDragging.offsetTop;
+  // + document.getElementById('side_content').scrollTop;
 
   var bottomOffset = obj.offsetTop + obj.clientHeight - snapinTop;
   if (bottomOffset < 0)
@@ -360,6 +360,47 @@ function contentFrameAccessible() {
     }
 }
 
+function update_content_location() {
+    // init the original frameset title
+    if (typeof(window.parent.orig_title) == 'undefined') {
+        window.parent.orig_title = window.parent.document.title;
+    }
+
+    var content_frame = window.parent.frames[1];
+
+    // Change the title to add the right frame title to reflect the
+    // title of the content URL in the framesets title (window title or tab title)
+    if (content_frame.document.title != '') {
+        var page_title = window.parent.orig_title + ' - ' + content_frame.document.title;
+    } else {
+        var page_title = window.parent.orig_title;
+    }
+    window.parent.document.title = page_title;
+
+    // Construct the URL to be called on page reload
+    var parts = window.parent.location.pathname.split('/')
+    parts.pop();
+    var cmk_path = parts.join('/');
+    var rel_url = content_frame.location.pathname + content_frame.location.search + content_frame.location.hash
+    var index_url = cmk_path + '/index.py?start_url=' + encodeURIComponent(rel_url);
+
+    if (window.parent.history.replaceState) {
+        if (rel_url && rel_url != 'blank') {
+            // Update the URL to be called on reload, e.g. via F5, to make the
+            // frameset switch to exactly this URL
+            window.parent.history.replaceState({}, page_title, index_url);
+
+            // only update the internal flag var if the url was not blank and has been updated
+            //otherwise try again on next scheduler run
+            g_content_loc = parent.frames[1].document.location.href;
+        }
+    } else {
+        // Only a browser without history.replaceState support reaches this. Sadly
+        // we have no F5/reload fix for them...
+        g_content_loc = parent.frames[1].document.location.href;
+    }
+}
+
 function debug(s) {
   window.parent.frames[1].document.write(s+'<br />');
 }
@@ -421,10 +462,19 @@ function startDragScroll(event) {
   if (!event)
     event = window.event;
 
+  if (sidebar_folded) {
+      unfoldSidebar();
+      return false;
+  }
+  else if (!sidebar_folded && event.clientX < 10) {
+      foldSidebar();
+      return false;
+  }
+
+
   var target = getTarget(event);
   var button = getButton(event);
 
-  // Evtl. auch nur mit Shift Taste: (e.button == 0 && (e["shiftKey"])
   if (dragging === false && button == 'LEFT'
       && target.tagName != 'A'
       && target.tagName != 'INPUT'
@@ -481,6 +531,34 @@ function dragScroll(event) {
 
   return false;
 }
+
+function foldSidebar()
+{
+    sidebar_folded = true;
+    document.getElementById('check_mk_sidebar').style.position = "relative";
+    document.getElementById('check_mk_sidebar').style.left = "-265px";
+    if (isWebkit()) {
+        var oldcols = parent.document.body.cols.split(",");
+        var oldwidth = parseInt(oldcols[0]);
+        var new_width = 10.0 / 280.0 * oldwidth;
+        parent.document.body.cols = new_width.toString() + ",*";
+    }
+    else
+        parent.document.body.cols = "10,*";
+    get_url('sidebar_fold.py?fold=yes');
+}
+
+
+function unfoldSidebar()
+{
+    document.getElementById('check_mk_sidebar').style.position = "";
+    document.getElementById('check_mk_sidebar').style.left = "0";
+    parent.document.body.cols = "280,*";
+    sidebar_folded = false;
+    get_url('sidebar_fold.py?fold=');
+}
+
+
 
 /************************************************
  * Mausrad scrollen
@@ -618,12 +696,18 @@ function switch_site(switchvar) {
        everything is affected by the switch */
 }
 
+var g_seconds_to_update = null;
+
 function sidebar_scheduler() {
-    var timestamp = Date.parse(new Date()) / 1000;
+    if (g_seconds_to_update == null)
+        g_seconds_to_update = sidebar_update_interval;
+    else
+        g_seconds_to_update -= 1;
+
     var newcontent = "";
     var to_be_updated = [];
 
-    for (var i in refresh_snapins) {
+    for (var i = 0; i < refresh_snapins.length; i++) {
         var name = refresh_snapins[i][0];
         if (refresh_snapins[i][1] != '') {
             // Special handling for snapins like the nagvis maps snapin which request
@@ -631,7 +715,7 @@ function sidebar_scheduler() {
             // from this url
             var url = refresh_snapins[i][1];
 
-            if (timestamp % sidebar_update_interval == 0) {
+            if (g_seconds_to_update <= 0) {
                 get_url(url, updateContents, "snapin_" + name);
             }
         } else {
@@ -642,7 +726,7 @@ function sidebar_scheduler() {
 
     // Are there any snapins to be bulk updates?
     if(to_be_updated.length > 0) {
-        if (timestamp % sidebar_update_interval == 0) {
+        if (g_seconds_to_update <= 0) {
             var url = 'sidebar_snapin.py?names=' + to_be_updated.join(',');
             if (sidebar_restart_time !== null)
                 url += '&since=' + sidebar_restart_time;
@@ -656,16 +740,23 @@ function sidebar_scheduler() {
         }
     }
 
-    if (g_sidebar_notify_interval !== null && timestamp % g_sidebar_notify_interval == 0) {
-        update_messages();
+    if (g_sidebar_notify_interval !== null) {
+        var timestamp = Date.parse(new Date()) / 1000;
+        if (timestamp % g_sidebar_notify_interval == 0) {
+            update_messages();
+        }
     }
 
     // Detect page changes and re-register the mousemove event handler
     // in the content frame. another bad hack ... narf
-    if (contentFrameAccessible() && contentLocation != parent.frames[1].document.location) {
+    if(contentFrameAccessible() && g_content_loc != parent.frames[1].document.location.href) {
         registerEdgeListeners(parent.frames[1]);
-        contentLocation = parent.frames[1].document.location;
+        update_content_location();
     }
+
+    if (g_seconds_to_update <= 0)
+        g_seconds_to_update = sidebar_update_interval;
+
     setTimeout(function(){sidebar_scheduler();}, 1000);
 }
 
@@ -712,8 +803,63 @@ function storeScrollPos() {
     setCookie('sidebarScrollPos', document.getElementById('side_content').scrollTop, null);
 }
 
+/************************************************
+ * WATO Folders snapin handling
+ *************************************************/
+
+// FIXME: Make this somehow configurable - use the start url?
+g_last_view   = 'dashboard.py?name=main';
+g_last_folder = '';
+
+// highlight the followed link (when both needed snapins are available)
+function highlight_link(link_obj, container_id) {
+    var this_snapin = document.getElementById(container_id);
+    if (container_id == 'snapin_container_wato_folders')
+        var other_snapin = document.getElementById('snapin_container_views');
+    else
+        var other_snapin = document.getElementById('snapin_container_wato_folders');
+
+    if (this_snapin && other_snapin) {
+        if (this_snapin.getElementsByClassName)
+            var links = this_snapin.getElementsByClassName('link');
+        else
+            var links = document.getElementsByClassName('link', this_snapin);
+
+        for (var i = 0; i < links.length; i++) {
+            links[i].style.fontWeight = 'normal';
+        }
+
+        link_obj.style.fontWeight = 'bold';
+    }
+}
+
+function wato_folders_clicked(link_obj, folderpath) {
+    g_last_folder = folderpath;
+    highlight_link(link_obj, 'snapin_container_wato_folders');
+    parent.frames[1].location = g_last_view + '&wato_folder=' + escape(g_last_folder);
+}
+
+function wato_views_clicked(link_obj) {
+    g_last_view = link_obj.href;
+
+    highlight_link(link_obj, 'snapin_container_views');
+
+    if (g_last_folder != '') {
+        // Navigate by using javascript, cancel following the default link
+        parent.frames[1].location = g_last_view + '&wato_folder=' + escape(g_last_folder);
+        return false;
+    } else {
+        // Makes use the url stated in href attribute
+        return true;
+    }
+}
+
+/************************************************
+ * WATO Foldertree (Standalone) snapin handling
+ *************************************************/
+
 /* Foldable Tree in snapin */
-function wato_tree_click(folderpath) {
+function wato_tree_click(link_obj, folderpath) {
     var topic  = document.getElementById('topic').value;
     var target = document.getElementById('target_' + topic).value;
 
@@ -793,6 +939,7 @@ function handle_update_messages(_unused, code) {
     var c = document.getElementById('messages');
     if (c) {
         c.innerHTML = code;
+        executeJSbyObject(c);
         update_message_trigger();
     }
 }
@@ -808,12 +955,21 @@ function update_messages() {
     get_url('sidebar_get_messages.py', handle_update_messages);
 }
 
+function get_hint_messages(c) {
+    var hints;
+    if (c.getElementsByClassName)
+        hints = c.getElementsByClassName('popup_msg');
+    else
+        hints = document.getElementsByClassName('popup_msg', c);
+    return hints;
+}
+
 function update_message_trigger() {
     var c = document.getElementById('messages');
     if (c) {
         var b = document.getElementById('msg_button');
-        var num = c.children.length;
-        if (c.children.length > 0) {
+        var hints = get_hint_messages(c);
+        if (hints.length > 0) {
             // are there pending messages? make trigger visible
             b.style.display = 'inline';
 
@@ -825,12 +981,19 @@ function update_message_trigger() {
                 b.appendChild(l);
             }
 
-            l.innerHTML = '' + c.children.length;
+            l.innerHTML = '' + hints.length;
         } else {
             // no messages: hide the trigger
             b.style.display = 'none';
         }
     }
+}
+
+function mark_message_read(msg_id) {
+    get_url('sidebar_message_read.py?id=' + msg_id);
+
+    // Update the button state
+    update_message_trigger();
 }
 
 function read_message() {
@@ -839,18 +1002,16 @@ function read_message() {
         return;
 
     // extract message from teh message container
-    var msg = c.children[0];
+    var hints = get_hint_messages(c);
+    var msg = hints[0];
     c.removeChild(msg);
 
     // open the next message in a window
     c.parentNode.appendChild(msg);
-    
+
     // tell server that the message has been read
     var msg_id = msg.id.replace('message-', '');
-    get_url('sidebar_message_read.py?id=' + msg_id);
-
-    // Update the button state
-    update_message_trigger();
+    mark_message_read(msg_id);
 }
 
 function message_close(msg_id) {

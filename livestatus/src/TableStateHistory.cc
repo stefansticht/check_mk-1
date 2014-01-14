@@ -85,6 +85,7 @@ struct HostServiceState {
     int     _host_down;      // used if service
     int     _state;             // -1/0/1/2/3
     int     _in_notification_period;
+    int     _in_service_period;
     int     _in_downtime;
     int     _in_host_downtime;
     int     _is_flapping;
@@ -103,6 +104,7 @@ struct HostServiceState {
     // These pointers are 0, if there is no output (e.g. downtime)
     char        *_log_output;
     char        *_notification_period;  // may be "": -> no period known, we assume "always"
+    char        *_service_period;  // may be "": -> no period known, we assume "always"
     host        *_host;
     service     *_service;
     const char  *_host_name;            // Fallback if host no longer exists
@@ -115,10 +117,7 @@ struct HostServiceState {
 
 extern Store *g_store;
 
-#define CLASSMASK_STATEHIST 0xC2
-
-// Debug information
-int total_update_calls = 0;
+#define CLASSMASK_STATEHIST 0xC6
 
 // Debugging logging is hard if debug messages are logged themselves...
 void debug_statehist(const char *loginfo, ...)
@@ -150,10 +149,25 @@ void log_hst(HostServiceState *state)
         debug_statehist("debug_info %s", state->_debug_info);
     if (state->_notification_period)
         debug_statehist("notification period %s", state->_notification_period);
+    if (state->_service_period)
+        debug_statehist("service period %s", state->_service_period);
     debug_statehist("from  %d", state->_from);
     debug_statehist("until %d", state->_until);
     debug_statehist("duration %d", state->_duration);
 }
+
+
+#ifndef CMC
+const char *getCustomVariable(customvariablesmember *cvm, const char *name)
+{
+    while (cvm) {
+        if (!strcmp(cvm->variable_name, name))
+            return cvm->variable_value;
+        cvm = cvm->next;
+    }
+    return "";
+}
+#endif
 
 HostServiceState::~HostServiceState()
 {
@@ -190,6 +204,10 @@ TableStateHistory::TableStateHistory()
             "Shows if the host or service is within its notification period", (char *)&(ref->_in_notification_period) - (char *)ref, -1));
     addColumn(new OffsetStringColumn("notification_period",
             "The notification period of the host or service in question", (char *)&(ref->_notification_period) - (char *)ref, -1));
+    addColumn(new OffsetIntColumn("in_service_period",
+            "Shows if the host or service is within its service period", (char *)&(ref->_in_service_period) - (char *)ref, -1));
+    addColumn(new OffsetStringColumn("service_period",
+            "The service period of the host or service in question", (char *)&(ref->_service_period) - (char *)ref, -1));
     addColumn(new OffsetStringColumn("debug_info",
             "Debug information", (char *)&(ref->_debug_info) - (char *)ref, -1));
     addColumn(new OffsetStringColumn("host_name",
@@ -333,6 +351,7 @@ void TableStateHistory::answerQuery(Query *query)
     // Switch to last logfile (we have at least one)
     _it_logs = g_store->logCache()->logfiles()->end();
     --_it_logs;
+    _logfiles_t::iterator newest_log = _it_logs;
 
     // Now find the log where 'since' starts.
     while (_it_logs != g_store->logCache()->logfiles()->begin() && _it_logs->first >= _since) {
@@ -347,56 +366,42 @@ void TableStateHistory::answerQuery(Query *query)
         return;
     }
 
-    // Set initial logentry
-    // Further logfile traversal is handled via getPreviousLogentry() / getNextLogentry()
+    // Determine initial logentry
+    LogEntry* entry;
     _entries = _it_logs->second->getEntriesFromQuery(query, g_store->logCache(), _since, _until, CLASSMASK_STATEHIST);
-    _it_entries = _entries->begin();
-
-    // Start at the logentry LOG VERSION: 2.0 which is logged in the first lines of each logfile
-    // If no entry is found there will be an UNMONITORED entry till the host or service appears
-    LogEntry* entry = _it_entries->second;
-    bool version_found = false;
-    while (entry != 0) {
-        if (entry->_time >= _since){
-            break;
+    if (_it_logs != newest_log) {
+        _it_entries = _entries->end();
+        // Check last entry. If it's younger than _since -> use this logfile too
+        if (--_it_entries != _entries->begin()) {
+            entry = _it_entries->second;
+            if (entry->_time >= _since) {
+                _it_entries = _entries->begin();
+            }
         }
-        if (entry->_type == LOG_VERSION) {
-            version_found = true;
-            break;
-        }
-        entry = getNextLogentry();
-    }
+    } else
+        _it_entries = _entries->begin();
 
-//    if (!version_found) {
-//        query->setError(RESPONSE_CODE_INVALID_REQUEST, "Unable to find any LOG VERSION entries before query "
-//                "timeframe. Logfiles seem corrupted.");
-//        g_store->logCache()->unlockLogCache();
-//        return;
-//    }
 
+    // From now on use getPreviousLogentry() / getNextLogentry()
     HostServiceKey key;
     bool only_update = true;
     bool in_nagios_initial_states = false;
 
-    // Debug parameters
-    int total_calls_saved = 0;
-    total_update_calls = 0;
-    int logentry_counter = 0;
-
-
     while (0 != (entry = getNextLogentry()))
     {
-        logentry_counter++;
-//
-//      if (logentry_counter % 50000 == 0)
-//          logger(LOG_NOTICE, "Statehist Entry: %d", logentry_counter);
-
         if (entry->_time >= _until) {
             getPreviousLogentry();
             break;
         }
         if (only_update && entry->_time >= _since) {
             // Reached start of query timeframe. From now on let's produce real output
+            // Update _from time of every state entry
+            state_info_t::iterator it_hst = state_info.begin();
+            while (it_hst != state_info.end()) {
+                it_hst->second->_from  = _since;
+                it_hst->second->_until = _since;
+                it_hst++;
+            }
             only_update = false;
         }
 
@@ -414,22 +419,23 @@ void TableStateHistory::answerQuery(Query *query)
             in_nagios_initial_states = false;
         }
 
+        key = 0;
+        bool is_service = false;
         switch (entry->_type) {
-        case DOWNTIME_ALERT_SERVICE:
-        case DOWNTIME_ALERT_HOST:
+        case ALERT_SERVICE:
         case STATE_SERVICE:
         case STATE_SERVICE_INITIAL:
+        case DOWNTIME_ALERT_SERVICE:
+        case FLAPPING_SERVICE:
+            key = entry->_service;
+            is_service = true;
+        case ALERT_HOST:
         case STATE_HOST:
         case STATE_HOST_INITIAL:
-        case ALERT_SERVICE:
-        case ALERT_HOST:
+        case DOWNTIME_ALERT_HOST:
         case FLAPPING_HOST:
-        case FLAPPING_SERVICE:
         {
-            key = 0;
-            if (entry->_service != 0)
-                key = entry->_service;
-            else if (entry->_host != 0)
+            if (!is_service)
                 key = entry->_host;
 
             if (key == 0)
@@ -452,8 +458,13 @@ void TableStateHistory::answerQuery(Query *query)
                 state->_is_host             = entry->_svc_desc == 0;
                 state->_host                = entry->_host;
                 state->_service             = entry->_service;
-                state->_host_name           = entry->_host_name;
-                state->_service_description = entry->_svc_desc != 0 ? entry->_svc_desc : "";
+                #ifdef CMC
+                state->_host_name           = entry->_host->_name;
+                state->_service_description = entry->_service != 0 ? entry->_service->_name : "";
+                #else
+                state->_host_name           = entry->_host->name;
+                state->_service_description = entry->_service != 0 ? entry->_service->description : "";
+                #endif
 
                 // No state found. Now check if this host/services is filtered out.
                 // Note: we currently do not filter out hosts since they might be
@@ -467,7 +478,6 @@ void TableStateHistory::answerQuery(Query *query)
                     {
                         Filter *filter = *it;
                         if (!filter->accepts(state)) {
-                            // logger(LOG_NOTICE, "kann ich rausschmeissen: %s/%s", key.first.c_str(), key.second.c_str());
                             filtered_out = true;
                             break;
                         }
@@ -517,6 +527,23 @@ void TableStateHistory::answerQuery(Query *query)
                 else
                     state->_notification_period = (char *)"";
 
+                // Same for service period. For Nagios this is a bit different, since this
+                // is no native field but just a custom variable
+                if (state->_service != 0)
+                    #ifdef CMC
+                    state->_service_period = (char *)state->_service->servicePeriod()->name();
+                    #else
+                    state->_service_period = (char *)getCustomVariable(state->_service->custom_variables, "SERVICE_PERIOD");
+                    #endif
+                else if (state->_host != 0)
+                    #ifdef CMC
+                    state->_service_period = (char *)state->_host->servicePeriod()->name();
+                    #else
+                    state->_service_period = (char *)getCustomVariable(state->_host->custom_variables, "SERVICE_PERIOD");
+                    #endif
+                else
+                    state->_service_period = (char *)"";
+
 
                 // Determine initial in_notification_period status
                 _notification_periods_t::const_iterator tmp_period = _notification_periods.find(state->_notification_period);
@@ -524,6 +551,13 @@ void TableStateHistory::answerQuery(Query *query)
                     state->_in_notification_period = tmp_period->second;
                 else
                     state->_in_notification_period = 1;
+
+                // Same for service period
+                tmp_period = _notification_periods.find(state->_service_period);
+                if (tmp_period != _notification_periods.end())
+                    state->_in_service_period = tmp_period->second;
+                else
+                    state->_in_service_period = 1;
 
                 // If this key is a service try to find its host and apply its _in_host_downtime and _host_down parameters
                 if (!state->_is_host) {
@@ -535,7 +569,8 @@ void TableStateHistory::answerQuery(Query *query)
                 }
 
                 // Log UNMONITORED state if this host or service just appeared within the query timeframe
-                if (!only_update) {
+                // It gets a grace period of ten minutes (nagios startup)
+                if  (!only_update && entry->_time - _since > 60 * 10) {
                     state->_debug_info = "UNMONITORED ";
                     state->_state      = -1;
                 }
@@ -549,7 +584,6 @@ void TableStateHistory::answerQuery(Query *query)
 
 
                 if (state_changed != 0) {
-                    total_calls_saved += state_info.size() - state->_services.size();
                     HostServices::iterator it_svc = state->_services.begin();
                     while (it_svc != state->_services.end()) {
                         updateHostServiceState(query, entry, *it_svc, only_update);
@@ -561,12 +595,19 @@ void TableStateHistory::answerQuery(Query *query)
         }
         case TIMEPERIOD_TRANSITION:
         {
-            _notification_periods[entry->_command_name] = atoi(entry->_state_type);
+            char *save_ptr;
+            char *buffer   = strdup(entry->_options);
+            char *tp_name  = strtok_r(buffer, ";", &save_ptr);
+            strtok_r(NULL, ";", &save_ptr);
+            char *tp_state = strtok_r(NULL, ";", &save_ptr);
+
+            _notification_periods[tp_name] = atoi(tp_state);
             state_info_t::iterator it_hst = state_info.begin();
             while (it_hst != state_info.end()) {
                 updateHostServiceState(query, entry, it_hst->second, only_update);
                 it_hst++;
             }
+            free(buffer);
             break;
         }
         case LOG_INITIAL_STATES:
@@ -588,10 +629,6 @@ void TableStateHistory::answerQuery(Query *query)
         }
         }
     }
-
-    logger(LOG_NOTICE, "Processed statehist logentries: %d", logentry_counter);
-    logger(LOG_NOTICE, "Total calls %d saved: %d", total_update_calls, total_calls_saved);
-    logger(LOG_NOTICE, "Objects: %d, Blacklisted: %d", state_info.size(), object_blacklist.size());
 
     // Create final reports
     state_info_t::iterator it_hst = state_info.begin();
@@ -621,6 +658,14 @@ void TableStateHistory::answerQuery(Query *query)
         process(query, hst);
         it_hst++;
     }
+
+    // Cleanup !
+    it_hst = state_info.begin();
+    while (it_hst != state_info.end()) {
+        delete it_hst->second;
+        it_hst++;
+    }
+
     g_store->logCache()->unlockLogCache();
 }
 
@@ -631,14 +676,14 @@ bool TableStateHistory::objectFilteredOut(Query *query, void *entry)
 
 inline int TableStateHistory::updateHostServiceState(Query *query, const LogEntry *entry, HostServiceState *hs_state, const bool only_update){
     int state_changed = 1;
-    total_update_calls++;
 
     // Revive host / service if it was unmonitored
     if (entry->_type != TIMEPERIOD_TRANSITION && hs_state->_has_vanished)
     {
         hs_state->_time  = hs_state->_last_known_time;
         hs_state->_until = hs_state->_last_known_time;
-        process(query, hs_state);
+        if (!only_update)
+            process(query, hs_state);
 
         hs_state->_may_no_longer_exist = false;
         hs_state->_has_vanished = false;
@@ -647,6 +692,7 @@ inline int TableStateHistory::updateHostServiceState(Query *query, const LogEntr
         hs_state->_debug_info = "UNMONITORED";
         hs_state->_in_downtime = 0;
         hs_state->_in_notification_period = 0;
+        hs_state->_in_service_period = 0;
         hs_state->_is_flapping = 0;
         if (hs_state->_log_output)
             free(hs_state->_log_output);
@@ -659,6 +705,14 @@ inline int TableStateHistory::updateHostServiceState(Query *query, const LogEntr
         }
         else // No notification period information available -> within notification period
             hs_state->_in_notification_period = 1;
+
+        // Same for service period
+        it_status = _notification_periods.find(hs_state->_service_period);
+        if (it_status != _notification_periods.end()) {
+            hs_state->_in_service_period = it_status->second;
+        }
+        else // No service period information available -> within service period
+            hs_state->_in_service_period = 1;
     }
 
     // Update basic information
@@ -750,9 +804,15 @@ inline int TableStateHistory::updateHostServiceState(Query *query, const LogEntr
     }
     case TIMEPERIOD_TRANSITION:
     {
+        char *save_ptr;
+        char *buffer   = strdup(entry->_options);
+        char *tp_name  = strtok_r(buffer, ";", &save_ptr);
+        strtok_r(NULL, ";", &save_ptr);
+        char *tp_state = strtok_r(NULL, ";", &save_ptr);
+
         // if no _host pointer is available the initial status of _in_notification_period (1) never changes
-        if (hs_state->_host && !strcmp(entry->_command_name, hs_state->_notification_period)) {
-            int new_status = atoi(entry->_state_type);
+        if (hs_state->_host && !strcmp(tp_name, hs_state->_notification_period)) {
+            int new_status = atoi(tp_state);
             if (new_status != hs_state->_in_notification_period) {
                 if (!only_update)
                     process(query, hs_state);
@@ -760,6 +820,17 @@ inline int TableStateHistory::updateHostServiceState(Query *query, const LogEntr
                 hs_state->_in_notification_period = new_status;
             }
         }
+        // same for service period
+        if (hs_state->_host && !strcmp(tp_name, hs_state->_service_period)) {
+            int new_status = atoi(tp_state);
+            if (new_status != hs_state->_in_service_period) {
+                if (!only_update)
+                    process(query, hs_state);
+                hs_state->_debug_info = "TIMEPERIOD ";
+                hs_state->_in_service_period = new_status;
+            }
+        }
+        free(buffer);
         break;
     }
     }
@@ -843,3 +914,4 @@ Column *TableStateHistory::column(const char *colname)
     string with_current = string("current_") + colname;
     return Table::column(with_current.c_str());
 }
+

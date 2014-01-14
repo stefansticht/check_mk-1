@@ -29,11 +29,12 @@
 # than with numbers.
 $RRD = array();
 foreach ($NAME as $i => $n) {
-    $RRD[$n] = "$RRDFILE[$i]:$DS[$i]:MAX";
-    $WARN[$n] = $WARN[$i];
-    $CRIT[$n] = $CRIT[$i];
-    $MIN[$n]  = $MIN[$i];
-    $MAX[$n]  = $MAX[$i];
+    $RRD[$n]    = "$RRDFILE[$i]:$DS[$i]:MAX";
+    $RRDAVG[$n] = "$RRDFILE[$i]:$DS[$i]:AVERAGE";
+    $WARN[$n]   = $WARN[$i];
+    $CRIT[$n]   = $CRIT[$i];
+    $MIN[$n]    = $MIN[$i];
+    $MAX[$n]    = $MAX[$i];
 }
 
 
@@ -48,32 +49,40 @@ $def[1] = ""
   . "DEF:out=$RRD[out] "
   . "CDEF:inmb=in,1048576,/ "
   . "CDEF:outmb=out,1048576,/ "
+  . "DEF:inavg=$RRDAVG[in] "
+  . "DEF:outavg=$RRDAVG[out] "
+  . "CDEF:inmbavg=inavg,1048576,/ "
+  . "CDEF:outmbavg=outavg,1048576,/ "
   . "AREA:inmb#60a020:\"in       \" "
-  . "GPRINT:inmb:LAST:\"%5.1lf MB/s last\" "
-  . "GPRINT:inmb:AVERAGE:\"%5.1lf MB/s avg\" "
-  . "GPRINT:inmb:MAX:\"%5.1lf MB/s max\\n\" "
+  . "GPRINT:inmb:LAST:\"%5.3lf MB/s last\" "
+  . "GPRINT:inmbavg:AVERAGE:\"%5.3lf MB/s avg\" "
+  . "GPRINT:inmb:MAX:\"%5.3lf MB/s max\\n\" "
   . "CDEF:out_draw=outmb,-1,* "
   . "AREA:out_draw#2060a0:\"out      \" "
-  . "GPRINT:outmb:LAST:\"%5.1lf MB/s last\" "
-  . "GPRINT:outmb:AVERAGE:\"%5.1lf MB/s avg\" "
-  . "GPRINT:outmb:MAX:\"%5.1lf MB/s max\\n\" "
+  . "GPRINT:outmb:LAST:\"%5.3lf MB/s last\" "
+  . "GPRINT:outmbavg:AVERAGE:\"%5.3lf MB/s avg\" "
+  . "GPRINT:outmb:MAX:\"%5.3lf MB/s max\\n\" "
   ;
 
 if (isset($RRD['in_avg'])) {
 $def[1] .= ""
-  . "DEF:inavg=$RRD[in_avg] "
-  . "DEF:outavg=$RRD[out_avg] "
-  . "CDEF:inavgmb=inavg,1048576,/ "
-  . "CDEF:outavgmb=outavg,1048576,/ "
-  . "CDEF:outavgmbdraw=outavg,-1048576,/ "
-  . "LINE:inavgmb#a0d040:\"in (avg) \" "
-  . "GPRINT:inavgmb:LAST:\"%5.1lf MB/s last\" "
-  . "GPRINT:inavgmb:AVERAGE:\"%5.1lf MB/s avg\" "
-  . "GPRINT:inavgmb:MAX:\"%5.1lf MB/s max\\n\" "
-  . "LINE:outavgmbdraw#40a0d0:\"out (avg)\" "
-  . "GPRINT:outavgmb:LAST:\"%5.1lf MB/s last\" "
-  . "GPRINT:outavgmb:AVERAGE:\"%5.1lf MB/s avg\" "
-  . "GPRINT:outavgmb:MAX:\"%5.1lf MB/s max\\n\" "
+  . "DEF:inaverage=$RRD[in_avg] "
+  . "DEF:outaverage=$RRD[out_avg] "
+  . "CDEF:inaveragemb=inaverage,1048576,/ "
+  . "CDEF:outaveragemb=outaverage,1048576,/ "
+  . "DEF:inaverage_avg=$RRDAVG[in_avg] "
+  . "DEF:outaverage_avg=$RRDAVG[out_avg] "
+  . "CDEF:inaveragemb_avg=inaverage_avg,1048576,/ "
+  . "CDEF:outaveragemb_avg=outaverage_avg,1048576,/ "
+  . "CDEF:outaveragemb_draw=outaverage,-1048576,/ "
+  . "LINE:inaveragemb_avg#a0d040:\"in (avg) \" "
+  . "GPRINT:inaveragemb:LAST:\"%5.3lf MB/s last\" "
+  . "GPRINT:inaveragemb_avg:AVERAGE:\"%5.3lf MB/s avg\" "
+  . "GPRINT:inaveragemb:MAX:\"%5.3lf MB/s max\\n\" "
+  . "LINE:outaveragemb_draw#40a0d0:\"out (avg)\" "
+  . "GPRINT:outaveragemb:LAST:\"%5.3lf MB/s last\" "
+  . "GPRINT:outaveragemb_avg:AVERAGE:\"%5.3lf MB/s avg\" "
+  . "GPRINT:outaveragemb:MAX:\"%5.3lf MB/s max\\n\" "
   ;
 }
 
@@ -100,14 +109,16 @@ $def[2] = ""
   . "HRULE:0#c0c0c0 "
   . "DEF:in=$RRD[rxframes] "
   . "DEF:out=$RRD[txframes] "
+  . "DEF:inavg=$RRDAVG[rxframes] "
+  . "DEF:outavg=$RRDAVG[txframes] "
   . "AREA:in#a0d040:\"in       \" "
   . "GPRINT:in:LAST:\"%5.1lf/s last\" "
-  . "GPRINT:in:AVERAGE:\"%5.1lf/s avg\" "
+  . "GPRINT:inavg:AVERAGE:\"%5.1lf/s avg\" "
   . "GPRINT:in:MAX:\"%5.1lf/s max\\n\" "
   . "CDEF:out_draw=out,-1,* "
   . "AREA:out_draw#40a0d0:\"out      \" "
   . "GPRINT:out:LAST:\"%5.1lf/s last\" "
-  . "GPRINT:out:AVERAGE:\"%5.1lf/s avg\" "
+  . "GPRINT:outavg:AVERAGE:\"%5.1lf/s avgargs\" "
   . "GPRINT:out:MAX:\"%5.1lf/s max\\n\" "
   ;
 

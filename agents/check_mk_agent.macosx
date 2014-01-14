@@ -43,7 +43,7 @@ fi
 
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.3i1
+echo Version: 1.2.5i1
 echo AgentOS: macosx
 
 osver="$(uname -r)"
@@ -88,6 +88,11 @@ if [ -r "$MK_CONFDIR/fileinfo.cfg" ] ; then
     stat -f "%N|%z|%m" $(cat "$MK_CONFDIR/fileinfo.cfg")
 fi
 
+if type tmutil >/dev/null
+then
+    echo '<<<timemachine>>>'
+    tmutil latestbackup 2>&1
+fi
 
 ###############################
 # Things up for takers:

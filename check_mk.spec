@@ -43,6 +43,10 @@ This package is only needed on the Nagios server.
 
 %package agent
 Group:     System/Monitoring
+# Requires:  xinetd, time
+# Better do not depend on time. It's just needed for the mk-job
+# Binary, which is useful but not neccessary to run the agent.
+# This dependency could cause more trouble then it helps.
 Requires:  xinetd
 Summary: Linux-Agent for check_mk
 AutoReq:   off
@@ -55,6 +59,7 @@ xinetd to run this agent.
 
 %package agent-scriptless
 Group:     System/Monitoring
+# Requires:  xinetd, time
 Requires:  xinetd
 Summary: Linux-Agent for check_mk
 AutoReq:   off
@@ -69,6 +74,7 @@ own.
 
 %package caching-agent
 Group:     System/Monitoring
+# Requires:  xinetd, time
 Requires:  xinetd
 Summary: Caching Linux-Agent for check_mk
 AutoReq:   off
@@ -155,6 +161,7 @@ rm -rf $RPM_BUILD_ROOT
 %config(noreplace) /etc/check_mk/multisite.mk
 /etc/check_mk/conf.d/README
 %config(noreplace) /etc/nagios/objects/*
+%config(noreplace) /etc/nagios/auth.serials
 /usr/bin/check_mk
 /usr/bin/cmk
 /usr/bin/mkp
@@ -178,7 +185,6 @@ rm -rf $RPM_BUILD_ROOT
 # Spaeter Subpaket draus machen
 /usr/bin/unixcat
 /usr/lib/check_mk/livestatus.o
-/usr/lib/check_mk/livecheck
 
 %files agent
 %config(noreplace) /etc/xinetd.d/check_mk
@@ -239,6 +245,7 @@ fi
 %define reload_xinetd if [ -x /etc/init.d/xinetd ] ; then if pgrep -x xinetd >/dev/null ; then echo "Reloading xinetd..." ; /etc/init.d/xinetd reload ; else echo "Starting xinetd..." ; /etc/init.d/xinetd start ; fi ; fi
 
 %define activate_xinetd if which chkconfig >/dev/null 2>&1 ; then echo "Activating startscript of xinetd" ; chkconfig xinetd on ; fi
+%define cleanup_rpmnew if [ -f /etc/xinetd.d/check_mk.rpmnew ] ; then rm /etc/xinetd.d/check_mk.rpmnew ; fi
 
 %pre agent
 if [ ! -x /etc/init.d/xinetd ] ; then
@@ -258,6 +265,7 @@ if [ ! -x /etc/init.d/xinetd ] ; then
 fi
 
 %post agent
+%cleanup_rpmnew
 %activate_xinetd
 %reload_xinetd
 
@@ -285,6 +293,7 @@ if [ ! -x /etc/init.d/xinetd ] ; then
 fi
 
 %post caching-agent
+%cleanup_rpmnew
 %activate_xinetd
 %reload_xinetd
 

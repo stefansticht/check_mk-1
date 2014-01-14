@@ -50,44 +50,8 @@ register_rule(group + "/" + subgroup_networking,
         help = _("This rule sets the parameters for the host checks (via <tt>check_icmp</tt>) "
                  "and also for PING checks on ping-only-hosts. For the host checks only the "
                  "critical state is relevant, the warning levels are ignored."),
-        elements = [
-           ( "rta",
-             Tuple(
-                 title = _("Round trip average"),
-                 elements = [
-                     Float(title = _("Warning if above"), unit = "ms"),
-                     Float(title = _("Critical if above"), unit = "ms"),
-                 ])),
-           ( "loss",
-             Tuple(
-                 title = _("Packet loss"),
-                 help = _("When the percentual number of lost packets is equal or greater then "
-                          "the level, then the according state is triggered. The default for critical "
-                          "is 100%. That means that the check is only critical if <b>all</b> packets "
-                          "are lost."),
-                 elements = [
-                     Percentage(title = _("Warning if above")),
-                     Percentage(title = _("Critical if above")),
-                 ])),
-
-            ( "packets",
-              Integer(
-                  title = _("Number of packets"),
-                  help = _("Number ICMP echo request packets to send to the target host on each "
-                           "check execution. All packets are sent directly on check execution. Afterwards "
-                           "the check waits for the incoming packets."),
-                  minvalue = 1,
-                  maxvalue = 20,
-               )),
-
-             ( "timeout",
-               Integer(
-                   title = _("Total timeout of check"),
-                   help = _("After this time (in seconds) the check is aborted, regardless "
-                            "of how many packets have been received yet."),
-                   minvalue = 1,
-               )),
-        ]),
+        elements = check_icmp_params,
+        ),
         match="dict")
 
 register_rule(group + '/' + subgroup_applications,
@@ -118,6 +82,7 @@ register_rule(group + '/' + subgroup_applications,
              ),
           ]
       ),
+      title = _("Logfile pattern rules"),
       help = _('<p>You can define one or several patterns (regular expressions) in each logfile pattern rule. '
                'These patterns are applied to the selected logfiles to reclassify the '
                'matching log messages. The first pattern which matches a line will '
@@ -143,8 +108,14 @@ register_rule(group + '/' + subgroup_inventory,
         elements = [
             ('services', ListOfStrings(
                 title = _("Services (Regular Expressions)"),
-                help  = _('Matching the begining of the service names (regular expression). '
-                          'If no service is given, this rule will match all services.'),
+                help  = _('Regular expressions matching the begining of the internal name '
+                          'or the description of the service. '
+                          'If no name is given then this rule will match all services. The '
+                          'match is done on the <i>beginning</i> of the service name. It '
+                          'is done <i>case sensitive</i>. You can do a case insensitive match '
+                          'by prefixing the regular expression with <tt>(?i)</tt>. Example: '
+                          '<tt>(?i).*mssql</tt> matches all services which contain <tt>MSSQL</tt> '
+                          'or <tt>MsSQL</tt> or <tt>mssql</tt> or...'),
                 orientation = "horizontal",
             )),
             ('state', DropdownChoice(
@@ -271,13 +242,18 @@ register_rule(group + '/' + subgroup_networking,
         ("portstates", ListChoice(title = _("Network interface port states to inventorize"),
               help = _("When doing inventory on switches or other devices with network interfaces "
                        "then only ports found in one of the configured port states will be added to the monitoring."),
-              choices = _if_portstate_choices)),
+              choices = _if_portstate_choices,
+              toggle_all = True,
+              default_value = ['1'],
+        )),
         ("porttypes", ListChoice(title = _("Network interface port types to inventorize"),
               help = _("When doing inventory on switches or other devices with network interfaces "
                        "then only ports of the specified types will be created services for."),
               choices = _if_porttype_choices,
-              columns = 3)),
-
+              columns = 3,
+              toggle_all = True,
+              default_value = [ '6', '32', '62', '117' ]
+        )),
         ],
         help = _('This rule can be used to control the inventory for network ports. '
                  'You can configure the port types and port states for inventory'
@@ -288,6 +264,8 @@ register_rule(group + '/' + subgroup_networking,
 register_rule(group + '/' + subgroup_inventory,
     varname   = "inventory_processes_rules",
     title     = _('Process Inventory'),
+    help      = _("Keep in mind that all configuration parameters in this rule are only applied during the hosts inventory. "
+                  "Any changes later on require a host re-inventory"),
     valuespec = Dictionary(
         elements = [
             ('descr', TextAscii(
@@ -385,8 +363,59 @@ register_rule(group + '/' + subgroup_inventory,
                     ),
                 ],
             )),
+            ( "cpulevels",
+              Tuple(
+                title = _("Levels on CPU utilization"),
+                elements = [
+                   Percentage(title = _("Warning if above"), default_value = 90),
+                   Percentage(title = _("Critical if above"), default_value = 98),
+                ],
+            )),
+            ( "cpu_average",
+             Integer(
+                 title = _("CPU Averaging"),
+                 help = _("By activating averaging, Check_MK will compute the average of "
+                          "the CPU utilization over a given interval. If you have defined "
+                          "alerting levels then these will automatically be applied on the "
+                          "averaged value. This helps to mask out short peaks. "),
+                 unit = _("minutes"),
+                 minvalue = 1,
+                 default_value = 15,
+             )
+           ),
+           ( "virtual_levels",
+              Tuple(
+                title = _("Virtual memory usage"),
+                elements = [
+                    Filesize(title = _("Warning at")),
+                    Filesize(title = _("Critical at")),
+                ],
+           )),
+           ( "resident_levels",
+              Tuple(
+                title = _("Physical memory usage"),
+                elements = [
+                    Filesize(title = _("Warning at")),
+                    Filesize(title = _("Critical at")),
+                ],
+           )),
+            ('handle_count', Tuple(
+                title = _('Handle Count (Windows only)'),
+                help  = _("The number of object handles in the processes object table. This includes open handles to "
+                          "threads, files and other resources like registry keys."),
+                elements = [
+                    Integer(
+                        title = _("Warning above"),
+                        unit = _("handles"),
+                    ),
+                    Integer(
+                        title = _("Critical above"),
+                        unit = _("handles"),
+                    ),
+                ],
+            )),
         ],
-        optional_keys = [],
+        optional_keys = ['handle_count', 'cpulevels', 'cpu_average', 'virtual_levels', 'resident_levels'],
     ),
     match = 'all',
 )
@@ -451,6 +480,38 @@ register_check_parameters(
     ),
     "first"
 )
+
+register_check_parameters(
+    subgroup_applications,
+    "mq_queues",
+    _("Apache ActiveMQ Queue lengths"),
+    Dictionary(
+        elements = [
+            ("size",
+            Tuple(
+               title = _("Levels for the queue length"),
+               help = _("Set the maximum and minimum length for the queue size"),
+               elements = [
+                  Integer(title="Warning at a size of"),
+                  Integer(title="Critical at a size of"),
+               ]
+            )),
+            ("consumerCount",
+            Tuple(
+               title = _("Levels for the consumer count"),
+               help = _("Consumer Count is the size of connected consumers to a queue"),
+               elements = [
+                  Integer(title="Warning less then"),
+                  Integer(title="Critical less then"),
+               ]
+            )),
+        ]
+    ),
+    TextAscii( title=_("Queue Name"),
+    help=_("The name of the queue like in the Apache queue manager")),
+    "first",
+)
+
 
 register_check_parameters(
     subgroup_applications,
@@ -729,6 +790,33 @@ register_check_parameters(
 )
 
 register_check_parameters(
+   subgroup_environment,
+    "apc_power",
+    _("APC Power Consumption"),
+    Tuple(
+        title = _("Power Comsumption of APC Devices"),
+        elements = [
+            Integer(
+                title = _("Warning below"),
+                unit = _("W"),
+                default_value = 20,
+            ),
+            Integer(
+                title = _("Critical below"),
+                unit = _("W"),
+                default_value = 1,
+            ),
+        ]
+    ),
+    TextAscii(
+        title = _("Phase"),
+        help = _("The identifier of the phase the power is related to."),
+    ),
+    None,
+    "first"
+)
+
+register_check_parameters(
     subgroup_storage,
     "fileinfo",
     _("Size and age of single files"),
@@ -824,7 +912,7 @@ register_rule(group + '/' + subgroup_storage,
                   '<tt>/var/log/apache/*.log</tt>. For files contained in a group '
                   'the inventory will automatically create a group service instead '
                   'of single services for each file. This rule also applies when '
-                  'you use manual configured checks instead of inventorized ones.'),
+                  'you use manually configured checks instead of inventorized ones.'),
     valuespec = ListOf(
       Tuple(
           help = _("This defines one file grouping pattern"),
@@ -883,6 +971,42 @@ register_check_parameters(
                     elements = [
                       Age(title = _("Warning if older than")),
                       Age(title = _("Critical if older than")),
+                    ]
+                )
+            ),
+            ("minsize_smallest",
+                Tuple(
+                    title = _("Minimal size of smallest file"),
+                    elements = [
+                      Filesize(title = _("Warning if below")),
+                      Filesize(title = _("Critical if below")),
+                    ]
+                )
+            ),
+            ("maxsize_smallest",
+                Tuple(
+                    title = _("Maximal size of smallest file"),
+                    elements = [
+                      Filesize(title = _("Warning if below")),
+                      Filesize(title = _("Critical if below")),
+                    ]
+                )
+            ),
+            ("minsize_largest",
+                Tuple(
+                    title = _("Minimal size of largest file"),
+                    elements = [
+                      Filesize(title = _("Warning if above")),
+                      Filesize(title = _("Critical if above")),
+                    ]
+                )
+            ),
+            ("maxsize_largest",
+                Tuple(
+                    title = _("Maximal size of largest file"),
+                    elements = [
+                      Filesize(title = _("Warning if above")),
+                      Filesize(title = _("Critical if above")),
                     ]
                 )
             ),
@@ -1141,17 +1265,6 @@ register_check_parameters(
                 ),
                 title = _("Access point name"),
             add_label = _("Add name"))
-           ),
-           ( "ap_model",
-            ListOf(
-                Tuple(
-                    elements = [
-                        TextAscii(title = _("AP model")),
-                        MonitoringState( title=_("State when missing"), default_value = 2)
-                    ]
-                ),
-                title = _("Access point device id"),
-            add_label = _("Add id"))
            )
         ]
     ),
@@ -1352,8 +1465,6 @@ register_check_parameters(
     has_inventory = False,
 )
 
-
-
 register_check_parameters(
     subgroup_applications,
     "msx_queues",
@@ -1364,17 +1475,17 @@ register_check_parameters(
             Integer(title = _("Warning if above"), unit = _("E-Mails")),
             Integer(title = _("Critical if above"), unit = _("E-Mails"))
         ]),
-        OptionalDropdownChoice(
-            title = _("Explicit Queue Names"),
-            help = _("Select queue names that the rule should apply"),
-           choices = [
-              ( "Active Remote Delivery",  _("Active Remote Delivery") ),
-              ( "Retry Remote Delivery",   _("Retry Remote Delivery") ),
-              ( "Active Mailbox Delivery", _("Active Mailbox Delivery") ),
-              ( "Poison Queue Length",     _("Poison Queue Length") ),
-              ],
-           otherlabel = _("specify manually ->"),
-           explicit = TextAscii(allow_empty = False)),
+    OptionalDropdownChoice(
+        title = _("Explicit Queue Names"),
+        help = _("Select queue names that the rule should apply"),
+        choices = [
+            ( "Active Remote Delivery",  _("Active Remote Delivery") ),
+            ( "Retry Remote Delivery",   _("Retry Remote Delivery") ),
+            ( "Active Mailbox Delivery", _("Active Mailbox Delivery") ),
+            ( "Poison Queue Length",     _("Poison Queue Length") ),
+        ],
+        otherlabel = _("specify manually ->"),
+        explicit = TextAscii(allow_empty = False)),
     "first"
 )
 
@@ -1390,8 +1501,8 @@ def get_filesystem_valuespec(what):
     vs_subgroup =  [
                     Tuple( title = _("Percentage %s") % title,
                         elements = [
-                            Percentage(title = _("Warning if %s") % course, unit = _("%"), minvalue = 0.0),
-                            Percentage(title = _("Critical if %s") % course, unit = _("%"), minvalue = 0.0),
+                            Percentage(title = _("Warning if %s") % course, unit = "%", minvalue = 0.0),
+                            Percentage(title = _("Critical if %s") % course, unit = "%", minvalue = 0.0),
                         ]
                     ),
                     Tuple( title = _("Absolute %s") % title,
@@ -1466,11 +1577,14 @@ filesystem_elements = [
                 ]
                 )
     ),
+    # Beware: this is a nasty hack that helps us to detect new-style paramters.
+    # Something hat has todo with float/int conversion and has not been documented
+    # by the one who implemented this.
     ( "flex_levels",
       FixedValue(
           None,
           totext = "",
-          title = _("Hidden identifier key for flexible level usage")
+          title = "",
           )),
     (  "magic",
        Float(
@@ -1872,6 +1986,37 @@ register_check_parameters(
 
 register_check_parameters(
     subgroup_os,
+    "memory_multiitem",
+    _("Main memory usage of devices with modules"),
+    Dictionary(
+        help = _("The memory levels for one specific module of this host. This is relevant for hosts that have "
+                 "several distinct memory areas, e.g. pluggable cards"),
+        elements = [
+            ("levels", Alternative(
+                title = _("Memory levels"),
+                elements = [
+                     Tuple(
+                         title = _("Specify levels in percentage of total RAM"),
+                         elements = [
+                             Percentage(title = _("Warning at a memory usage of"), default_value = 80.0, maxvalue = None),
+                             Percentage(title = _("Critical at a memory usage of"), default_value = 90.0, maxvalue = None)]),
+                     Tuple(
+                         title = _("Specify levels in absolute usage values"),
+                         elements = [
+                           Filesize(title = _("Warning if above")),
+                           Filesize(title = _("Critical if above"))]),
+                ])),
+            ],
+        optional_keys = []),
+    TextAscii(
+        title = _("Module name"),
+        allow_empty = False
+    ),
+    "match"
+)
+
+register_check_parameters(
+    subgroup_os,
     "esx_host_memory",
     _("Main memory usage of ESX host system"),
     Tuple(
@@ -1882,6 +2027,46 @@ register_check_parameters(
     None, None
 )
 
+register_check_parameters(
+    subgroup_os,
+    "vm_heartbeat",
+    _("Virtual machine heartbeat status"),
+     Dictionary(
+         optional_keys = False,
+         elements = [
+            ( "heartbeat_missing",
+               MonitoringState(
+                   title = _("No heartbeat"),
+                   help = _("Guest operating system may have stopped responding."),
+                   default_value = 2,
+               )
+            ),
+            ( "heartbeat_intermittend",
+               MonitoringState(
+                   title = _("Intermittent heartbeat"),
+                   help = _("May be due to high guest load."),
+                   default_value = 1,
+               )
+            ),
+             ( "heartbeat_no_tools",
+               MonitoringState(
+                   title = _("Heartbeat tools missing or not installed"),
+                   help = _("No VMWare Tools installed."),
+                   default_value = 1,
+               )
+            ),
+            ( "heartbeat_ok",
+               MonitoringState(
+                   title = _("Heartbeat OK"),
+                   help = _("Guest operating system is responding normally."),
+                   default_value = 0,
+               )
+            ),
+         ]
+      ),
+    None,
+    "dict",
+)
 register_check_parameters(
     subgroup_applications,
     "esx_vsphere_objects",
@@ -2004,6 +2189,55 @@ register_check_parameters(
         default_value = (90.0, 95.0)),
     None, None
 )
+
+register_check_parameters(
+    subgroup_os,
+    "cpu_utilization_multiitem",
+    _("CPU utilization of Devices with Modules"),
+    Dictionary(
+        help = _("The CPU utilization sums up the percentages of CPU time that is used "
+                 "for user processes and kernel routines over all available cores within "
+                 "the last check interval. The possible range is from 0% to 100%"),
+        elements =  [
+                        ("levels", Tuple(
+                            title = _("Alert on too high CPU utilization"),
+                            elements = [
+                                Percentage(title = _("Warning at a utilization of"), default_value=90.0),
+                                Percentage(title = _("Critical at a utilization of"), default_value=95.0)],
+                            ),
+                        ),
+                    ]
+                ),
+    TextAscii(
+        title = _("Module name"),
+        allow_empty = False
+    ),
+    None
+)
+
+register_check_parameters(
+    subgroup_os,
+    "fpga_utilization",
+    _("FPGA utilization"),
+    Dictionary(
+        help = _("Give FPGA utilization levels in percent. The possible range is from 0% to 100%."),
+        elements =  [
+                        ("levels", Tuple(
+                            title = _("Alert on too high FPGA utilization"),
+                            elements = [
+                                Percentage(title = _("Warning at a utilization of"), default_value = 80.0),
+                                Percentage(title = _("Critical at a utilization of"), default_value = 90.0)],
+                            ),
+                        ),
+                    ]
+                ),
+    TextAscii(
+        title = _("FPGA"),
+        allow_empty = False
+    ),
+    None
+)
+
 
 register_check_parameters(
     subgroup_os,
@@ -2209,6 +2443,68 @@ register_check_parameters(
 
 register_check_parameters(
     subgroup_applications,
+    "veeam_backup",
+    _("Veeam: Time since last Backup"),
+    Dictionary(
+        elements = [
+        ("age",
+          Tuple(
+            title = _("Time since end of last backup"),
+            elements = [
+                Age(title = _("Warning if older than"), default_value = 108000),
+                Age(title = _("Critical if older than"), default_value = 172800)
+            ]
+          )
+        )]
+    ),
+    None,
+    None
+)
+
+register_check_parameters(
+    subgroup_applications,
+    "backup_timemachine",
+    _("Age of timemachine backup"),
+    Dictionary(
+        elements = [
+        ("age",
+          Tuple(
+            title = _("Maximum age of latest timemachine backup"),
+            elements = [
+                Age(title = _("Warning if older than"), default_value = 86400),
+                Age(title = _("Critical if older than"), default_value = 172800)
+            ]
+          )
+        )]
+    ),
+    None,
+    None
+)
+
+register_check_parameters(
+    subgroup_applications,
+    "job",
+    _("Age of jobs controlled by mk-job"),
+    Dictionary(
+        elements = [
+        ("age",
+          Tuple(
+            title = _("Maximum time since last start of job execution"),
+            elements = [
+                Age(title = _("Warning if above"), default_value = 0),
+                Age(title = _("Critical if above"), default_value = 0)
+            ]
+          )
+        )]
+    ),
+    TextAscii(
+        title = _("Job name"),
+    ),
+    None
+)
+
+register_check_parameters(
+    subgroup_applications,
     "mssql_counters_locks",
     _("MSSQL Locks"),
     Dictionary(
@@ -2355,6 +2651,35 @@ register_check_parameters(
                     elements = [
                        Percentage(title = _("Warning if above")),
                        Percentage(title = _("Critical if above")),
+                    ]
+                )
+            ),
+        ]),
+    None,
+    "dict"
+)
+
+register_check_parameters(
+    subgroup_applications,
+    "f5_connections",
+    _("F5 Loadbalancer Connections"),
+    Dictionary(
+        elements = [
+            ( "conns",
+                Tuple(
+                    title = _("Max. number of connections"),
+                    elements = [
+                       Integer(title = _("Warning if above"), default_value = 25000 ),
+                       Integer(title = _("Critical if above"), default_value = 30000 ) ,
+                    ]
+                )
+            ),
+            ( "ssl_conns",
+                Tuple(
+                    title = _("Max. number of ssl connections"),
+                    elements = [
+                       Integer(title = _("Warning if above"), default_value = 25000 ),
+                       Integer(title = _("Critical if above"), default_value = 30000 ),
                     ]
                 )
             ),
@@ -2798,6 +3123,46 @@ register_check_parameters(
 
 register_check_parameters(
      subgroup_storage,
+    "multipath_count",
+    _("Multipath Count"),
+    Alternative(
+            title = _("Match type"),
+            elements = [
+                    FixedValue(
+                        None,
+                        title = _("OK if standby count is zero or equals active paths."),
+                        totext  = "",
+                    ),
+                    Dictionary(
+                        title = _("Custom settings"),
+                        elements = [ (element,
+                                      Tuple(
+                                          title = description,
+                                          elements = [
+                                              Integer(title = _("Warning if more than")),
+                                              Integer(title = _("Critical if more than")),
+                                          ]
+                                      )
+                                     ) for (element, description) in [
+                                             ("active",   _("Active paths")),
+                                             ("dead",     _("Dead paths")),
+                                             ("disabled", _("Disabled paths")),
+                                             ("standby",  _("Standby paths")),
+                                             ("unknown",  _("Unknown paths"))
+                                            ]
+                                    ]
+                        ),
+                    ]
+    ),
+    TextAscii(
+        title = _("Path ID")),
+    "first"
+)
+
+
+
+register_check_parameters(
+     subgroup_storage,
     "hpux_multipath",
     _("Multipathing on HPUX - state of paths of a LUN"),
     Tuple(
@@ -2873,6 +3238,39 @@ register_check_parameters(
 )
 
 register_check_parameters(
+    subgroup_applications,
+    "winperf_ts_sessions",
+    _("Windows Terminal Server Sessions"),
+    Dictionary(
+         help = _("This check monitors number of active and inactive terminal "
+                  "server sessions."),
+         elements = [
+             ( "active",
+               Tuple(
+                   title = _("Number of active sessions"),
+                   elements = [
+                       Integer(title = _("Warning if above"),  unit = _("sessions"), default_value = 100),
+                       Integer(title = _("Critical if above"), unit = _("sessions"), default_value = 200),
+                    ],
+               ),
+            ),
+            ( "inactive",
+               Tuple(
+                   title = _("Number of inactive sessions"),
+                   help = _("Levels for the number of sessions that are currently inactive"),
+                   elements = [
+                       Integer(title = _("Warning if above"),  unit = _("sessions"), default_value = 10),
+                       Integer(title = _("Critical if above"), unit = _("sessions"), default_value = 20),
+                    ],
+               ),
+            ),
+         ]
+    ),
+    None,
+    None
+)
+
+register_check_parameters(
     subgroup_storage,
     "raid",
     _("RAID: overall state"),
@@ -2918,6 +3316,26 @@ register_check_parameters(
     TextAscii(
         title = _("Sensor"),
         allow_empty = False),
+     None
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "plugs",
+    _("State of PDU Plugs"),
+    DropdownChoice(
+        help = _("This rule sets the required state of a PDU plug. It is meant to "
+                 "be independent of the hardware manufacturer."),
+        title = _("Required plug state"),
+        choices = [
+                  ( "on", "Plug is ON" ),
+                  ( "off", "Plug is OFF" ),
+                  ],
+        default_value = "on"
+    ),
+    TextAscii(
+        title = _("Plug Item ID number"),
+        allow_empty = True),
      None
 )
 
@@ -3076,15 +3494,53 @@ register_check_parameters(
     subgroup_environment,
     "hw_fans",
     _("FAN speed of Hardware devices"),
-    Tuple(
-        help = _("Levels for the FAN speed of a hardware device like a switch"),
+    Dictionary(
         elements = [
-            Integer(title = _("warning if below"), unit = u"rpm", default_value = 3000),
-            Integer(title = _("critical if below"), unit = u"rpm", default_value = 2500),
-        ]),
+            ("lower",
+            Tuple(
+                help = _("Lower levels for the fan speed of a hardware device"),
+                title = _("Lower levels"),
+                elements = [
+                    Integer(title = _("warning if below"), unit = u"rpm"),
+                    Integer(title = _("critical if below"), unit = u"rpm"),
+                ]),
+            ),
+            ( "upper",
+            Tuple(
+                help = _("Upper levels for the Fan speed of a hardware device"),
+                title = _("Upper levels"),
+                elements = [
+                    Integer(title = _("warning if above"), unit = u"rpm", default_value = 8000),
+                    Integer(title = _("critical if above"), unit = u"rpm", default_value = 8400),
+                ]),
+            ),
+        ],
+        optional_keys = ["upper"],
+    ),
     TextAscii(
         title = _("Fan Name"),
         help = _("The identificator of the fan.")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_os,
+    "pf_used_states",
+    _("Number of used states of OpenBSD PF engine"),
+    Dictionary(
+        elements = [
+            ("used",
+            Tuple(
+                title = _("Limits for the number of used states"),
+                elements = [
+                    Integer(title = _("warning if above")),
+                    Integer(title = _("critical if above")),
+                ]),
+            ),
+        ],
+        optional_keys = [None],
+    ),
+    None,
     "first"
 )
 
@@ -3139,12 +3595,43 @@ register_check_parameters(
 
 register_check_parameters(
     subgroup_environment,
+    "hostsystem_sensors",
+    _("Hostsystem sensor alerts"),
+    ListOf(
+        Dictionary(
+        help     = _("This rule allows to override alert levels for the given sensor names."),
+        elements = [("name", TextAscii(title = _("Sensor name")) ),
+                    ("states", Dictionary(
+                        title = _("Custom states"),
+                        elements = [
+                                (element,
+                                  MonitoringState( title = "Sensor %s" %
+                                                   description, label = _("Set state to"),
+                                                   default_value = int(element) )
+                                ) for (element, description) in [
+                                         ("0", _("OK")),
+                                         ("1", _("WARNING")),
+                                         ("2", _("CRITICAL")),
+                                         ("3", _("UNKNOWN"))
+                                ]
+                        ],
+                    ))],
+        optional_keys = False
+        ),
+        add_label = _("Add sensor name")
+    ),
+    None,
+    "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
     "temperature_auto",
     _("Temperature sensors with builtin levels"),
     None,
     TextAscii(
         title = _("Sensor ID"),
-        help = _("The identificator of the themal sensor.")),
+        help = _("The identificator of the thermal sensor.")),
     "first"
 )
 
@@ -3181,33 +3668,210 @@ register_check_parameters(
    subgroup_environment,
     "apc_symentra",
     _("APC Symmetra Checks"),
-    Tuple(
+    Dictionary(
         elements = [
-            Integer(
-                title = _("Critical Battery Capacity"),
-                help = _("The battery capacity in percent at and below which a critical state is be triggered"),
-                unit = _("%"),
-                default_value = 95,
+            ("levels",
+            Tuple(
+                title = _("Levels of battery parameters during normal operation"),
+                elements = [
+                    Integer(
+                        title = _("Critical Battery Capacity"),
+                        help = _("The battery capacity in percent at and below which a critical state is triggered"),
+                        unit = "%",
+                        default_value = 95,
+                    ),
+                    Integer(
+                        title = _("Critical Battery Temperature"),
+                        help = _("The critical temperature of the battery"),
+                        unit = _("C"),
+                        default_value = 40,
+                    ),
+                    Integer(
+                        title = _("Critical Battery Current"),
+                        help = _("The critical battery current in Ampere"),
+                        unit = _("A"),
+                        default_value = 1,
+                    ),
+                    Integer(
+                        title = _("Critical Battery Voltage"),
+                        help = _("The output voltage at and below which a critical state is triggered."),
+                        unit = _("V"),
+                        default_value = 220,
+                    ),
+                ]
+            )),
+            ("output_load",
+            Tuple(
+              title = _("Current Output Load"),
+              help = _("Here you can set levels on the current percentual output load of the UPS. "
+                       "This load affects the running time of all components being supplied "
+                       "with battery power."),
+              elements = [
+                 Percentage(
+                     title = _("Warning level"),
+                 ),
+                 Percentage(
+                     title = _("Critical level"),
+                 ),
+              ]
+
+            )
             ),
-            Integer(
-                title = _("Critical Battery Temperature"),
-                help = _("The critical temperature of the battery"),
-                unit = _("C"),
-                default_value = 40,
+            ("post_calibration_levels",
+            Dictionary(
+                title = _("Levels of battery parameters after calibration"),
+                help = _("After a battery calibration the battery capacity is reduced until the "
+                         "battery is fully charged again. Here you can specify an alternative lower "
+                         "level in this post-calibration phase. "
+                         "Since apc devices remember the time of the last calibration only "
+                         "as a date, the alternative lower level will be applied on the whole "
+                         "day of the calibration until midnight. You can extend this time period "
+                         "with an additional time span to make sure calibrations occuring just "
+                         "before midnight do not trigger false alarms."
+                ),
+                elements = [
+                    ("altcapacity",
+                    Percentage(
+                        title = _("Alternative critical battery capacity after calibration"),
+                        default_value = 50,
+                    )),
+                    ("additional_time_span",
+                    Integer(
+                        title = ("Extend post-calibration phase by additional time span"),
+                        unit = _("minutes"),
+                        default_value = 0,
+                    )),
+                ],
+                optional_keys = False,
+            )),
+        ],
+        optional_keys = ['post_calibration_levels', 'output_load'],
+    ),
+    None,
+    "first"
+)
+
+register_check_parameters(
+   subgroup_environment,
+   "apc_ats_output",
+   _("APC Automatic Transfer Switch Output"),
+   Dictionary(
+       title = _("Levels for ATS Output parameters"),
+       optional_keys = True,
+       elements = [
+        ("output_voltage_max",
+            Tuple(
+             title = _("Maximum Levels for Voltage"),
+             elements = [
+               Integer(title = _("Warning if above"), unit="Volt"),
+               Integer(title = _("Critical if above"), unit="Volt"),
+            ])),
+        ("output_voltage_min",
+            Tuple(
+             title = _("Minimum Levels for Voltage"),
+             elements = [
+               Integer(title = _("Warning if below"), unit="Volt"),
+               Integer(title = _("Critical if below"), unit="Volt"),
+            ])),
+        ("load_perc_max",
+            Tuple(
+             title = _("Maximum Levels for load in percent"),
+             elements = [
+               Percentage(title = _("Warning if above")),
+               Percentage(title = _("Critical if above")),
+            ])),
+        ("load_perc_min",
+            Tuple(
+             title = _("Minimum Levels for load in percent"),
+             elements = [
+               Percentage(title = _("Warning if below")),
+               Percentage(title = _("Critical if below")),
+            ])),
+
+       ],
+   ),
+   TextAscii( title = _("ID of phase")),
+   "dict",
+)
+
+register_check_parameters(
+   subgroup_environment,
+   "airflow",
+   _("Airflow levels"),
+   Dictionary(
+      title = _("Levels for airflow"),
+      elements = [
+      ("level_low",
+        Tuple(
+          title = _("Lower levels"),
+          elements = [
+            Integer(title = _( "Warning if below"), unit=_("l/s")),
+            Integer(title = _( "Critical if below"), unit=_("l/s"))
+          ]
+        )
+      ),
+      ("level_high",
+        Tuple(
+          title = _("Upper levels"),
+          elements = [
+            Integer(title = _( "Warning if above"), unit=_("l/s")),
+            Integer(title = _( "Critical if above"), unit=_("l/s"))
+          ]
+        )
+      ),
+      ]
+   ),
+   None,
+   None,
+)
+
+
+register_check_parameters(
+   subgroup_environment,
+    "ups_capacity",
+    _("UPS Capacity"),
+    Dictionary(
+        title = _("Levels for battery parameters"),
+        optional_keys = False,
+        elements = [
+        ("capacity",
+            Tuple(
+                title = _("Battery Capacity"),
+                elements = [
+                    Integer(
+                        title = _("Warning Level"),
+                        help = _("The battery capacity in percent at and below which a warning state is triggered"),
+                        unit = "%",
+                        default_value = 95,
+                    ),
+                    Integer(
+                        title = _("Critical Level"),
+                        help = _("The battery capacity in percent at and below which a critical state is triggered"),
+                        unit = "%",
+                        default_value = 90,
+                    ),
+                ],
             ),
-            Integer(
-                title = _("Critical Battery Current"),
-                help = _("The critical battery current in Ampere"),
-                unit = _("A"),
-                default_value = 1,
+        ),
+        ("battime",
+            Tuple(
+                title = _("Time Left on Battery"),
+                elements = [
+                    Integer(
+                        title = _("Warning Level"),
+                        help = _("Time left on Battery at and below which a warning state is triggered"),
+                        unit = _("min"),
+                        default_value = 0,
+                    ),
+                    Integer(
+                        title = _("Critical Level"),
+                        help = _("Time Left on Battery at and below which a critical state is triggered"),
+                        unit = _("min"),
+                        default_value = 0,
+                    ),
+                ],
             ),
-            Integer(
-                title = _("Critical Battery Voltage"),
-                help = _("The output voltage at and below which a critical state is triggered."),
-                unit = _("V"),
-                default_value = 220,
-            ),
-        ]
+        )],
     ),
     None,
     "first"
@@ -3559,6 +4223,26 @@ register_check_parameters(
     "first"
 )
 
+register_check_parameters(
+    subgroup_applications,
+    "windows_updates",
+    _("WSUS"),
+    Tuple(
+        title = _("Parameters for the Windows Update Check with WSUS"),
+        elements = [
+                Integer(title = _("Warning level for important updates")),
+                Integer(title = _("Critical level for important updates")),
+                Integer(title = _("Warning level for optional updates")),
+                Integer(title = _("Critical level for optional updates")),
+                Age(title = _("Warning level for time until forced reboot"), default_value = 604800),
+                Age(title = _("Critical level for time until forced reboot"), default_value = 172800),
+                Checkbox(title = _("display all important updates verbosely"), default_value = True),
+              ],
+    ),
+    None,
+    "first"
+)
+
 register_check_parameters(subgroup_applications,
     "logwatch_ec",
     _('Logwatch Event Console Forwarding'),
@@ -3790,9 +4474,40 @@ register_check_parameters(
                      default_value = 15,
                  )
                ),
+               ( "virtual_levels",
+                  Tuple(
+                    title = _("Virtual memory usage"),
+                    elements = [
+                        Filesize(title = _("Warning at")),
+                        Filesize(title = _("Critical at")),
+                    ],
+               )),
+               ( "resident_levels",
+                  Tuple(
+                    title = _("Physical memory usage"),
+                    elements = [
+                        Filesize(title = _("Warning at")),
+                        Filesize(title = _("Critical at")),
+                    ],
+               )),
+               ('handle_count', Tuple(
+                   title = _('Handle Count (Windows only)'),
+                   help  = _("The number of object handles in the process's object table. This includes open handles to "
+                             "threads, files and other resources like registry keys."),
+                   elements = [
+                       Integer(
+                           title = _("Warning above"),
+                           unit = _("handles"),
+                       ),
+                       Integer(
+                           title = _("Critical above"),
+                           unit = _("handles"),
+                       ),
+                   ],
+               )),
 
             ],
-            optional_keys = [ "user", "cpulevels", "cpu_average" ]),
+            optional_keys = [ "user", "cpulevels", "cpu_average", "virtual_levels", "resident_levels", "handle_count" ]),
         forth = ps_convert_from_tuple,
     ),
     TextAscii(
@@ -3803,5 +4518,5 @@ register_check_parameters(
         regex_error = _("Please use only a-z, A-Z, 0-9, space, underscore, "
                         "dot and hyphon for your service description"),
     ),
-    "first", True
+    "first", False
 )

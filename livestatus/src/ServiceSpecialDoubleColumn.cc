@@ -27,6 +27,8 @@
 #include "logger.h"
 #include "time.h"
 
+extern int      interval_length;
+
 double ServiceSpecialDoubleColumn::getValue(void *data)
 {
     data = shiftPointer(data);
@@ -36,28 +38,29 @@ double ServiceSpecialDoubleColumn::getValue(void *data)
     switch (_type) {
         case SSDC_STALENESS:
         {
-            bool is_cmk_passive = !strncmp(svc->check_command_ptr->name, "check_mk-", 9);
-
             time_t check_result_age = time(0) - svc->last_check;
-            service *tmp_svc;
+            if (svc->check_interval != 0)
+                return check_result_age / (svc->check_interval * interval_length);
 
-            // check_mk PASSIVE CHECK: Find check-mk service and get its check interval
+            // check_mk PASSIVE CHECK without check interval uses
+            // the check interval of its check-mk service
+            bool is_cmk_passive = !strncmp(svc->check_command_ptr->name, "check_mk-", 9);
             if (is_cmk_passive) {
                 host *host = svc->host_ptr;
+                service *tmp_svc;
                 servicesmember *svc_member = host->services;
-                double check_interval = 1;
                 while (svc_member != 0) {
                     tmp_svc = svc_member->service_ptr;
                     if (!strncmp(tmp_svc->check_command_ptr->name, "check-mk", 9)) {
-                        return check_result_age / ((tmp_svc->check_interval == 0 ? 1 : tmp_svc->check_interval) * 60);
+                        return check_result_age / ((tmp_svc->check_interval == 0 ? 1 : tmp_svc->check_interval) * interval_length);
                     }
                     svc_member = svc_member->next;
                 }
-                return 1; // Shouldnt happen! We always except check-mk service
+                return 1; // Shouldnt happen! We always expect a check-mk service
             }
-            else // Other non-cmk passive and active checks
+            else // Other non-cmk passive and active checks without check_interval
             {
-                return check_result_age / ((svc->check_interval == 0 ? 1 : svc->check_interval) * 60);
+                return check_result_age / interval_length;
             }
         }
     }

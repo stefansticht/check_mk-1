@@ -71,6 +71,7 @@ register_configvar(group,
             default_value = False),
     domain = "multisite")
 
+
 register_configvar(group,
     "buffered_http_stream",
     Checkbox(title = _("Buffered HTTP stream"),
@@ -186,7 +187,8 @@ register_configvar(group,
                        "is shown in the main (right) frame. You can replace this with any other "
                        "URL you like here."),
               size = 80,
-              default_value = "dashboard.py"),
+              default_value = "dashboard.py",
+              attrencode = True),
     domain = "multisite")
 
 register_configvar(group,
@@ -196,7 +198,8 @@ register_configvar(group,
                        "using OMD then you can embed a <tt>%s</tt>. This will be replaced by the name "
                        "of the OMD site."),
               size = 80,
-              default_value = u"Check_MK %s"),
+              default_value = u"Check_MK %s",
+              attrencode = True),
     domain = "multisite")
 
 register_configvar(group,
@@ -215,12 +218,25 @@ register_configvar(group,
     domain = "multisite")
 
 register_configvar(group,
+    "escape_plugin_output",
+    Checkbox(title = _("Escape HTML codes in plugin output"),
+             label = _("Prevent loading HTML from plugin output or log messages"),
+             help = _("By default, for security reasons, Multisite does not interpret any HTML "
+                      "code received from external sources, like plugin output or log messages. "
+                      "If you are really sure what you are doing and need to have HTML codes, like "
+                      "links rendered, disable this option. Be aware, you might open the way "
+                      "for several injection attacks."),
+            default_value = True),
+    domain = "multisite")
+
+
+register_configvar(group,
     "multisite_draw_ruleicon",
-    Checkbox(title = _("Show icon for WATO parameter editor"),
+    Checkbox(title = _("Show icon linking to WATO parameter editor for services"),
              label = _("Show WATO icon"),
              help = _("When enabled a rule editor icon is displayed for each "
                       "service in the multisite views. It is only displayed if the user "
-                      "does have the permission to edit rules"),
+                      "does have the permission to edit rules."),
             default_value = False),
     domain = "multisite")
 
@@ -283,15 +299,16 @@ register_configvar(group,
                     title = _("Adhoc comment"),
                     help    = _("The comment which is automatically sent with an adhoc downtime"),
                     size = 80,
-                    allow_empty = False
+                    allow_empty = False,
+                    attrencode = True,
                     )),
             ],
         ),
         title = _("Adhoc downtime"),
         label = _("Enable adhoc downtime"),
         help  = _("This setting allows to set an adhoc downtime comment and its duration. "
-                  "When enabled a new button <tt>Adhoc downtime for xx minutes</tt> will "
-                  "be available in the command form"),
+                  "When enabled a new button <i>Adhoc downtime for __ minutes</i> will "
+                  "be available in the command form."),
     ),
     domain = "multisite",
 )
@@ -333,6 +350,7 @@ register_configvar(group,
             help    = _("Configure the name of the environment variable to read "
                         "from the incoming HTTP requests"),
             default_value = 'REMOTE_USER',
+            attrencode = True,
         ),
         title = _("Authenticate users by incoming HTTP requests"),
         label = _("Activate HTTP header authentication (Warning: Only activate "
@@ -485,10 +503,12 @@ register_configvar(group,
                   'during each page rendering. Each connector can then specify if it wants to perform '
                   'any actions. For example the LDAP connector will start the sync once the cached user '
                   'information are too old.'),
-        default_value = [ 'wato_users', 'page' ],
+        default_value = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ],
         choices       = [
-            ('wato_users', 'When opening the users configuration page'),
-            ('page',       'During regular page processing'),
+            ('page',                      'During regular page processing'),
+            ('wato_users',                'When opening the users configuration page'),
+            ('wato_pre_activate_changes', 'Before activating the changed configuration'),
+            ('wato_snapshot_pushed',      'On a remote site, when it receives a new configuration'),
         ],
         allow_empty   = True,
     ),
@@ -499,7 +519,7 @@ register_configvar(group,
     "ldap_connection",
     Dictionary(
         title = _("LDAP Connection Settings"),
-        help  = _("This option configures all LDAP specific connection options. These options "
+        help  = _("This section configures all LDAP specific connection options. These options "
                   "are used by the LDAP user connector."),
         elements = [
             ("server", TextAscii(
@@ -507,6 +527,7 @@ register_configvar(group,
                 help = _("Set the host address of the LDAP server. Might be an IP address or "
                          "resolvable hostname."),
                 allow_empty = False,
+                attrencode = True,
             )),
             ('failover_servers', ListOfStrings(
                 title = _('Failover Servers'),
@@ -527,7 +548,13 @@ register_configvar(group,
             )),
             ("use_ssl", FixedValue(
                 title  = _("Use SSL"),
-                help   = _("Connect to the LDAP server with a SSL encrypted connection."),
+                help   = _("Connect to the LDAP server with a SSL encrypted connection. You might need "
+                           "to configure the OpenLDAP installation on your monitoring server to accept "
+                           "the certificates of the LDAP server. This is normally done via system wide "
+                           "configuration of the CA certificate which signed the certificate of the LDAP "
+                           "server. Please refer to the <a target=\"_blank\" "
+                           "href=\"http://mathias-kettner.de/checkmk_multisite_ldap_integration.html\">"
+                           "documentation</a> for details."),
                 value  = True,
                 totext = _("Encrypt the network connection using SSL."),
             )),
@@ -573,7 +600,7 @@ register_configvar(group,
                     LDAPDistinguishedName(
                         title = _("Bind DN"),
                         help  = _("Specify the distinguished name to be used to bind to "
-                                  "the LDAP directory."),
+                                  "the LDAP directory, e. g. <tt>CN=ldap,OU=users,DC=example,DC=com</tt>"),
                         size = 63,
                     ),
                     Password(
@@ -588,7 +615,7 @@ register_configvar(group,
                 help = _("LDAP searches can be performed in paginated mode, for example to improve "
                          "the performance. This enables pagination and configures the size of the pages."),
                 minvalue = 1,
-                default_value = 100,
+                default_value = 1000,
             )),
             ("response_timeout", Integer(
                 title = _("Response Timeout (sec)"),
@@ -598,6 +625,7 @@ register_configvar(group,
             )),
         ],
         optional_keys = ['no_persistent', 'use_ssl', 'bind', 'page_size', 'response_timeout', 'failover_servers'],
+        default_keys = ['page_size']
     ),
     domain = "multisite",
     in_global_settings = False,
@@ -607,19 +635,20 @@ register_configvar(group,
     "ldap_userspec",
     Dictionary(
         title = _("LDAP User Settings"),
-        help  = _("This option configures all user related LDAP options. These options "
+        help  = _("This section configures all user related LDAP options. These options "
                   "are used by the LDAP user connector to find the needed users in the LDAP directory."),
         elements = [
             ("dn", LDAPDistinguishedName(
                 title = _("User Base DN"),
-                help  = _("The base distinguished name to be used when performing user account "
-                          "related queries to the LDAP server."),
+                help  = _("Give a base distinguished name here, e. g. <tt>OU=users,DC=example,DC=com</tt><br> "
+                          "All user accounts to synchronize must be located below this one."),
                 size = 80,
             )),
             ("scope", DropdownChoice(
                 title = _("Search Scope"),
-                help  = _("Scope to be used in LDAP searches. In most cases \"sub\" is the best choice. "
-                          "It searches for matching objects in the given base and the whole subtree."),
+                help  = _("Scope to be used in LDAP searches. In most cases <i>Search whole subtree below "
+                          "the base DN</i> is the best choice. "
+                          "It searches for matching objects recursively."),
                 choices = [
                     ("sub",  _("Search whole subtree below the base DN")),
                     ("base", _("Search only the entry at the base DN")),
@@ -631,21 +660,29 @@ register_configvar(group,
                 title = _("Search Filter"),
                 help = _("Using this option you can define an optional LDAP filter which is used during "
                          "LDAP searches. It can be used to only handle a subset of the users below the given "
-                         "base DN."),
+                         "base DN.<br><br>Some common examples:<br><br> "
+                         "All user objects in LDAP:<br> "
+                         "<tt>(&(objectclass=user)(objectcategory=person))</tt><br> "
+                         "Members of a group:<br> "
+                         "<tt>(&(objectclass=user)(objectcategory=person)(memberof=CN=cmk-users,OU=groups,DC=example,DC=com))</tt><br>"),
                 size = 80,
                 default_value = lambda: userdb.ldap_filter('users', False),
+                attrencode = True,
             )),
             ("filter_group", LDAPDistinguishedName(
-                title = _("Filter Group"),
+                title = _("Filter Group (Only use in special situations)"),
                 help = _("Using this option you can define the DN of a group object which is used to filter the users. "
                          "Only members of this group will then be synchronized. This is a filter which can be "
                          "used to extend capabilities of the regular \"Search Filter\". Using the search filter "
                          "you can only define filters which directly apply to the user objects. To filter by "
-                         "group memberships, you can use the \"memberOf\" attribute of the user objects in some "
+                         "group memberships, you can use the <tt>memberOf</tt> attribute of the user objects in some "
                          "directories. But some directories do not have such attributes because the memberships "
-                         "are stored in the group objects as e.g. \"member\" attributes. You should use the "
+                         "are stored in the group objects as e.g. <tt>member</tt> attributes. You should use the "
                          "regular search filter whenever possible and only use this filter when it is really "
-                         "neccessary."),
+                         "neccessary. Finally you can say, you should not use this option when using Active Directory. "
+                         "This option is neccessary in OpenLDAP directories when you like to filter by group membership.<br><br>"
+                         "If using, give a plain distinguished name of a group here, e. g. "
+                         "<tt>CN=cmk-users,OU=groups,DC=example,DC=com</tt>"),
                 size = 80,
             )),
             ("user_id", TextAscii(
@@ -654,6 +691,7 @@ register_configvar(group,
                           "unique values to make an user identifyable by the value of this "
                           "attribute."),
                 default_value = lambda: userdb.ldap_attr('user_id'),
+                attrencode = True,
             )),
             ("lower_user_ids", FixedValue(
                 title  = _("Lower Case User-IDs"),
@@ -661,8 +699,19 @@ register_configvar(group,
                 value  = True,
                 totext = _("Enforce lower case User-IDs."),
             )),
+            ("user_id_umlauts", DropdownChoice(
+                title = _("Umlauts in User-IDs"),
+                help  = _("Multisite does not support umlauts in User-IDs at the moment. To deal "
+                          "with LDAP users having umlauts in their User-IDs you have the following "
+                          "choices."),
+                choices = [
+                    ("replace",  _("Replace umlauts like \"&uuml;\" with \"ue\"")),
+                    ("skip",     _("Skip users with umlauts in their User-IDs")),
+                ],
+                default_value = "replace",
+            )),
         ],
-        optional_keys = ['scope', 'filter', 'filter_group', 'user_id', 'lower_user_ids'],
+        optional_keys = ['filter', 'filter_group', 'user_id', 'lower_user_ids', ],
     ),
     domain = "multisite",
     in_global_settings = False,
@@ -672,20 +721,21 @@ register_configvar(group,
     "ldap_groupspec",
     Dictionary(
         title = _("LDAP Group Settings"),
-        help  = _("This option configures all group related LDAP options. These options "
+        help  = _("This section configures all group related LDAP options. These options "
                   "are only needed when using group related attribute synchonisation plugins."),
         elements = [
             ("dn", LDAPDistinguishedName(
                 title = _("Group Base DN"),
-                help  = _("The base distinguished name to be used when performing group account "
-                          "related queries to the LDAP server."),
+                help  = _("Give a base distinguished name here, e. g. <tt>OU=groups,DC=example,DC=com</tt><br> "
+                          "All groups used must be located below this one."),
                 size = 80,
             )),
             ("scope", DropdownChoice(
                 title = _("Search Scope"),
-                help  = _("Scope to be used in group related LDAP searches. In most cases \"sub\" "
+                help  = _("Scope to be used in group related LDAP searches. In most cases "
+                          "<i>Search whole subtree below the base DN</i> "
                           "is the best choice. It searches for matching objects in the given base "
-                          "and the whole subtree."),
+                          "recursively."),
                 choices = [
                     ("sub",  _("Search whole subtree below the base DN")),
                     ("base", _("Search only the entry at the base DN")),
@@ -697,17 +747,20 @@ register_configvar(group,
                 title = _("Search Filter"),
                 help = _("Using this option you can define an optional LDAP filter which is used "
                          "during group related LDAP searches. It can be used to only handle a "
-                         "subset of the groups below the given base DN."),
+                         "subset of the groups below the given base DN.<br><br>"
+                         "e.g. <tt>(objectclass=group)</tt>"),
                 size = 80,
                 default_value = lambda: userdb.ldap_filter('groups', False),
+                attrencode = True,
             )),
             ("member", TextAscii(
                 title = _("Member Attribute"),
                 help  = _("The attribute used to identify users group memberships."),
                 default_value = lambda: userdb.ldap_attr('member'),
+                attrencode = True,
             )),
         ],
-        optional_keys = ['scope', 'filter', 'member'],
+        optional_keys = ['filter', 'member'],
     ),
     domain = "multisite",
     in_global_settings = False,
@@ -731,11 +784,12 @@ register_configvar(group,
 
 register_configvar(group,
     "ldap_cache_livetime",
-    Integer(
+    Age(
         title = _('LDAP Cache Livetime'),
         help  = _('This option defines the maximum age for using the cached LDAP data. The time of the '
                   'last LDAP synchronisation is saved and checked on every request to the multisite '
-                  'interface. Once the cache gets outdated, a new synchronisation job is started.'),
+                  'interface. Once the cache gets outdated, a new synchronisation job is started.<br><br>'
+                  'Please note: Passwords of the users are never stored in WATO and therefor never cached!'),
         minvalue = 1,
         default_value = 300,
     ),
@@ -749,6 +803,7 @@ register_configvar(group,
         Filename(
             label = _("Absolute path to log file"),
             default = defaults.var_dir + '/web/ldap-debug.log',
+            trans_func = userdb.ldap_replace_macros,
         ),
           title = _("LDAP connection diagnostics"),
           label = _("Activate logging of LDAP transactions into a logfile"),
@@ -866,7 +921,7 @@ register_configvar(group,
                  "off locking altogether."),
         choices = [
             ('abort', _("Abort with an error")),
-            ('ait' ,  _("Wait until the other has finished") ),
+            ('wait' , _("Wait until the other has finished") ),
             (None ,   _("Disable locking") ),
             ]),
     need_restart = False
@@ -896,13 +951,18 @@ register_configvar(group,
 
 register_configvar(group,
     "debug_log",
-    Optional(Filename(label = _("Absolute path to log file")),
-          title = _("Logfile for debugging errors in checks"),
-          label = _("Activate logging errors into a logfile"),
-          help = _("If this option is used and set to a filename, Check_MK will create a debug logfile "
-                   "containing details about failed checks (those which have state UNKNOWN "
-                   "and the output UNKNOWN - invalid output from plugin.... Per default no "
-                   "logfile is written.")),
+    Transform(
+        Checkbox(
+            label = _("Write exceptions to <tt>%s/crashed-checks.log</tt>" % defaults.log_dir),
+        ),
+        title = _("Log exceptions in check plugins"),
+        help = _("If this option is enabled Check_MK will create a debug logfile at "
+                 "<tt>%s/chrashed-checks.log</tt>"
+                 "containing details about failed checks (those which have the state <i>UNKNOWN "
+                 "and the output UNKNOWN - invalid output from plugin</i>...) Per default no "
+                 "logfile is written.") % defaults.log_dir,
+        forth = lambda x: not not x,
+    ),
     need_restart = True)
 
 register_configvar(group,
@@ -949,14 +1009,50 @@ register_configvar(group,
                       "and children_system_time")),
     need_restart = True)
 
+register_configvar(group,
+    "use_dns_cache",
+    Checkbox(
+        title = _("Use DNS lookup cache"),
+        label = _("Prevent DNS lookups by use of a cache file"),
+        help = _("When this option is enabled (which is the default), then Check_MK tries to "
+                 "prevent IP address lookups during the configuration generation. This can speed "
+                 "up this process greatly when you have a larger number of hosts. The cache is stored "
+                 "in a simple file. Note: when the cache is enabled then changes of the IP address "
+                 "of a host in your name server will not be detected immediately. If you need an "
+                 "immediate update then simply disable the cache once, activate the changes and "
+                 "enabled it again. OMD based installations automatically update the cache once "
+                 "a day."),
+        default_value = True,
+    ),
+    need_restart = True
+)
+
+register_configvar(group,
+    "use_inline_snmp",
+    Checkbox(
+        title = _("Use Inline SNMP"),
+        label = _("Enable inline SNMP (directly use net-snmp libraries)"),
+        help = _("By default Check_MK uses command line calls of Net-SNMP tools like snmpget or "
+                 "snmpwalk to gather SNMP information. For each request a new command line "
+                 "program is being executed. It is now possible to use the inline SNMP implementation "
+                 "which calls the net-snmp libraries directly via its python bindings. This "
+                 "should increase the performance of SNMP checks in a significant way. The inline "
+                 "SNMP mode is a feature which improves the performance for large installations and "
+                 "only available via our subscription."),
+        default_value = False
+    ),
+    need_restart = True
+)
+
 group = _("Inventory - automatic service detection")
 
 register_configvar(group,
     "inventory_check_interval",
     Optional(
         Integer(title = _("Do inventory check every"),
-                label = _("minutes"),
-                min_value = 1),
+                unit = _("minutes"),
+                min_value = 1,
+                default_value = 120),
         title = _("Enable regular inventory checks"),
         help = _("If enabled, Check_MK will create one additional check per host "
                  "that does a regular check, if the inventory would find new services "
@@ -974,7 +1070,33 @@ register_configvar(group,
             (1, _("Warning") ),
             (2, _("Critical") ),
             (3, _("Unknown") ),
-            ]))
+            ],
+        default_value = 1))
+
+register_configvar(group,
+    "inventory_check_do_scan",
+    DropdownChoice(
+        title = _("Inventory check for SNMP devices"),
+        choices = [
+           ( True, _("Perform full SNMP scan always, detect new check types") ),
+           ( False, _("Just rely on existing check files, detect new items only") )
+        ]
+    ))
+
+register_configvar(group,
+    "inventory_check_autotrigger",
+    Checkbox(
+        title = _("Inventory triggers inventory check"),
+        label = _("Automatically schedule inventory check after service configuration changes"),
+        help = _("When this option is enabled then after each change of the service "
+                 "configuration of a host via WATO - may it be via manual changes or a bulk "
+                 "inventory - the inventory check is automatically rescheduled in order "
+                 "to reflect the new service state correctly immediately."),
+        default_value = True,
+    ))
+
+
+
 
 _if_portstate_choices = [
                         ( '1', 'up(1)'),
@@ -1131,7 +1253,6 @@ register_configvar(group,
                       "after each inventory, i.e. create one file per host. This is the same "
                       "as adding the option <tt>-u</tt> to each call of <tt>-I</tt> on the "
                       "command line.")))
-
 
 group = _("Check configuration")
 
@@ -1341,8 +1462,8 @@ register_rule(group,
         title = _("Enable/disable passive checks for services"),
         help = _("This setting allows you to disable the processing of passiv check results for a "
                  "service."),
-        choices = [ ("1", _("Enable processing of passiv check results")),
-                    ("0", _("Disable processing of passiv check results")) ],
+        choices = [ ("1", _("Enable processing of passive check results")),
+                    ("0", _("Disable processing of passive check results")) ],
         ),
         itemtype = "service")
 
@@ -1413,11 +1534,19 @@ register_rule(
                  "whether a host is up. In some cases this is not possible, however. With this rule "
                  "you can specify an alternative way of determining the host's state."),
         choices = [
-          ( "ping",    _("PING (ICMP echo request)") ),
-          ( "tcp" ,    _("TCP Connect"), Integer(label = _("to port:"), minvalue=1, maxvalue=65535, default_value=80 )),
-          ( "ok",      _("Always assume host to be up") ),
-          ( "agent",   _("Use the status of the Check_MK Agent") ),
-          ( "service", _("Use the status of the service..."), TextUnicode(label = ":", size=32, allow_empty=False )),
+          ( "ping",       _("PING (active check with ICMP echo request)") ),
+          ( "smart",      _("Smart PING (only with Check_MK Micro Core)") ),
+          ( "tcp" ,       _("TCP Connect"), Integer(label = _("to port:"), minvalue=1, maxvalue=65535, default_value=80 )),
+          ( "ok",         _("Always assume host to be up") ),
+          ( "agent",      _("Use the status of the Check_MK Agent") ),
+          ( "service",    _("Use the status of the service..."),
+            TextUnicode(
+                label = ":",
+                size = 45,
+                allow_empty = False,
+                attrencode = True,
+            )),
+          ( "custom",     _("Use a custom check plugin..."), PluginCommandLine() ),
         ],
         default_value = "ping",
         html_separator = " ",
@@ -1434,6 +1563,7 @@ register_rule(group,
         help = _("This ruleset is deprecated and will be removed soon: "
                  "it changes the default check_command for a host check. You need to "
                  "define that command manually in your monitoring configuration."),
+        attrencode = True,
     ),
 )
 
@@ -1442,7 +1572,7 @@ def get_snmp_checktypes():
    types = [ (cn, (c['title'] != cn and '%s: ' % cn or '') + c['title'])
              for (cn, c) in checks.items() if c['snmp'] ]
    types.sort()
-   return types
+   return [ (None, _('All SNMP Checks')) ] + types
 
 register_rule(group,
     "snmp_check_interval",
@@ -1454,12 +1584,13 @@ register_rule(group,
         elements = [
             DropdownChoice(
                 title = _("Checktype"),
-                choices = [ (None, _('All SNMP Checks')) ] + get_snmp_checktypes(),
+                choices = get_snmp_checktypes,
             ),
             Integer(
                 title = _("Do check every"),
                 unit = _("minutes"),
                 min_value = 1,
+                default_value = 1,
             ),
         ]
     )
@@ -1655,22 +1786,43 @@ register_rule(group,
 register_rule(group,
     "extra_service_conf:notes_url",
     TextAscii(
-        label = _("Url:"),
-        title = _("Notes url for Services"),
+        label = _("URL:"),
+        title = _("Notes URL for Services"),
         help = _("With this setting you can set links to documentations "
                  "for each service"),
-        ),
+        attrencode = True,
+    ),
     itemtype = "service")
 
 register_rule(group,
     "extra_host_conf:notes_url",
     TextAscii(
-        label = _("Url:"),
-        title = _("Notes url for Hosts"),
+        label = _("URL:"),
+        title = _("Notes URL for Hosts"),
         help = _("With this setting you can set links to documentations "
                  "for Hosts"),
-        ),
-    )
+        attrencode = True,
+    ),
+)
+
+register_rule(group,
+   "extra_service_conf:display_name",
+   TextUnicode(
+       title = _("Alternative display name for Services"),
+       help = _("This rule set allows you to specify an alternative name "
+                "to be displayed for certain services. This name is available as "
+                "a column when creating new views or modifying existing ones. "
+                "It is always visible in the details view of a service. In the "
+                "availability reporting there is an option for using that name "
+                "instead of the normal service description. It does <b>not</b> automatically "
+                "replace the normal service name in all views.<br><br><b>Note</b>: The "
+                "purpose of this rule set is to define unique names for several well-known "
+                "services. It cannot rename services in general."),
+       size = 64,
+       attrencode = True,
+   ),
+   itemtype = "service")
+
 
 group = "monconf/" + _("Inventory and Check_MK settings")
 
@@ -1714,6 +1866,47 @@ register_rule(group,
              "cluster and the physical nodes after changing this ruleset."),
     itemtype = "service")
 group = "monconf/" + _("Various")
+
+register_rule(group,
+     "clustered_services_mapping",
+     TextAscii(
+        title = _("Explicit mapping of Clustered Services"),
+        help = _( "It's possible to have overlaping nodes between multiple clusters."
+                  "With this rule the direct mapping of services from nodes to the "
+                  "favored Cluster can be done."),
+     ),
+     itemtype = "service",
+     )
+
+register_rule(group,
+    "extra_host_conf:service_period",
+    TimeperiodSelection(
+        title = _("Service period for hosts"),
+        help = _("When it comes to availability reporting, you might want the report "
+                 "to cover only certain time periods, e.g. only Monday to Friday "
+                 "from 8:00 to 17:00. You can do this by specifying a service period "
+                 "for hosts or services. In the reporting you can then decide to "
+                 "include, exclude or ignore such periods und thus e.g. create a report "
+                 "of the availability just within or without these times. <b>Note</b>: Changes in the "
+                 "actual <i>definition</i> of a time period will only be reflected in "
+                 "times <i>after</i> that change. Selecting a different service period "
+                 "will also be reflected in the past.")),
+    )
+
+register_rule(group,
+    "extra_service_conf:service_period",
+    TimeperiodSelection(
+        title = _("Service period for services"),
+        help = _("When it comes to availability reporting, you might want the report "
+                 "to cover only certain time periods, e.g. only Monday to Friday "
+                 "from 8:00 to 17:00. You can do this by specifying a service period "
+                 "for hosts or services. In the reporting you can then decide to "
+                 "include, exclude or ignore such periods und thus e.g. create a report "
+                 "of the availability just within or without these times. <b>Note</b>: Changes in the "
+                 "actual <i>definition</i> of a time period will only be reflected in "
+                 "times <i>after</i> that change. Selecting a different service period "
+                 "will also be reflected in the past.")),
+    itemtype = "service")
 
 class MonitoringIcon(ValueSpec):
     def __init__(self, **kwargs):
@@ -1832,8 +2025,8 @@ _snmpv3_basic_elements = [
              ( "sha", _("SHA1") ),
           ],
           title = _("Authentication protocol")),
-     TextAscii(title = _("Security name")),
-     TextAscii(title = _("Authentication password"))]
+     TextAscii(title = _("Security name"), attrencode = True),
+     Password(title = _("Authentication password"))]
 
 register_rule(group,
     "snmp_communities",
@@ -1841,7 +2034,8 @@ register_rule(group,
        elements = [
            TextAscii(
                title = _("SNMP community (SNMP Versions 1 and 2c)"),
-               allow_empty = False),
+               allow_empty = False,
+               attrencode = True),
            Tuple(
                title = _("Credentials for SNMPv3"),
                elements = _snmpv3_basic_elements),
@@ -1854,7 +2048,7 @@ register_rule(group,
                          ( "AES", _("AES") ),
                       ],
                       title = _("Privacy protocol")),
-                 TextAscii(title = _("Privacy pass phrase")),
+                 Password(title = _("Privacy pass phrase")),
                    ])],
         title = _("SNMP communities of monitored hosts"),
         help = _("By default Check_MK uses the community \"public\" to contact hosts via SNMP. This rule "
@@ -1908,13 +2102,14 @@ register_rule(group,
                  "for the SNMP access to devices."),
         elements = [
             ( "timeout",
-              Integer(
+              Float(
                   title = _("Timeout between retries"),
-                  help = _("A request is sent to the SNMP daemon, than wait up to this "
-                           " number of seconds until retrying."),
+                  help = _("After a request is sent to the remote SNMP agent we will wait up to this "
+                           "number of seconds until assuming the answer get lost and retrying."),
                   default_value = 1,
-                  minvalue = 1,
+                  minvalue = 0.1,
                   maxvalue = 60,
+                  allow_int = True,
                   unit = _("sec"),
               ),
             ),

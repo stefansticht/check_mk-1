@@ -59,14 +59,19 @@ declare_filter(100, FilterText("hostregex",    _("Hostname"),        "host",    
 declare_filter(101, FilterText("host",    _("Hostname (exact match)"),             "host",    "host_name",          "host",    "="),
                           _("Exact match, used for linking"))
 
+declare_filter(102, FilterText("hostalias",   _("Hostalias"),      "host",     "host_alias",      "hostalias",    "~~"),
+                          _("Search field allowing regular expressions and partial matches"))
+
 declare_filter(200, FilterText("serviceregex", _("Service"),         "service", "service_description",   "service", "~~"),
                           _("Search field allowing regular expressions and partial matches"))
 
 declare_filter(201, FilterText("service", _("Service (exact match)"),              "service", "service_description",   "service", "="),
                           _("Exact match, used for linking"))
 
+declare_filter(202, FilterText("service_display_name", _("Service alternative display name"),   "service", "service_display_name",   "service_display_name", "~~"),
+                          _("Alternative display name of the service, regex match"))
 
-declare_filter(101, FilterText("hostgroupnameregex",    _("Hostgroup)"),        "hostgroup",    "hostgroup_name",      "hostgroup_name",    "~~"),
+declare_filter(101, FilterText("hostgroupnameregex",    _("Hostgroup"),        "hostgroup",    "hostgroup_name",      "hostgroup_name",    "~~"),
                                _("Search field allowing regular expressions and partial matches on the names of hostgroups"))
 
 declare_filter(101, FilterText("servicegroupnameregex", _("Servicegroup"),   "servicegroup", "servicegroup_name",   "servicegroup_name", "~~"),
@@ -114,8 +119,48 @@ declare_filter(102, FilterIPAddress())
 # Helper that retrieves the list of host/service/contactgroups via Livestatus
 # use alias by default but fallback to name if no alias defined
 def all_groups(what):
-    groups = dict(html.live.query("GET %sgroups\nColumns: name alias\n" % what))
+    groups = dict(html.live.query("GET %sgroups\nCache: reload\nColumns: name alias\n" % what))
     return [ (name, groups[name] or name) for name in groups.keys() ]
+
+class FilterMultigroup(Filter):
+    def __init__(self, what, title):
+        htmlvars = [ what + "groups" ]
+        Filter.__init__(self, htmlvars[0], # name
+                              title,
+                              what,        # info, e.g. "service"
+                              htmlvars,
+                              [])          # no link info needed
+        self.what = what
+        self.htmlvar = htmlvars[0]
+
+    def double_height(self):
+        return True
+
+    def valuespec(self):
+        return DualListChoice(choices = all_groups(self.what), autoheight=False)
+
+    def selection(self):
+        current = html.var(self.htmlvar, "").strip().split("|")
+        if current == ['']:
+            return []
+        else:
+            return current
+
+    def display(self):
+        html.write('<div class=multigroup>')
+        self.valuespec().render_input(self.htmlvar, self.selection())
+        html.write('</div>')
+
+    def filter(self, infoname):
+        current = self.selection()
+        if len(current) == 0:
+            return "" # No group selected = all groups selected, filter unused
+        filters = ""
+        for group in current:
+            filters += "Filter: %s_groups >= %s\n" % (self.what, group)
+        filters += "Or: %d\n" % len(current)
+        return filters
+
 
 class FilterGroupCombo(Filter):
     def __init__(self, what, title, enforce):
@@ -151,7 +196,7 @@ class FilterGroupCombo(Filter):
             if not self.enforce:
                 return ""
             # Take first group with the name we search
-            current_value = html.live.query_value("GET %sgroups\nColumns: name\nLimit: 1\n" % self.what, None)
+            current_value = html.live.query_value("GET %sgroups\nCache: reload\nColumns: name\nLimit: 1\n" % self.what, None)
 
         if current_value == None:
             return "" # no {what}group exists!
@@ -179,17 +224,20 @@ class FilterGroupCombo(Filter):
     def heading_info(self, infoname):
         current_value = self.current_value(infoname)
         if current_value:
-            alias = html.live.query_value("GET %sgroups\nColumns: alias\nFilter: name = %s\n" %
+            alias = html.live.query_value("GET %sgroups\nCache: reload\nColumns: alias\nFilter: name = %s\n" %
                 (self.what, current_value), current_value)
             return alias
 
 
 declare_filter(104, FilterGroupCombo("host",            _("Hostgroup"),            False), _("Optional selection of host group"))
 declare_filter(104, FilterGroupCombo("host",            _("Hostgroup (enforced)"),            True),  _("Dropdown list, selection of host group is <b>enforced</b>"))
+declare_filter(105, FilterMultigroup("host",            _("Several Hostgroups")), _("Selection of multiple host groups"))
 declare_filter(204, FilterGroupCombo("service",         _("Servicegroup"),         False), _("Optional selection of service group"))
 declare_filter(205, FilterGroupCombo("service",         _("Servicegroup (enforced)"),         True),  _("Dropdown list, selection of service group is <b>enforced</b>"))
-declare_filter(106, FilterGroupCombo("host_contact",    _("Host Contactgroup"),    False), _("Optional selection of host contact group group"))
-declare_filter(206, FilterGroupCombo("service_contact", _("Service Contactgroup"), False), _("Optional selection of service contact group group"))
+declare_filter(205, FilterMultigroup("service",         _("Several Servicegroups")), _("Selection of multiple service groups"))
+
+declare_filter(106, FilterGroupCombo("host_contact",    _("Host Contactgroup"),    False), _("Optional selection of host contact group"))
+declare_filter(206, FilterGroupCombo("service_contact", _("Service Contactgroup"), False), _("Optional selection of service contact group"))
 
 declare_filter(107, FilterText("host_ctc", _("Host Contact"), "host", "host_contacts", "host_ctc", ">="))
 declare_filter(207, FilterText("service_ctc", _("Service Contact"), "service", "service_contacts", "service_ctc", ">="))
@@ -216,9 +264,9 @@ class FilterQueryDropdown(Filter):
             return ""
 
 declare_filter(110, FilterQueryDropdown("host_check_command", _("Host check command"), "host", \
-        "GET commands\nColumns: name\n", "Filter: host_check_command = %s\n"))
+        "GET commands\nCache: reload\nColumns: name\n", "Filter: host_check_command = %s\n"))
 declare_filter(210, FilterQueryDropdown("check_command", _("Service check command"), "service", \
-        "GET commands\nColumns: name\n", "Filter: service_check_command = %s\n"))
+        "GET commands\nCache: reload\nColumns: name\n", "Filter: service_check_command = %s\n"))
 
 class FilterServiceState(Filter):
     def __init__(self, name, title, prefix):
@@ -228,9 +276,9 @@ class FilterServiceState(Filter):
 
     def display(self):
         html.begin_checkbox_group()
-        for var, text in [(self.prefix + "st0", "OK"), (self.prefix + "st1", "WARN"), \
-                          (self.prefix + "st2", "CRIT"), (self.prefix + "st3", "UNKNOWN"),
-                          (self.prefix + "stp", "PEND.")]:
+        for var, text in [(self.prefix + "st0", _("OK")), (self.prefix + "st1", _("WARN")), \
+                          (self.prefix + "st2", _("CRIT")), (self.prefix + "st3", _("UNKNOWN")),
+                          (self.prefix + "stp", _("PEND"))]:
 	    #if html.mobile:
 	        #text = text[:1]
             html.checkbox(var, True, label=text)
@@ -286,6 +334,8 @@ class FilterHostState(Filter):
 
 declare_filter(115, FilterHostState())
 
+
+
 class FilterTristate(Filter):
     def __init__(self, name, title, info, column, deflt = -1):
         self.column = column
@@ -315,6 +365,25 @@ class FilterTristate(Filter):
             return self.filter_code(infoname, True)
         else:
             return self.filter_code(infoname, False)
+
+
+class FilterStateType(FilterTristate):
+    def __init__(self, info, column, title, deflt = -1):
+        FilterTristate.__init__(self, column, title, info, None, deflt)
+
+    def display(self):
+        current = html.var(self.varname)
+        html.begin_radio_group(horizontal = True)
+        for value, text in [("0", _("SOFT")), ("1", _("HARD")), ("-1", _("(ignore)"))]:
+            checked = current == value or (current in [ None, ""] and int(value) == self.deflt)
+            html.radiobutton(self.varname, value, checked, text + " &nbsp; ")
+        html.end_radio_group()
+
+    def filter_code(self, infoname, positive):
+        return "Filter: state_type = %d\n" % int(positive)
+
+declare_filter(116, FilterStateType("host", "host_state_type",       _("Host state type")))
+declare_filter(217, FilterStateType("service", "service_state_type", _("Service state type")))
 
 class FilterNagiosFlag(FilterTristate):
     def __init__(self, info, column, title, deflt = -1):
@@ -747,7 +816,7 @@ class FilterHostTags(Filter):
 
             if op and val:
                 operator = op != 'is' and '!~' or '~'
-                headers.append('Filter: custom_variables %s TAGS %s' % (operator, val))
+                headers.append('Filter: host_custom_variables %s TAGS %s' % (operator, val))
 
         if headers:
             return '\n'.join(headers) + '\n'
@@ -757,5 +826,59 @@ class FilterHostTags(Filter):
     def double_height(self):
         return True
 
-
 declare_filter(302, FilterHostTags())
+
+
+class FilterStarred(FilterTristate):
+    def __init__(self, what):
+        self.what = what
+        icon = '<img class="icon inline" src="images/icon_starred.png"> '
+        FilterTristate.__init__(self,
+            name   = what + "_favorites",
+            title  = icon  + (what == "host" and _("Favorite Hosts") or _("Favorite Services")),
+            info   = what,
+            column = what + "_favorite", # Column, not used
+            deflt  = -1,
+        )
+
+    def filter(self, infoname):
+        current = self.tristate_value()
+        if current == -1:
+            return ""
+        elif current:
+            aand, oor, eq = "And", "Or", "="
+        else:
+            aand, oor, eq = "Or", "And", "!="
+
+        stars = load_stars()
+        filters = ""
+        count = 0
+        if self.what == "host":
+            for star in stars:
+                if ";" in star:
+                    continue
+                filters += "Filter: host_name %s %s\n" % (eq, star)
+                count += 1
+        else:
+            for star in stars:
+                if ";" not in star:
+                    continue
+                h, s = star.split(";")
+                filters += "Filter: host_name %s %s\n" % (eq, h)
+                filters += "Filter: service_description %s %s\n" % (eq, s)
+                filters += "%s: 2\n" % aand
+                count += 1
+
+        # No starred object and show only starred -> show nothing
+        if count == 0 and current:
+            return "Filter: host_state = -4612\n"
+
+        # no starred object and show unstarred -> show everything
+        elif count == 0:
+            return ""
+
+        filters += "%s: %d\n" % (oor, count)
+        return filters
+
+declare_filter(501, FilterStarred("host"))
+declare_filter(501, FilterStarred("service"))

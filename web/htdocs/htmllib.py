@@ -34,6 +34,9 @@ try:
 except NameError:
     from sets import Set as set
 
+# Only parse variable adhering to the following regular expressions
+varname_regex = re.compile('^[\w\d_.%+-\\\*]+$')
+
 # Information about uri
 class InvalidUserInput(Exception):
     def __init__(self, varname, text):
@@ -70,6 +73,7 @@ class html:
         self.help_visible = False
         self.treestates = {}
         self.treestates_for_id = None
+        self.caches = {}
 
     RETURN = 13
     SHIFT = 16
@@ -163,11 +167,13 @@ class html:
         else:
             enctype = ''
         if onsubmit:
-            onsubmit = ' onsubmit="%s"' % onsubmit
+            onsubmit = ' onsubmit="%s"' % self.attrencode(onsubmit)
         else:
             onsubmit = ''
+        enc_name = self.attrencode(name)
         self.write('<form id="form_%s" name="%s" class="%s" action="%s" method="%s"%s%s>\n' %
-                   (name, name, name, action, method, enctype, onsubmit))
+                   (enc_name, enc_name, enc_name, self.attrencode(action), self.attrencode(method),
+                    enctype, onsubmit))
         self.hidden_field("filled_in", name)
         if add_transid:
             self.hidden_field("_transid", str(self.fresh_transid()))
@@ -199,8 +205,8 @@ class html:
 
     def hidden_field(self, var, value, id = None, add_var = False):
         if value != None:
-            id = id and ' id="%s"' % id or ''
-            self.write("<input type=\"hidden\" name=\"%s\" value=\"%s\"%s />\n" %
+            id = id and ' id="%s"' % self.attrencode(id) or ''
+            self.write("<input type=\"hidden\" name=\"%s\" value=\"%s\"%s />" %
                                 (self.attrencode(var), self.attrencode(value), id))
             if add_var:
                 self.add_form_var(var)
@@ -254,7 +260,7 @@ class html:
 
     def image_button(self, varname, title, cssclass = ''):
         if not self.mobile:
-            self.write('<label for="%s" class="image_button">' % varname)
+            self.write('<label for="%s" class="image_button">' % self.attrencode(varname))
         self.raw_button(varname, title, cssclass)
         if not self.mobile:
             self.write('</label>')
@@ -346,6 +352,7 @@ class html:
         self.context_buttons_open = False
 
     def context_button(self, title, url, icon=None, hot=False, id=None, bestof=None, hover_title='', fkey=None):
+        title = self.attrencode(title)
         display = "block"
         if bestof:
             counts = self.get_button_counts()
@@ -360,22 +367,23 @@ class html:
             self.begin_context_buttons()
 
         if icon:
-            title = '<img src="images/icon_%s.png">%s' % (icon, title)
+            title = '<img src="images/icon_%s.png">%s' % (self.attrencode(icon), self.attrencode(title))
         if id:
-            idtext = " id='%s'" % id
+            idtext = " id='%s'" % self.attrencode(id)
         else:
             idtext = ""
-        self.write('<div%s style="display:%s" class="contextlink%s%s" ' % (idtext, display, hot and " hot" or "", (fkey and self.keybindings_enabled) and " button" or ""))
+        self.write('<div%s style="display:%s" class="contextlink%s%s" ' %
+            (idtext, display, hot and " hot" or "", (fkey and self.keybindings_enabled) and " button" or ""))
         self.context_button_hover_code(hot and "_hot" or "")
         self.write('>')
-        self.write('<a href="%s"' % url)
+        self.write('<a href="%s"' % self.attrencode(url))
         if hover_title:
-            self.write(' title="%s"' % hover_title)
+            self.write(' title="%s"' % self.attrencode(hover_title))
         if bestof:
             self.write(' onclick="count_context_button(this); document.location=this.href; " ')
         if fkey and self.keybindings_enabled:
             title += '<div class=keysym>F%d</div>' % fkey
-            self.add_keybinding([html.F1 + (fkey - 1)], "document.location='%s';" % url)
+            self.add_keybinding([html.F1 + (fkey - 1)], "document.location='%s';" % self.attrencode(url))
         self.write('>%s</a></div>\n' % title)
 
     def context_button_hover_code(self, what):
@@ -481,7 +489,8 @@ class html:
         for value, text in options:
             if value == None: value = ""
             sel = value == current and " selected" or ""
-            self.write("<option value=\"%s\"%s>%s</option>\n" % (value, sel, text))
+            self.write("<option value=\"%s\"%s>%s</option>\n" %
+                (self.attrencode(value), sel, self.attrencode(text)))
         self.write("</select>\n")
         if varname:
             self.form_vars.append(varname)
@@ -494,7 +503,8 @@ class html:
             if value == None: value = ""
             sel = value == current and " selected" or ""
             self.write('<option style="background-image:url(images/icon_%s.png);" '
-                       'value=\"%s\"%s>%s</option>\n' % (icon, value, sel, text))
+                       'value=\"%s\"%s>%s</option>\n' %
+                        (icon, self.attrencode(value), sel, self.attrencode(text)))
         self.write("</select>\n")
         if varname:
             self.form_vars.append(varname)
@@ -516,12 +526,12 @@ class html:
             checked = self.var(varname) == value
         checked_text = checked and " checked" or ""
         if label:
-            id = "rb_%s_%s" % (varname, value)
+            id = "rb_%s_%s" % (varname, self.attrencode(value))
             idtxt = ' id="%s"' % id
         else:
             idtxt = ""
         self.write("<input type=radio name=%s value=\"%s\"%s%s>\n" %
-                      (varname, value, checked_text, idtxt))
+                      (varname, self.attrencode(value), checked_text, idtxt))
         if label:
             self.write('<label for="%s">%s</label>\n' % (id, label))
         self.form_vars.append(varname)
@@ -577,8 +587,8 @@ class html:
             form_name = self.form_name
 
         return self.has_var("filled_in") and (
-            self.form_name == None or \
-            self.form_name in self.list_var("filled_in"))
+            form_name == None or \
+            form_name in self.list_var("filled_in"))
 
 
     # Get value of checkbox. Return True, False or None. None means
@@ -588,7 +598,7 @@ class html:
     def get_checkbox(self, varname, form_name = None):
         if self.has_var(varname):
             return not not self.var(varname)
-        elif not self.form_filled_in():
+        elif not self.form_filled_in(form_name):
             return None
         else:
             # Form filled in but variable missing -> Checkbox not checked
@@ -658,21 +668,21 @@ class html:
             self.write("</x>")
         self.form_vars.append(varname)
 
-    def html_head(self, title, javascripts = [], stylesheets = ["pages"]):
-        if not self.header_sent:
+    def html_head(self, title, javascripts = [], stylesheets = ["pages"], force=False):
+        if not self.header_sent or force:
             self.write(
-                u'''<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+                u'''<!DOCTYPE HTML>
 <html><head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />\n''')
             self.write('<title>')
-            self.write(title)
+            self.write(self.attrencode(title))
             self.write('</title>\n')
 
             # If the variable _link_target is set, then all links in this page
             # should be targetted to the HTML frame named by _link_target. This
             # is e.g. useful in the dash-board
             if self.link_target:
-                self.write('<base target="%s">\n' % self.link_target)
+                self.write('<base target="%s">\n' % self.attrencode(self.link_target))
 
             # Load all specified style sheets and all user style sheets in htdocs/css
             for css in [ "check_mk" ] + stylesheets:
@@ -706,6 +716,9 @@ class html:
 
     def set_browser_reload(self, secs):
         self.browser_reload = secs
+
+    def http_redirect(self, url):
+        raise MKGeneralException("http_redirect not implemented")
 
     def set_browser_redirect(self, secs, url):
         self.browser_reload   = secs
@@ -797,7 +810,7 @@ class html:
         h += '<a target="_top" href="%s"><img class=statusicon src="images/status_pageurl.png" title="%s"></a>\n' % \
              ("index.py?" + self.urlencode_vars([("start_url", self.makeuri([]))]), _("URL to this page including sidebar"))
 
-        if self.myfile == "view":
+        if self.myfile == "view" and self.var('mode') != 'availability':
             # h += '<a target="_top" href="%s"><img class=statusicon src="images/status_frameurl.png" title="%s"></a>\n' % \
             #     (self.makeuri([("output_format", "json_export")]), _("Export as JSON"))
             h += '<a target="_top" href="%s"><img class=statusicon src="images/icon_download_csv.png" title="%s"></a>\n' % \
@@ -897,9 +910,13 @@ class html:
         if varname in self.listvars:
             del self.listvars[varname]
 
-    def del_all_vars(self):
-        self.vars = {}
-        self.listvars = {}
+    def del_all_vars(self, prefix = None):
+        if not prefix:
+            self.vars = {}
+            self.listvars = {}
+        else:
+            self.vars = dict([(k,v) for (k,v) in self.vars.iteritems() if not k.startswith(prefix)])
+            self.listvars = dict([(k,v) for (k,v) in self.listvars.iteritems() if not k.startswith(prefix)])
 
     def javascript(self, code):
         self.write("<script language=\"javascript\">\n%s\n</script>\n" % code)
@@ -1020,11 +1037,12 @@ class html:
             self.lowlevel_write("<pre>%s</pre>\n" % pprint.pformat(element))
 
 
-    def debug_vars(self):
+    def debug_vars(self, prefix = None):
         self.lowlevel_write('<table onmouseover="this.style.display=\'none\';" class=debug_vars>')
         self.lowlevel_write("<tr><th colspan=2>POST / GET Variables</th></tr>")
         for name, value in sorted(self.vars.items()):
-            self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" % (name, value))
+            if not prefix or name.startswith(prefix):
+                self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" % (name, value))
         self.write("</ul>")
 
     def var(self, varname, deflt = None):
@@ -1062,6 +1080,9 @@ class html:
     def attrencode(self, value):
         if type(value) == int:
             return str(value)
+        elif type(value) not in [str, unicode]:
+            value = str(value)
+
         new = ""
         for c in value:
             if c == '"':
@@ -1111,6 +1132,21 @@ class html:
             ret += c
         return ret
 
+    # Escape a variable name so that it only uses allowed charachters for URL variables
+    def varencode(self, varname):
+        if varname == None:
+            return "None"
+        if type(varname) == int:
+            return varname
+
+        ret = ""
+        for c in varname:
+            if not c.isdigit() and not c.isalnum() and c != "_":
+                ret += "%%%02x" % ord(c)
+            else:
+                ret += c
+        return ret
+
     def u8(self, c):
         if ord(c) > 127:
             return "&#%d;" % ord(c)
@@ -1123,14 +1159,10 @@ class html:
         else:
             return text.encode("utf-8")
 
-        # Old code is soooooooo slow...
-        n = ""
-        for c in text:
-            n += self.u8(c)
-        return n
-
     # remove all HTML-tags
     def strip_tags(self, ht):
+        if type(ht) not in [str, unicode]:
+            return ht
         while True:
             x = ht.find('<')
             if x == -1:
@@ -1155,48 +1187,6 @@ class html:
     def begin_foldable_container(self, treename, id, isopen, title, indent = True, first = False):
         self.folding_indent = indent
         # try to get persisted state of tree
-        tree_state = weblib.get_tree_states(treename)
-
-        if id in tree_state:
-            isopen = tree_state[id] == "on"
-
-        img_num = isopen and "90" or "00"
-        onclick = ' onclick="toggle_foldable_container(\'%s\', \'%s\')"' % (treename, id)
-        onclick += ' onmouseover="this.style.cursor=\'pointer\';" '
-        onclick += ' onmouseout="this.style.cursor=\'auto\';" '
-
-        if indent == "nform":
-            self.write('<tr class=heading><td id="nform.%s.%s" %s colspan=2>' % (treename, id, onclick))
-            self.write('%s</td></tr>' % title)
-        else:
-            self.write('<img align=absbottom class="treeangle" id="treeimg.%s.%s" '
-                       'src="images/tree_%s.png" %s>' %
-                    (treename, id, img_num, onclick))
-            if title.startswith('<'): # custom HTML code
-                self.write(title)
-                if indent != "form":
-                    self.write("<br>")
-            else:
-                self.write('<b class="treeangle title" class=treeangle %s>%s</b><br>' %
-                         (onclick, title))
-
-            indent_style = "padding-left: %dpx; " % (indent == True and 15 or 0)
-            if indent == "form":
-                self.write("</td></tr></table>")
-                indent_style += "margin: 0; "
-            self.write('<ul class="treeangle %s" style="%s" id="tree.%s.%s">' %
-                 (isopen and "open" or "closed", indent_style,  treename, id))
-
-        # give caller information about current toggling state (needed for nform)
-        return isopen
-
-    def end_foldable_container(self):
-        if self.folding_indent != "nform":
-            self.write("</ul>")
-
-    def begin_foldable_container(self, treename, id, isopen, title, indent = True, first = False):
-        self.folding_indent = indent
-        # try to get persisted state of tree
         tree_state = self.get_tree_states(treename)
 
         if id in tree_state:
@@ -1209,6 +1199,8 @@ class html:
 
         if indent == "nform":
             self.write('<tr class=heading><td id="nform.%s.%s" %s colspan=2>' % (treename, id, onclick))
+            self.write('<img align=absbottom class="treeangle nform" src="images/tree_%s.png">' % (
+                    isopen and "90" or "00"))
             self.write('%s</td></tr>' % title)
         else:
             self.write('<img align=absbottom class="treeangle" id="treeimg.%s.%s" '
@@ -1252,4 +1244,47 @@ class html:
         self.load_tree_states()
         self.treestates[tree] = val
 
+    def parse_field_storage(self, fields):
+        self.vars     = {}
+        self.listvars = {} # for variables with more than one occurrance
+        self.uploads  = {}
 
+        for field in fields.list:
+            varname = field.name
+            value = field.value
+
+            # To prevent variours injections, we only allow a defined set
+            # of characters to be used in variables
+            if not varname_regex.match(varname):
+                continue
+
+            # put uploaded file infos into separate storage
+            if field.filename is not None:
+                self.uploads[varname] = (field.filename, field.type, field.value)
+
+            else: # normal variable
+                # Multiple occurrance of a variable? Store in extra list dict
+                if varname in self.vars:
+                    if varname in self.listvars:
+                        self.listvars[varname].append(value)
+                    else:
+                        self.listvars[varname] = [ self.vars[varname], value ]
+                # In the single-value-store the last occurrance of a variable
+                # has precedence. That makes appending variables to the current
+                # URL simpler.
+                self.vars[varname] = value
+
+    def uploaded_file(self, varname, default = None):
+        return self.uploads.get(varname, default)
+
+    #
+    # Per request caching
+    #
+    def set_cache(self, name, value):
+        self.caches[name] = value
+
+    def is_cached(self, name):
+        return name in self.caches
+
+    def get_cached(self, name):
+        return self.caches.get(name)

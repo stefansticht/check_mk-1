@@ -119,19 +119,24 @@ function hilite_icon(oImg, onoff) {
 }
 
 
-function get_url(url, handler, data, errorHandler) {
+function get_url(url, handler, data, errorHandler, addAjaxId) {
     if (window.XMLHttpRequest) {
         var AJAX = new XMLHttpRequest();
     } else {
         var AJAX = new ActiveXObject("Microsoft.XMLHTTP");
     }
 
+    var addAjaxId = (typeof addAjaxId === "undefined") ? true : addAjaxId;
+
     // Dynamic part to prevent caching
-    var dyn = "_ajaxid="+Math.floor(Date.parse(new Date()) / 1000);
-    if (url.indexOf('\?') !== -1) {
-        dyn = "&"+dyn;
-    } else {
-        dyn = "?"+dyn;
+    var dyn = '';
+    if (addAjaxId) {
+        dyn = "_ajaxid="+Math.floor(Date.parse(new Date()) / 1000);
+        if (url.indexOf('\?') !== -1) {
+            dyn = "&"+dyn;
+        } else {
+            dyn = "?"+dyn;
+        }
     }
 
     if (!AJAX) {
@@ -467,8 +472,18 @@ function pnp_response_handler(data, code) {
     }
     response = null;
 
-    if(!valid_response)
-        fallback_graphs(data);
+    if(!valid_response) {
+        if (code.match(/_login/)) {
+            // Login failed! This usually happens when one uses a distributed
+            // multisite setup but the transparent authentication is somehow
+            // broken. Display an error message trying to assist.
+            var container = document.getElementById(data['container']);
+            container.innerHTML = '<div class="error">Unable to fetch graphs of the host. Maybe you have a '
+                                + 'distributed setup and not set up the authentication correctly yet.</div>';
+        } else {
+            fallback_graphs(data);
+        }
+    }
 }
 
 // Fallback bei doofer/keiner Antwort
@@ -480,6 +495,10 @@ function fallback_graphs(data) {
 
 function create_graph(data, params) {
     var urlvars = params + '&theme=multisite&baseurl='+data['base_url'];
+
+    if (typeof(data['start']) !== 'undefined' && typeof(data['end']) !== 'undefined')
+        urlvars += '&start='+data['start']+'&end='+data['end'];
+
     var container = document.getElementById(data['container']);
 
     var img = document.createElement('img');
@@ -501,13 +520,23 @@ function create_graph(data, params) {
     urlvars = null;
 }
 
-function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link) {
+function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link, from_ts, to_ts) {
+    from_ts = (typeof from_ts === 'undefined') ? null : from_ts;
+    to_ts   = (typeof to_ts === 'undefined') ? null : to_ts;
+
     var data = { 'container': container, 'base_url': base_url,
                  'pnp_url':   pnp_url,   'site':     site,
                  'host':      host,      'service':  service,
                  'with_link': with_link, 'view':     pnpview};
-    get_url(pnp_url + 'index.php/json?&host=' + encodeURIComponent(host) + '&srv=' + encodeURIComponent(service) + '&source=0&view=' + pnpview,
-        pnp_response_handler, data, pnp_error_response_handler);
+
+    if (from_ts !== null && to_ts !== null) {
+        data['start'] = from_ts;
+        data['end'] = to_ts;
+    }
+
+    var url = pnp_url + 'index.php/json?&host=' + encodeURIComponent(host)
+              + '&srv=' + encodeURIComponent(service) + '&source=0&view=' + pnpview;
+    get_url(url, pnp_response_handler, data, pnp_error_response_handler, false);
 }
 
 // Renders contents for the PNP hover menus
@@ -1055,6 +1084,8 @@ function toggle_foldable_container(treename, id) {
     // Check, if we fold a NG-Norm
     var oNform = document.getElementById('nform.' + treename + '.' + id);
     if (oNform) {
+        var oImg = oNform.childNodes[0];
+        toggle_folding(oImg, oImg.src[oImg.src.length - 6] == '0');
         var oTr = oNform.parentNode.nextSibling;
         toggle_tree_state(treename, id, oTr);
     }
@@ -1709,6 +1740,19 @@ function valuespec_listof_fixarrows(oTbody) {
     }
 }
 
+function vs_list_choice_toggle_all(varprefix) {
+    var tbl = document.getElementById(varprefix + "_tbl");
+    var checkboxes = tbl.getElementsByTagName("input");
+    if (!checkboxes)
+        return;
+
+    // simply use state of first texbox as base
+    var state = ! checkboxes[0].checked;
+    for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = state;
+    }
+}
+
 function vs_textascii_button(img, text, how) {
     var oInput = img.previousElementSibling;
     while (oInput.tagName == "A")
@@ -1772,6 +1816,20 @@ function vs_duallist_switch(field, varprefix) {
         texts.push(pos_field.options[i].value);
     }
     helper.value = texts.join('|')
+}
+
+function vs_iconselector_select(event, varprefix, value) {
+    // set value of valuespec
+    var obj = document.getElementById(varprefix + '_value');
+    obj.value = value;
+
+    var src_img = document.getElementById(varprefix + '_i_' + value);
+
+    // Set the new choosen icon in the valuespecs image
+    var img = document.getElementById(varprefix + '_img');
+    img.src = src_img.src;
+
+    toggle_popup(event, varprefix);
 }
 
 function help_enable() {
@@ -2077,4 +2135,40 @@ function keybindings_check_keylist(keylist)
             return false;
     }
     return true;
+}
+
+//   .--Popups--------------------------------------------------------------.
+//   |                  ____                                                |
+//   |                 |  _ \ ___  _ __  _   _ _ __  ___                    |
+//   |                 | |_) / _ \| '_ \| | | | '_ \/ __|                   |
+//   |                 |  __/ (_) | |_) | |_| | |_) \__ \                   |
+//   |                 |_|   \___/| .__/ \__,_| .__/|___/                   |
+//   |                            |_|         |_|                           |
+//   +----------------------------------------------------------------------+
+
+function toggle_popup(event, id)
+{
+    if(!event)
+        event = window.event;
+
+    var obj = document.getElementById(id + '_popup');
+    if(obj) {
+        if(obj.style.display == 'none') {
+            obj.style.display = 'block';
+        } else {
+            obj.style.display = 'none';
+        }
+        obj = null;
+    }
+
+    if (event.stopPropagation)
+        event.stopPropagation();
+    event.cancelBubble = true;
+
+    // Disable the default events for all the different browsers
+    if (event.preventDefault)
+        event.preventDefault();
+    else
+        event.returnValue = false;
+    return false;
 }

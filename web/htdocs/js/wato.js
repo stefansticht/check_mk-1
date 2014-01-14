@@ -435,6 +435,7 @@ function progress_clean_log() {
 function progress_scheduler(mode, url_prefix, timeout, items, end_url, success_stats, fail_stats, term_url, finished_txt) {
     // Initialize
     if (progress_items === null) {
+        total_num_items        = items.length;
         progress_items         = items;
         failed_items           = Array();
         progress_total_num     = items.length;
@@ -455,10 +456,15 @@ function progress_scheduler(mode, url_prefix, timeout, items, end_url, success_s
     // Regular processing when not paused and not already running
     if (!progress_paused && !progress_running) {
         if (progress_items.length > 0) {
+            num_items_left = progress_items.length;
+            perc = Math.round(100 - (100.0 * num_items_left / total_num_items));
+            // title = progress_items.length + " Items, " + progress_success_stats.length + " Stats, " + progress_fail_stats.length + " Failed.";
+            title = perc + "%";
             // Progressing
             progress_running = true;
             // Remove leading pipe signs (when having no folder set)
-            update_progress_title(progress_items[0].replace(/^\|*/g, ''));
+            // update_progress_title(percentage + "%");
+            update_progress_title(title);
             get_url(url_prefix + '&_transid=-1&_item=' + escape(progress_items[0]),
                 progress_handle_response,    // regular handler (http code 200)
                 [ mode, progress_items[0] ], // data to hand over to handlers
@@ -610,6 +616,70 @@ function wato_randomize_secret(id, len) {
     oInput.value = secret;
 }
 
+// .-Profile Repl----------------------------------------------------------.
+// |          ____             __ _ _        ____            _             |
+// |         |  _ \ _ __ ___  / _(_) | ___  |  _ \ ___ _ __ | |            |
+// |         | |_) | '__/ _ \| |_| | |/ _ \ | |_) / _ \ '_ \| |            |
+// |         |  __/| | | (_) |  _| | |  __/ |  _ <  __/ |_) | |            |
+// |         |_|   |_|  \___/|_| |_|_|\___| |_| \_\___| .__/|_|            |
+// |                                                  |_|                  |
+// +-----------------------------------------------------------------------+
+
+var profile_replication_progress = new Array();
+
+function wato_do_profile_replication(siteid, est, progress_text) {
+    get_url("wato_ajax_profile_repl.py?site=" + siteid,
+            wato_profile_replication_result, siteid);
+    profile_replication_progress[siteid] = 20; // 10 of 10 10ths
+    setTimeout("profile_replication_step('"+siteid+"', "+est+", '"+progress_text+"');", est/20);
+}
+
+function profile_replication_set_status(siteid, image, text) {
+    var oImg = document.getElementById("site-" + siteid).childNodes[0];
+    oImg.title = text;
+    oImg.src = 'images/icon_'+image+'.png';
+}
+
+function profile_replication_step(siteid, est, progress_text) {
+    if (profile_replication_progress[siteid] > 0) {
+        profile_replication_progress[siteid]--;
+        var perc = (20.0 - profile_replication_progress[siteid]) * 100 / 20;
+        var img;
+        if (perc >= 75)
+            img = 'repl_75';
+        else if (perc >= 50)
+            img = 'repl_50';
+        else if (perc >= 25)
+            img = 'repl_25';
+        else
+            img = 'repl_pending';
+        profile_replication_set_status(siteid, img, progress_text);
+        setTimeout("profile_replication_step('"+siteid+"',"+est+", '"+progress_text+"');", est/20);
+    }
+}
+
+// g_num_replsites is set by the page code in wato.py to the number async jobs started
+// in total
+function wato_profile_replication_result(siteid, code) {
+    profile_replication_progress[siteid] = 0;
+    var oDiv = document.getElementById("site-" + siteid);
+    if (code[0] == "0")
+        profile_replication_set_status(siteid, 'repl_success', code.substr(2));
+    else
+        profile_replication_set_status(siteid, 'repl_failed', code.substr(2));
+    g_num_replsites--;
+
+    if (0 == g_num_replsites) {
+        setTimeout(wato_profile_replication_finish, 1000);
+    }
+}
+
+function wato_profile_replication_finish() {
+    // check if we have a sidebar-main frame setup
+    if (this.parent && parent && parent.frames[1] == this)
+        parent.frames[0].location.reload(); // reload sidebar
+}
+
 // ----------------------------------------------------------------------------
 // Folderlist
 // ----------------------------------------------------------------------------
@@ -698,4 +768,55 @@ function wato_toggle_move_folder(event, oButton) {
     else
         event.returnValue = false;
     return false;
+}
+
+// .--Host Diag-----------------------------------------------------------.
+// |              _   _           _     ____  _                           |
+// |             | | | | ___  ___| |_  |  _ \(_) __ _  __ _               |
+// |             | |_| |/ _ \/ __| __| | | | | |/ _` |/ _` |              |
+// |             |  _  | (_) \__ \ |_  | |_| | | (_| | (_| |              |
+// |             |_| |_|\___/|___/\__| |____/|_|\__,_|\__, |              |
+// |                                                  |___/               |
+// +----------------------------------------------------------------------+
+
+function handle_host_diag_result(ident, response_text) {
+    var img   = document.getElementById(ident + '_img');
+    var log   = document.getElementById(ident + '_log');
+    var retry = document.getElementById(ident + '_retry');
+
+    if (response_text[0] == "0") {
+        img.src = "images/icon_success.gif";
+        log.className = "log diag_success";
+    }
+    else {
+        img.src = "images/icon_failed.gif";
+        log.className = "log diag_failed";
+    }
+
+    log.innerHTML = response_text.substr(1).replace(/\n/g, "<br>\n");
+
+    retry.src = "images/icon_retry.gif";
+    retry.style.display = 'inline';
+}
+
+function start_host_diag_test(ident, hostname) {
+    var log   = document.getElementById(ident + '_log');
+    var img   = document.getElementById(ident + '_img');
+    var retry = document.getElementById(ident + '_retry');
+
+    retry.style.display = 'none';
+
+    var vars = '';
+    vars = '&ipaddress=' + escape(document.getElementsByName('vs_host_p_ipaddress')[0].value);
+    vars += '&snmp_community=' + escape(document.getElementsByName('vs_host_p_snmp_community')[0].value);
+    vars += '&agent_port=' + escape(document.getElementsByName('vs_rules_p_agent_port')[0].value);
+    vars += '&snmp_timeout=' + escape(document.getElementsByName('vs_rules_p_snmp_timeout')[0].value);
+    vars += '&snmp_retries=' + escape(document.getElementsByName('vs_rules_p_snmp_retries')[0].value);
+    vars += '&datasource_program=' + escape(document.getElementsByName('vs_rules_p_datasource_program')[0].value);
+
+    img.src = "images/icon_loading.gif";
+    log.innerHTML = "...";
+    get_url("wato_ajax_diag_host.py?host=" + escape(hostname) + "&_test=" + escape(ident)
+            + '&_transid=-1' + vars,
+              handle_host_diag_result, ident);
 }

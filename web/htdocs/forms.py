@@ -45,17 +45,18 @@ def get_input(valuespec, varprefix):
 # current transaction. This is for preview mode
 def edit_dictionary(entries, value, focus=None, hover_help=True,
                     validate=None, buttontext=None, title=None,
-                    buttons = None, method="GET", preview=False):
+                    buttons = None, method="GET", preview=False,
+                    varprefix="", formname="form"):
     new_value = value.copy()
-    if html.var("filled_in") == "form" and html.transaction_valid():
+    if html.var("filled_in") == formname and html.transaction_valid():
         if not preview:
             html.check_transaction()
 
         messages = []
         for name, vs in entries:
             try:
-                v = vs.from_html_vars(name)
-                vs.validate_value(v, name)
+                v = vs.from_html_vars(varprefix + name)
+                vs.validate_value(v, varprefix + name)
                 new_value[name] = v
             except MKUserError, e:
                 messages.append(u"%s: %s" % (vs.title(), e.message))
@@ -77,7 +78,7 @@ def edit_dictionary(entries, value, focus=None, hover_help=True,
             return new_value
 
 
-    html.begin_form("form", method=method)
+    html.begin_form(formname, method=method)
     header(title and title or _("Properties"))
     first = True
     for name, vs in entries:
@@ -87,9 +88,9 @@ def edit_dictionary(entries, value, focus=None, hover_help=True,
             v = value[name]
         else:
             v = vs.default_value()
-        vs.render_input(name, v)
+        vs.render_input(varprefix + name, v)
         if (not focus and first) or (name == focus):
-            vs.set_focus(name)
+            vs.set_focus(varprefix + name)
             first = False
 
     end()
@@ -100,6 +101,7 @@ def edit_dictionary(entries, value, focus=None, hover_help=True,
         if buttontext == None:
             buttontext = _("Save")
         html.button("save", buttontext)
+    html.del_var("filled_in") # Should be ignored be hidden_fields, but I do not dare to change it there
     html.hidden_fields()
     html.end_form()
 
@@ -110,6 +112,7 @@ def strip_bad_chars(x):
     s = "".join([c for c in x if c > ' ' and c < 'z'])
 
     if type(x) == unicode:
+        s = unicode(s)
         return s.translate({
             ord(u"'"): None,
             ord(u"&"): None,
@@ -155,29 +158,30 @@ def container():
 def space():
     html.write('<tr><td colspan=2 style="height:15px;"></td></tr>')
 
-def section(title = None, checkbox = None, id = "", simple=False, hide = False):
+def section(title = None, checkbox = None, id = "", simple=False, hide = False, legend = True):
     global g_section_open
     if g_section_open:
         html.write('</td></tr>')
     if id:
         id = ' id="%s"' % id
-    html.write('<tr class="%s"%s%s><td class="legend%s">' %
+    html.write('<tr class="%s"%s%s>' %
             (g_section_isopen and "open" or "closed", id,
-             hide and ' style="display:none;"' or '',
-             simple and " simple" or ""))
-    if title:
-        html.write('<div class="title%s">%s<span class="dots">%s</span></div>' %
-                  (checkbox and " withcheckbox" or "", title, "."*100))
-    if checkbox:
-        html.write('<div class=checkbox>')
-        if type(checkbox) == str:
-            html.write(checkbox)
-        else:
-            name, inactive, attrname = checkbox
-            html.checkbox(name, inactive, onclick = 'wato_toggle_attribute(this, \'%s\')' % attrname)
-        html.write('</div>')
+             hide and ' style="display:none;"' or ''))
 
-    html.write('</td>')
+    if legend:
+        html.write('<td class="legend%s">' % (simple and " simple" or ""))
+        if title:
+            html.write('<div class="title%s">%s<span class="dots">%s</span></div>' %
+                      (checkbox and " withcheckbox" or "", title, "."*100))
+        if checkbox:
+            html.write('<div class=checkbox>')
+            if type(checkbox) == str:
+                html.write(checkbox)
+            else:
+                name, inactive, attrname = checkbox
+                html.checkbox(name, inactive, onclick = 'wato_toggle_attribute(this, \'%s\')' % attrname)
+            html.write('</div>')
+        html.write('</td>')
     html.write('<td class="content%s">' % (simple and " simple" or ""))
     g_section_open = True
 

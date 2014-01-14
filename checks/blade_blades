@@ -37,8 +37,8 @@ blade_blades_power_labels  = ('off', 'on')
 blade_blades_health_labels = ('unknown', 'good', 'warning', 'bad')
 
 def inventory_blade_blades(info):
-    # find only blades that are present
-    return [ (line[0], '', line[1]) for line in info if line[1] == '1' ]
+    # find only blades that are powered on
+    return [ (line[0], '', line[1]) for line in info if line[2] == '1' ]
 
 def check_blade_blades(item, params, info):
     for line in info:
@@ -58,7 +58,7 @@ def check_blade_blades(item, params, info):
                     output += ' (!)'
                 elif nag_state == 2:
                     output += ' (!!)'
-                else:
+                elif nag_state == 3:
                     output += ' (UNKNOWN)'
                 state = max(state, nag_state)
                 output += ', '
@@ -79,5 +79,5 @@ check_info["blade_blades"] = {
             6, # bladeName
     ]),
     'snmp_scan_function':      \
-        lambda oid: re.match('BladeCenter( Advanced)* Management Module', oid(".1.3.6.1.2.1.1.1.0")),
+        lambda oid: re.match('BladeCenter( Advanced)* Management Module', oid(".1.3.6.1.2.1.1.1.0")) != None,
 }

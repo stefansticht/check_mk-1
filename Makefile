@@ -23,7 +23,7 @@
 # Boston, MA 02110-1301 USA.
 
 SHELL           = /bin/bash
-VERSION        	= 1.2.3i1
+VERSION        	= 1.2.5i1
 NAME           	= check_mk
 RPM_TOPDIR     	= rpm.topdir
 RPM_BUILDROOT  	= rpm.buildroot
@@ -59,7 +59,7 @@ check-spaces:
 	@if grep -q '[[:space:]]$$' $(SOURCE_FILES) ; then echo $$? ; figlet "Space error" \
           ; echo "Aborting due to trailing spaces. Please use 'make healspaces' to repair." \
           ; echo "Affected files: " \
-          ; grep -l '[ 	]$$' $(SOURCE_FILES) \
+          ; grep -l '[[:space:]]$$' $(SOURCE_FILES) \
           ; exit 1 ; fi
 	@echo OK
 
@@ -137,6 +137,7 @@ version:
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 12.04" \
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 12.10" \
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 13.04" \
+          -o "$$(head -c 12 /etc/issue)" = "Ubuntu 13.10" \
           -o "$$(head -c 20 /etc/issue)" = "Debian GNU/Linux 6.0" ] \
           || { echo 'You are not on the reference system!' ; exit 1; }
 	@newversion=$$(dialog --stdout --inputbox "New Version:" 0 0 "$(VERSION)") ; \
@@ -233,7 +234,7 @@ SOURCE_FILES = checkman/* modules/* checks/* notifications/* $$(find -name Makef
 
 healspaces:
 	@echo "Removing trailing spaces from code lines..."
-	@sed -ri 's/[ 	]+$$//g' $(SOURCE_FILES)
+	@sed -ri 's/[[:space:]]+$$//g' $(SOURCE_FILES)
 
 setup:
 

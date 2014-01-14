@@ -60,10 +60,6 @@ Boston, MA 02110-1301 USA.
     border-left-style: none;
     border-radius: 4px 0px 0px 0px;
 }
-.wato table.data td {
-    html.write('</div>')
-    /* border-style: dashed; */
-}
 
 .wato table.data td.select {
     text-align: center;
@@ -223,7 +219,6 @@ table.validationerror img {
 }
 
 .wato table.data tr.data td.bulksearch {
-    text-align: right;
     padding-right: 0px;
     white-space: nowrap;
 }
@@ -231,6 +226,10 @@ table.validationerror img {
 .wato td.bulksearch input[type=text] {
     width: 150px;
     margin-right: 5px;
+}
+
+.wato table.data tr.data td.bulksearch div.togglebutton.checkbox {
+    margin-left: 0px;
 }
 
 
@@ -363,6 +362,7 @@ table.validationerror img {
     position: absolute;
     top: 28px;
     right: 19px;
+    z-index: 500;
 }
 
 .wato div.floatfolder div.infos img {
@@ -394,7 +394,11 @@ table.validationerror img {
     position: absolute;
     bottom: 23px;
     left: 20px;
+    width: 140px;
     color: #bde;
+    overflow:hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .wato div.floatfolder .title {
@@ -419,33 +423,22 @@ table.validationerror img {
     top: -2px;
 }
 
-.wato div.move_dialog {
-    padding:10px;
-    background-color: #45829D;
+.wato img.authicon {
+    width: 28px;
+    height: 28px;
+    margin-right: 10px;
+    vertical-align: middle;
+}
 
+.wato div.popup.move_dialog {
     position: relative;
     left:105px;
     top:35px;
-    z-index: 200;
     height: 190px;
-
-    width: -moz-max-content;
-    width: intrinsic;
-
-    -webkit-border-radius: 5px;
-    border-radius: 5px;
-    border-radius: 5px;
-    border: 1px solid #fff;
 }
 
-.wato div.move_dialog select[multiple] {
+.wato div.popup.move_dialog select[multiple] {
     height: 170px;
-}
-
-.wato div.move_dialog span {
-    display: block;
-    margin-bottom: 2px;
-    color: white;
 }
 
 .wato div.hoverarea {
@@ -808,9 +801,16 @@ div.varname {
 
 .wato div.globalvars td.simple a.modified, .wato div.globalvars a.modified table {
     border-radius: 5px 5px 5px 5px;
-    box-shadow: 3px 3px 5px #A2BECD inset;
+    border: 1px solid #cdf;
+    box-shadow: 3px 3px 5px #eee inset;
     margin-left: -5px;
-    padding: 0 5px;
+    padding-bottom: 18px;
+    padding: 1px 4px 2px 4px;
+}
+.wato div.globalvars div.title a.modified {
+    box-shadow: none;
+    border: none;
+    /* font-weight: bold; */
 }
 
 .wato div.globalvars td.content img.iconbutton {
@@ -1109,4 +1109,97 @@ table.multisite_conn_method td input {
 
 .wato .biruletree .node {
     margin-top: 0px;
+}
+
+/*-Host Diag-----------------------------------------------------------.
+|              _   _           _     ____  _                           |
+|             | | | | ___  ___| |_  |  _ \(_) __ _  __ _               |
+|             | |_| |/ _ \/ __| __| | | | | |/ _` |/ _` |              |
+|             |  _  | (_) \__ \ |_  | |_| | | (_| | (_| |              |
+|             |_| |_|\___/|___/\__| |____/|_|\__,_|\__, |              |
+|                                                  |___/               |
++---------------------------------------------------------------------*/
+
+.wato .diag_host div.success {
+    margin-top: 0;
+}
+
+.wato .diag_host td > h3 {
+    margin-top: 0;
+}
+
+.wato .diag_host table.nform {
+    width: 212px;
+}
+
+.wato .diag_host .test {
+    margin-bottom:15px;
+}
+
+.wato .diag_host .log {
+    height: 113px;
+    width: 700px;
+    font-family: monospace, sans-serif;
+    box-shadow: 1px 1px 3px #888 inset;
+    overflow-y: scroll;
+    padding: 5px 5px;
+    vertical-align: top;
+    background-color: #fff;
+    /* below resize option is css3 */
+    resize:both;
+}
+.wato .diag_host .log.diag_success {
+    background-color: #efe;
+}
+.wato .diag_host .log.diag_failed {
+    background-color: #fee;
+}
+
+.wato .diag_host table.test td {
+    padding: 0;
+}
+
+.wato .diag_host table.test td.icons {
+    padding: 2px;
+}
+
+.wato .diag_host td.icons div {
+    position: relative;
+    width: 22px;
+    height: 120px;
+}
+
+.wato .diag_host td.icons div img {
+    margin-left: 2px;
+}
+
+.wato .diag_host td.icons img.retry {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+}
+
+/*--Profile Repl-----------------------------------------------------------.
+|          ____             __ _ _        ____            _                |
+|         |  _ \ _ __ ___  / _(_) | ___  |  _ \ ___ _ __ | |               |
+|         | |_) | '__/ _ \| |_| | |/ _ \ | |_) / _ \ '_ \| |               |
+|         |  __/| | | (_) |  _| | |  __/ |  _ <  __/ |_) | |               |
+|         |_|   |_|  \___/|_| |_|_|\___| |_| \_\___| .__/|_|               |
+|                                                  |_|                     |
+'-------------------------------------------------------------------------*/
+
+#profile_repl .site {
+    margin: 0 5px 5px 0;
+    padding: 2px;
+    border-radius: 1ex;
+    box-shadow: 0 0 3px #444;
+    background-color: #9dbecd;
+    border-color: #080;
+
+    width: 158px;
+    text-overflow: ellipsis;
+}
+
+#profile_repl .site img, #profile_repl .site span {
+    vertical-align: middle;
 }

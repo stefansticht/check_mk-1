@@ -380,6 +380,7 @@ def paint_comments(what, row, tags, custom_vars):
         text = ""
         for c in comments:
             id, author, comment, ty, timestamp = c
+            comment = comment.replace("\n", "<br>").replace("'","&#39;")
             text += "%s %s: \"%s\" \n" % (paint_age(timestamp, True, 0, 'abs')[1], author, comment)
         return link_to_view('<img class=icon title=\'%s\' ' \
                             'src="images/icon_comment.gif">' %
@@ -432,6 +433,7 @@ multisite_icons.append({
     'paint':           paint_flapping,
 })
 
+#.
 #   .--Staleness-----------------------------------------------------------.
 #   |              ____  _        _                                        |
 #   |             / ___|| |_ __ _| | ___ _ __   ___  ___ ___               |
@@ -544,3 +546,35 @@ def paint_aggregations(what, row, tags, custom_vars):
 multisite_icons.append({
     'paint':           paint_aggregations,
 })
+
+#.
+#   .--Stars *-------------------------------------------------------------.
+#   |                   ____  _                                            |
+#   |                  / ___|| |_ __ _ _ __ ___  __/\__                    |
+#   |                  \___ \| __/ _` | '__/ __| \    /                    |
+#   |                   ___) | || (_| | |  \__ \ /_  _\                    |
+#   |                  |____/ \__\__,_|_|  |___/   \/                      |
+#   |                                                                      |
+#   '----------------------------------------------------------------------'
+
+
+def paint_stars(what, row, tags, custom_vars):
+    try:
+        stars = html.stars
+    except:
+        stars = set(config.load_user_file("favorites", []))
+        html.stars = stars
+
+    if what == "host":
+        starred = row["host_name"] in stars
+    else:
+        starred = (row["host_name"] + ";" + row["service_description"]) in stars
+    if starred:
+        return '<img class=icon title="%s" src="images/icon_starred.png">' % \
+          _("This %s is one of your favorites") % _(what)
+
+multisite_icons.append({
+    'columns': [],
+    'paint': paint_stars,
+})
+

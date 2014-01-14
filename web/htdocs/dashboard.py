@@ -61,10 +61,6 @@ def load_plugins():
     if loaded_with_language == current_language:
         return
 
-    # Permissions are currently not being defined. That will be the
-    # case as soon as dashboards become editable.
-
-
     # Load plugins for dashboards. Currently these files
     # just may add custom dashboards by adding to builtin_dashboards.
     load_web_plugins("dashboard", globals())
@@ -80,6 +76,20 @@ def load_plugins():
     global dashboards
     dashboards = builtin_dashboards
 
+    # Declare permissions for all dashboards
+    config.declare_permission_section("dashboard", _("Dashboards"))
+    for name, dashboard in dashboards.items():
+        config.declare_permission("dashboard.%s" % name,
+                dashboard["title"],
+                dashboard.get("description", ''),
+                config.builtin_role_ids)
+
+def permitted_dashboards():
+    return [ (name, dashboard) for name, dashboard
+        in dashboards.items()
+        if config.may("dashboard.%s" % name)
+    ]
+
 # HTML page handler for generating the (a) dashboard. The name
 # of the dashboard to render is given in the HTML variable 'name'.
 # This defaults to "main".
@@ -87,6 +97,8 @@ def page_dashboard():
     name = html.var("name", "main")
     if name not in dashboards:
         raise MKGeneralException("No such dashboard: '<b>%s</b>'" % name)
+    if not config.may("dashboard.%s" % name):
+        raise MKAuthException(_("You are not allowed to access this dashboard."))
 
     render_dashboard(name)
 
@@ -227,7 +239,7 @@ def render_dashlet(nr, dashlet, wato_folder):
             url = 'about:blank'
 
         # Fix of iPad >:-P
-        html.write('<div style="width: 100%; height: 100%; -webkit-overflow-scrolling:touch; overflow: auto;">')
+        html.write('<div style="width: 100%; height: 100%; -webkit-overflow-scrolling:touch; overflow: hidden;">')
         html.write('<iframe id="dashlet_iframe_%d" allowTransparency="true" frameborder="0" width="100%%" '
                    'height="100%%" src="%s"> </iframe>' % (nr, url))
         html.write('</div>')

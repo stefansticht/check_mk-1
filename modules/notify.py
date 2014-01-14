@@ -34,7 +34,7 @@
 # hostname, servicedesc, hoststate, servicestate, output in
 # the form %(variable)s
 
-import pprint, urllib, select
+import pprint, urllib, select, subprocess
 
 # Default settings
 notification_logdir   = var_dir + "/notify"
@@ -246,7 +246,7 @@ def process_context(context, write_into_spoolfile, use_method = None):
             elif method == "email":
                 # We are searching for a specific
                 # but this contact does not offer any
-                notify_log("ERROR: contact %r do not have any plugins (required: %s)" % (contact, use_method))
+                notify_log("ERROR: contact %r does not have any plugins (required: %s)" % (contact, use_method))
                 return 2
             else:
                 found_plugin = {}
@@ -261,9 +261,12 @@ def process_context(context, write_into_spoolfile, use_method = None):
                 method = ('flexible', [found_plugin])
 
         if type(method) == tuple and method[0] == 'flexible':
+            notify_log("Preparing flexible notifications for %s" % context["CONTACTNAME"])
             return notify_flexible(context, method[1], write_into_spoolfile)
         else:
+            notify_log("Sending plain email to %s" % context["CONTACTNAME"])
             return notify_via_email(context, write_into_spoolfile)
+
     except Exception, e:
         notify_log("ERROR: %s\n%s" % (e, format_exception()))
         sys.stderr.write("ERROR: %s\n" % e)
@@ -327,26 +330,9 @@ def notify_data_available():
     readable, writeable, exceptionable = select.select([0], [], [], None)
     return not not readable
 
-def notify_config_timestamp():
-    mtime = 0
-    for dirpath, dirnames, filenames in os.walk(check_mk_configdir):
-        for f in filenames:
-            mtime = max(mtime, os.stat(dirpath + "/" + f).st_mtime)
-    mtime = max(mtime, os.stat(default_config_dir + "/main.mk").st_mtime)
-    try:
-        mtime = max(mtime, os.stat(default_config_dir + "/final.mk").st_mtime)
-    except:
-        pass
-    try:
-        mtime = max(mtime, os.stat(default_config_dir + "/local.mk").st_mtime)
-    except:
-        pass
-    return mtime
-
-
 
 def notify_keepalive():
-    config_timestamp = notify_config_timestamp()
+    last_config_timestamp = config_timestamp()
 
     # Send signal that we are ready to receive the next notification, but
     # not after a config-reload-restart (see below)
@@ -369,8 +355,7 @@ def notify_keepalive():
             # CMK_NOTIFY_RESTART=1
 
             if notify_data_available():
-                current_config_timestamp = notify_config_timestamp()
-                if current_config_timestamp > config_timestamp:
+                if last_config_timestamp != config_timestamp():
                     notify_log("Configuration has changed. Restarting myself.")
                     os.putenv("CMK_NOTIFY_RESTART", "1")
                     os.execvp("cmk", sys.argv)
@@ -523,12 +508,13 @@ def notify_notify(context):
 
 def notify_via_email(context, write_into_spoolfile):
     if write_into_spoolfile:
+        notify_log("Spooled this notification.")
         create_spoolfile({"context": context})
         return 0
 
     notify_log(substitute_context(notification_log_template, context))
 
-    if "SERVICEDESC" in context:
+    if "SERVICEDESC" in context and context['SERVICEDESC'].strip():
         subject_t = notification_service_subject
         body_t = notification_service_body
     else:
@@ -538,24 +524,44 @@ def notify_via_email(context, write_into_spoolfile):
     subject = substitute_context(subject_t, context)
     context["SUBJECT"] = subject
     body = substitute_context(notification_common_body + body_t, context)
-    command = substitute_context(notification_mail_command, context) + " >/dev/null 2>&1"
+    command = substitute_context(notification_mail_command, context)
     command_utf8 = command.encode("utf-8")
-    if notification_logging >= 2:
-        notify_log("Executing command: %s" % command)
     notify_log(body)
-    # Make sure that mail(x) is using UTF-8. More then
-    # setting the locale cannot be done here. We hope that
-    # C.UTF-8 is always available. Please check the output
-    # of 'locale -a' on your system if you are curious.
-    os.putenv("LANG", "C.UTF-8")
+
+    # Make sure that mail(x) is using UTF-8. Otherwise we cannot send notifications
+    # with non-ASCII characters. Unfortunately we do not know whether C.UTF-8 is
+    # available. If e.g. nail detects a non-Ascii character in the mail body and
+    # the specified encoding is not available, it will silently not send the mail!
+    # Our resultion in future: use /usr/sbin/sendmail directly.
+    # Our resultion in the present: look with locale -a for an existing UTF encoding
+    # and use that.
+    for encoding in os.popen("locale -a 2>/dev/null"):
+        l = encoding.lower()
+        if "utf8" in l or "utf-8" in l or "utf.8" in l:
+            encoding = encoding.strip()
+            os.putenv("LANG", encoding)
+            if notification_logging >= 2:
+                notify_log("Setting locale for mail to %s." % encoding)
+            break
+    else:
+        notify_log("No UTF-8 encoding found in your locale -a! Please provide C.UTF-8 encoding.")
+
     if notification_logging >= 2:
         file(var_dir + "/notify/body.log", "w").write(body.encode("utf-8"))
 
     # Important: we must not output anything on stdout or stderr. Data of stdout
     # goes back into the socket to the CMC in keepalive mode and garbles the
     # handshake signal.
-    return os.popen(command_utf8, "w").write(body.encode("utf-8"))
+    if notification_logging >= 2:
+        notify_log("Executing command: %s" % command)
 
+    p = subprocess.Popen(command_utf8, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+    stdout_txt, stderr_txt = p.communicate(body.encode("utf-8"))
+    exitcode = p.returncode
+    if exitcode != 0:
+        notify_log("ERROR: could not deliver mail. Exit code of command is %r" % exitcode)
+        for line in (stdout_txt + stderr_txt).splitlines():
+            notify_log("mail: %s" % line.rstrip())
 
 
 
@@ -587,6 +593,21 @@ def should_notify(context, entry):
         if sl < from_sl or sl > to_sl:
             notify_log(" - Skipping: service level %d not between %d and %d" % (sl, from_sl, to_sl))
             return False
+
+    # Skip blacklistet serivces
+    if entry.get("service_blacklist"):
+        servicedesc = context.get("SERVICEDESC")
+        if not servicedesc:
+            notify_log(" - Proceed: blacklist certain services, but this is a host notification")
+        else:
+            for s in entry["service_blacklist"]:
+                if re.match(s, servicedesc):
+                    notify_log(" - Skipping: service '%s' matches blacklist (%s)" % (
+                        servicedesc, ", ".join(entry["service_blacklist"])))
+                    return False
+
+
+
 
     # Check service, if configured
     if entry.get("only_services"):
@@ -665,7 +686,8 @@ def notify_flexible(context, notification_table, write_into_spoolfile):
 
 
 def call_notification_script(plugin, parameters, context, write_into_spoolfile):
-    # Prepare environment
+
+    # Enter context into environment
     os.putenv("NOTIFY_PARAMETERS", " ".join(parameters))
     for nr, value in enumerate(parameters):
         os.putenv("NOTIFY_PARAMETER_%d" % (nr + 1), value)
@@ -674,19 +696,8 @@ def call_notification_script(plugin, parameters, context, write_into_spoolfile):
     # Export complete context to have all vars in environment.
     # Existing vars are replaced, some already existing might remain
     for key in context:
-        os.putenv('NOTIFY_' + key, context[key].encode('utf-8'))
-
-    # Remove service macros for host notifications
-    if context['WHAT'] == 'HOST':
-        for key in context.keys():
-            if 'SERVICE' in key:
-                os.unsetenv('NOTIFY_%s' % key)
-
-    # Remove exceeding arguments from previous plugin calls
-    for nr in range(len(parameters)+1, 101):
-        name = "NOTIFY_PARAMETER_%d" % nr
-        if name in os.environ:
-            os.putenv(name, "")
+        if context['WHAT'] == 'SERVICE' or 'SERVICE' not in key:
+            os.putenv('NOTIFY_' + key, context[key].encode('utf-8'))
 
     # Call actual script without any arguments
     if local_notifications_dir:
@@ -701,21 +712,33 @@ def call_notification_script(plugin, parameters, context, write_into_spoolfile):
         notify_log("  not in %s" % notifications_dir)
         if local_notifications_dir:
             notify_log("  and not in %s" % local_notifications_dir)
-        return 2
+        exitcode = 2
 
-    # Create spoolfile or actually call the plugin
-    if write_into_spoolfile:
-        create_spoolfile({"context": context, "plugin": plugin})
     else:
-        notify_log("Executing %s" % path)
-        out = os.popen(path + " 2>&1 </dev/null")
-        for line in out:
-            notify_log("Output: %s" % line.rstrip())
-        exitcode = out.close()
-        if exitcode:
-            notify_log("Plugin exited with code %d" % (exitcode >> 8))
-            return exitcode
-    return 0
+        # Create spoolfile or actually call the plugin
+        if write_into_spoolfile:
+            create_spoolfile({"context": context, "plugin": plugin})
+            exitcode = 0
+        else:
+            notify_log("Executing %s" % path)
+            out = os.popen(path + " 2>&1 </dev/null")
+            for line in out:
+                notify_log("Output: %s" % line.rstrip())
+            exitcode = out.close()
+            if exitcode:
+                notify_log("Plugin exited with code %d" % (exitcode >> 8))
+            else:
+                exitcode = 0
+
+    # Clear environment again
+    for key in context:
+        if context['WHAT'] == 'SERVICE' or 'SERVICE' not in key:
+            os.unsetenv('NOTIFY_' + key)
+        os.unsetenv("NOTIFY_PARAMETERS")
+        for nr, value in enumerate(parameters):
+            os.unsetenv("NOTIFY_PARAMETER_%d" % (nr + 1))
+        os.unsetenv("NOTIFY_LOGDIR")
+    return exitcode
 
 
 def check_notification_type(context, host_events, service_events):

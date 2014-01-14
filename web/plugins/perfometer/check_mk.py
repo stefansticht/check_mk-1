@@ -71,6 +71,7 @@ perfometers["check_mk-hr_fs"] = perfometer_check_mk_df
 perfometers["check_mk-oracle_asm_diskgroup"] = perfometer_check_mk_df
 perfometers["check_mk-mysql_capacity"] = perfometer_check_mk_df
 perfometers["check_mk-esx_vsphere_counters.ramdisk"] = perfometer_check_mk_df
+perfometers["check_mk-hitachi_hnas_span"] = perfometer_check_mk_df
 
 def perfometer_esx_vsphere_datastores(row, check_command, perf_data):
     used_mb        = perf_data[0][1]
@@ -142,11 +143,7 @@ def perfometer_check_mk_mem_used(row, check_command, perf_data):
 
     state = row["service_state"]
     # paint used ram and swap
-    ram_color, swap_color = {
-        0:("#80ff40", "#008030"),
-        1:("#ff2", "#dd0"),
-        2:("#f44", "#d00"),
-        3:("#fa2", "#d80") }[state]
+    ram_color, swap_color = "#80ff40", "#008030"
     h += perfometer_td(100 * ram_used / virt_total, ram_color)
     h += perfometer_td(100 * swap_used / virt_total, swap_color)
 
@@ -165,9 +162,8 @@ perfometers["check_mk-hr_mem"] = perfometer_check_mk_mem_used
 
 def perfometer_check_mk_mem_win(row, check_command, perf_data):
     # only show mem usage, do omit page file
-    base_colors = ("#20d060", "#3040d0")
     state = row["service_state"]
-    color = { 0: "#20d060", 1: "#ff2", 2: "#f44", 3: "#fa2",}[state]
+    color = "#5090c0"
     ram_total  = float(perf_data[0][6])
     ram_used   = float(perf_data[0][1])
     perc = ram_used / ram_total * 100.0
@@ -193,9 +189,12 @@ def perfometer_check_mk_cpu_loads(row, check_command, perf_data):
     load = float(perf_data[0][1])
     return "%.1f" % load, perfometer_logarithmic(load, 4, 2, color)
 
-
 perfometers["check_mk-cpu.loads"] = perfometer_check_mk_cpu_loads
 perfometers["check_mk-ucd_cpu_load"] = perfometer_check_mk_cpu_loads
+perfometers["check_mk-statgrab_load"] = perfometer_check_mk_cpu_loads
+perfometers["check_mk-hpux_cpu"] = perfometer_check_mk_cpu_loads
+perfometers["check_mk-blade_bx_load"] = perfometer_check_mk_cpu_loads
+
 
 def perfometer_check_mk_ntp(row, check_command, perf_data, unit = "ms"):
     offset = float(perf_data[0][1])
@@ -228,7 +227,7 @@ perfometers["check_mk-systemtime"] = lambda r, c, p: perfometer_check_mk_ntp(r, 
 
 def perfometer_ipmi_sensors(row, check_command, perf_data):
     state = row["service_state"]
-    color = { 0: "#39f", 1: "#ff2", 2: "#f22", 3: "#fa2" }[state]
+    color = "#39f"
     value = float(perf_data[0][1])
     crit = savefloat(perf_data[0][4])
     if not crit:
@@ -259,7 +258,7 @@ perfometers["check_mk-ipmi_sensors"] = perfometer_ipmi_sensors
 
 def perfometer_temperature(row, check_command, perf_data):
     state = row["service_state"]
-    color = { 0: "#39f", 1: "#ff2", 2: "#f22", 3: "#fa2" }[state]
+    color = "#39f"
     value = float(perf_data[0][1])
     crit = savefloat(perf_data[0][4])
     return u"%d°C" % int(value), perfometer_logarithmic(value, 40, 1.2, color)
@@ -276,6 +275,37 @@ perfometers["check_mk-akcp_sensor_temp"] = perfometer_temperature
 perfometers["check_mk-fsc_temp"] = perfometer_temperature
 perfometers["check_mk-viprinet_temp"] = perfometer_temperature
 perfometers["check_mk-hwg_temp"] = perfometer_temperature
+perfometers["check_mk-sensatronics_temp"] = perfometer_temperature
+perfometers["check_mk-apc_inrow_temperature"] = perfometer_temperature
+perfometers["check_mk-hitachi_hnas_temp"] = perfometer_temperature
+
+def perfometer_temperature_multi(row, check_command, perf_data):
+    display_value = -1
+    display_color = "#60f020"
+
+    for sensor, value, uom, warn, crit, min, max in perf_data:
+        value=saveint(value)
+        if value > display_value:
+            display_value=value
+
+    if display_value > saveint(warn):
+        display_color = "#FFC840"
+    if display_value > saveint(crit):
+        display_color = "#FF0000"
+
+    display_string = "%s °C" % display_value
+    return display_string, perfometer_linear(display_value, display_color)
+
+perfometers["check_mk-brocade_mlx_temp"] = perfometer_temperature_multi
+
+def perfometer_users(row, check_command, perf_data):
+    state = row["service_state"]
+    color = "#39f"
+    value = float(perf_data[0][1])
+    crit = savefloat(perf_data[0][4])
+    return u"%d users" % int(value), perfometer_logarithmic(value, 50, 2, color)
+
+perfometers["check_mk-hitachi_hnas_cifs"] = perfometer_users
 
 def perfometer_blower(row, check_command, perf_data):
     rpm = saveint(perf_data[0][1])
@@ -400,20 +430,19 @@ perfometers["check_mk-oracle_logswitches"] = perfometer_oracle_sessions
 
 def perfometer_cpu_utilization(row, check_command, perf_data):
     util = float(perf_data[0][1]) # is already percentage
-    color = "#cf2"
-    if perf_data[0][3]:
-        warn = float(perf_data[0][3])
-        crit = float(perf_data[0][4])
-        if util < warn:
-            color = "#6f2"
-        elif util < crit:
-            color = "#9f2"
-
+    color = "#60f020"
     return "%.0f%%" % util, perfometer_linear(util, color)
 
 #perfometer_linear(perc, color)
 perfometers["check_mk-h3c_lanswitch_cpu"] = perfometer_cpu_utilization
 perfometers["check_mk-winperf_processor.util"] = perfometer_cpu_utilization
+perfometers["check_mk-netapp_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-cisco_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-juniper_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-brocade_mlx.module_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-hitachi_hnas_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-hitachi_hnas_fpga"] = perfometer_cpu_utilization
+perfometers["check_mk-hr_cpu"] = perfometer_cpu_utilization
 
 def perfometer_ps_perf(row, check_command, perf_data):
     perf_dict = dict([(p[0], float(p[1])) for p in perf_data])
@@ -470,6 +499,7 @@ perfometers["check_mk-winperf_phydisk"] = perfometer_check_mk_diskstat
 perfometers["check_mk-hpux_lunstats"] = perfometer_check_mk_diskstat
 perfometers["check_mk-mysql.innodb_io"] = perfometer_check_mk_diskstat
 perfometers["check_mk-esx_vsphere_counters.diskio"] = perfometer_check_mk_diskstat
+perfometers["check_mk-emcvnx_disks"] = perfometer_check_mk_diskstat
 
 def perfometer_in_out_mb_per_sec(row, check_command, perf_data):
     read_mbit = float(perf_data[0][1]) / 131072
@@ -480,6 +510,19 @@ def perfometer_in_out_mb_per_sec(row, check_command, perf_data):
     return text, perfometer_logarithmic_dual(
             read_mbit, "#30d050", write_mbit, "#0060c0", 100, 10)
 perfometers["check_mk-openvpn_clients"] = perfometer_in_out_mb_per_sec
+
+def perfometer_check_mk_hba(row, check_command, perf_data):
+    if len(perf_data) < 2:
+        return "", ""
+
+    read_blocks = int(perf_data[0][1])
+    write_blocks = int(perf_data[1][1])
+
+    text = "%d/s  %d/s" % (read_blocks, write_blocks)
+
+    return text, perfometer_logarithmic_dual(
+            read_blocks, "#30d050", write_blocks, "#0060c0", 100000, 2)
+perfometers["check_mk-emcvnx_hba"] = perfometer_check_mk_hba
 
 
 def perfometer_check_mk_printer_supply(row, check_command, perf_data):
@@ -705,6 +748,7 @@ def perfometer_simple_mem_usage(row, command, perf):
 
 perfometers['check_mk-db2_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-esx_vsphere_hostsystem.mem_usage'] = perfometer_simple_mem_usage
+perfometers['check_mk-brocade_mlx.module_mem'] = perfometer_simple_mem_usage
 
 def perfometer_vmguest_mem_usage(row, command, perf):
     used = float(perf[0][1])
@@ -717,3 +761,34 @@ def perfometer_esx_vsphere_hostsystem_cpu(row, command, perf):
     return "%d%%" % used_perc, perfometer_linear(used_perc, "#60f020")
 
 perfometers['check_mk-esx_vsphere_hostsystem.cpu_usage'] = perfometer_esx_vsphere_hostsystem_cpu
+
+def perfometer_mq_queues(row, command, perf):
+    size = int(perf[0][1])
+    return "%s Messages" % size, perfometer_logarithmic(size, 1, 2, "#701141")
+
+perfometers['check_mk-mq_queues'] = perfometer_mq_queues
+
+def perfometer_apc_mod_pdu_modules(row, check_command, perf_data):
+    value = int(savefloat(perf_data[0][1]) * 100)
+    return "%skw" % perf_data[0][1], perfometer_logarithmic(value, 500, 2, "#3366CC")
+
+perfometers["check_mk-apc_mod_pdu_modules"] = perfometer_apc_mod_pdu_modules
+
+# Aiflow in l/s
+def perfometer_airflow_ls(row, check_command, perf_data):
+    value = int(float(perf_data[0][1])*100)
+    return "%sl/s" % perf_data[0][1], perfometer_logarithmic(value, 1000, 2, '#3366cc')
+
+perfometers["check_mk-apc_inrow_airflow"] = perfometer_airflow_ls
+
+def perfometer_fanspeed(row, check_command, perf_data):
+    value = float(perf_data[0][1])
+    return "%.2f%%" % value, perfometer_linear(value, "silver")
+
+perfometers["check_mk-apc_inrow_fanspeed"]  = perfometer_fanspeed
+
+def perfometer_fanspeed_logarithmic(row, check_command, perf_data):
+    value = float(perf_data[0][1])
+    return "%d rpm" % value, perfometer_logarithmic(value, 5000, 2, "silver")
+
+perfometers["check_mk-hitachi_hnas_fan"]  = perfometer_fanspeed_logarithmic

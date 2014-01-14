@@ -75,7 +75,7 @@
 //  | Declarations of macrosk, structs and function prototypes             |
 //  '----------------------------------------------------------------------'
 
-#define CHECK_MK_VERSION "1.2.3i1"
+#define CHECK_MK_VERSION "1.2.5i1"
 #define CHECK_MK_AGENT_PORT 6556
 #define SERVICE_NAME "Check_MK_Agent"
 #define KiloByte 1024
@@ -91,9 +91,10 @@
 #define SECTION_SYSTEMTIME   0x00000100
 #define SECTION_PLUGINS      0x00000200
 #define SECTION_LOCAL        0x00000400
-#define SECTION_MRPE         0x00000800
-#define SECTION_FILEINFO     0x00001000
-#define SECTION_LOGFILES     0x00002000
+#define SECTION_SPOOL        0x00000800
+#define SECTION_MRPE         0x00001000
+#define SECTION_FILEINFO     0x00002000
+#define SECTION_LOGFILES     0x00004000
 
 // Limits for static global arrays
 #define MAX_EVENTLOGS                 128
@@ -104,7 +105,7 @@
 // Maximum heap buffer for a single local/plugin script
 // This buffer contains the check output
 #define HEAP_BUFFER_DEFAULT         16384L
-#define HEAP_BUFFER_MAX            524288L
+#define HEAP_BUFFER_MAX           2097152L
 
 // Maximum timeout for a single local/plugin script
 #define DEFAULT_PLUGIN_TIMEOUT         60
@@ -138,14 +139,21 @@ struct winperf_counter {
 struct eventlog_config_entry {
     char name[256];
     int level;
+    int hide_context;
 };
 
-// Definitions for scripts
-enum caching_method {
-    CACHE_ASYNC,
-    CACHE_SYNC,
-    CACHE_OFF,
+// How single scripts are executed
+enum script_execution_mode {
+    SYNC, // inline
+    ASYNC // delayed
 };
+
+// How delayed scripts are executed
+enum script_async_execution {
+    PARALLEL,
+    SEQUENTIAL
+};
+
 
 // States for plugin and local scripts
 enum script_status {
@@ -158,47 +166,55 @@ enum script_status {
 };
 
 enum script_type {
-    TYPE_PLUGIN,
-    TYPE_LOCAL
+    PLUGIN,
+    LOCAL
 };
 
 struct script_container {
-    char         *path;
-    int           max_age;
-    int           timeout;
-    int           max_retries;
-    int           retry_count;
-    time_t        buffer_time;
-    char         *buffer;
-    char         *buffer_work;
-    script_type   type;
-    script_status status;
-    script_status last_problem;
-    volatile bool should_terminate;
-    HANDLE        worker_thread;
-    HANDLE        job_object;
+    char                  *path;
+    int                    max_age;
+    int                    timeout;
+    int                    max_retries;
+    int                    retry_count;
+    time_t                 buffer_time;
+    char                  *buffer;
+    char                  *buffer_work;
+    script_type            type;
+    script_execution_mode  execution_mode;
+    script_status          status;
+    script_status          last_problem;
+    volatile bool          should_terminate;
+    HANDLE                 worker_thread;
+    HANDLE                 job_object;
 };
 
 struct retry_config{
     char         *pattern;
     int           retries;
 };
-typedef vector<retry_config*> retry_config_t;
-retry_config_t retry_configs_local, retry_configs_plugin;
+typedef vector<retry_config*> retry_count_configs_t;
+retry_count_configs_t retry_configs_local, retry_configs_plugin;
 
 struct timeout_config {
     char         *pattern;
     int           timeout;
 };
-typedef vector<timeout_config*> timeout_config_t;
-timeout_config_t timeout_configs_local, timeout_configs_plugin;
+typedef vector<timeout_config*> timeout_configs_t;
+timeout_configs_t timeout_configs_local, timeout_configs_plugin;
 
 struct cache_config {
     char         *pattern;
     int           max_age;
 };
-typedef vector<cache_config*> cache_config_t;
-cache_config_t cache_configs_local, cache_configs_plugin;
+typedef vector<cache_config*> cache_configs_t;
+cache_configs_t cache_configs_local, cache_configs_plugin;
+
+struct execution_mode_config {
+    char                  *pattern;
+    script_execution_mode  mode;
+};
+typedef vector<execution_mode_config*> execution_mode_configs_t;
+execution_mode_configs_t execution_mode_configs_local, execution_mode_configs_plugin;
 
 typedef map<string, script_container*> script_containers_t;
 script_containers_t script_containers;
@@ -231,7 +247,9 @@ void crash_log(const char *format, ...);
 //  | Global variables                                                     |
 //  '----------------------------------------------------------------------'
 
-caching_method g_caching_method = CACHE_OFF;
+script_execution_mode  g_default_script_execution_mode  = SYNC;
+script_async_execution g_default_script_async_execution = SEQUENTIAL;
+
 bool verbose_mode               = false;
 bool g_crash_debug              = false;
 bool do_tcp                     = false;
@@ -289,6 +307,7 @@ char g_agent_directory[256];
 char g_current_directory[256];
 char g_plugins_dir[256];
 char g_local_dir[256];
+char g_spool_dir[256];
 char g_config_file[256];
 char g_crash_log[256];
 char g_connection_log[256];
@@ -320,7 +339,7 @@ typedef vector<char*> fileinfo_paths_t;
 fileinfo_paths_t g_fileinfo_paths;
 
 // Pointer to open crash log file, if crash_debug = on
-FILE  *g_connectionlog_file = 0;
+HANDLE g_connectionlog_file;
 struct timeval g_crashlog_start;
 bool   g_found_crash = false;
 
@@ -1048,7 +1067,6 @@ bool output_eventlog_entry(SOCKET &out, char *dllpath, EVENTLOGRECORD *event, ch
         dwFlags |= FORMAT_MESSAGE_FROM_HMODULE;
 
     DWORD len = FormatMessageW(
-            // DWORD len = FormatMessage(
         dwFlags,
         dll,
         event->EventID,
@@ -1056,46 +1074,46 @@ bool output_eventlog_entry(SOCKET &out, char *dllpath, EVENTLOGRECORD *event, ch
         wmsgbuffer,
         // msgbuffer,
         2048,
-        (char **)strings);
+        (char **)strings
+    );
 
-            if (dll)
-            FreeLibrary(dll);
+    if (dll)
+        FreeLibrary(dll);
 
-            if (len)
-            {
-            // convert message to UTF-8
-            len = WideCharToMultiByte(CP_UTF8, 0, wmsgbuffer, -1, msgbuffer, sizeof(msgbuffer), NULL, NULL);
-            }
+    if (len) {
+        // convert message to UTF-8
+        len = WideCharToMultiByte(CP_UTF8, 0, wmsgbuffer, -1, msgbuffer, sizeof(msgbuffer), NULL, NULL);
+    }
 
-            if (len == 0) // message could not be converted
-            {
-                // if conversion was not successfull while trying to load a DLL, we return a
-                // failure. Our parent function will then retry later without a DLL path.
-                if (dllpath)
-                    return false;
+    if (len == 0) // message could not be converted
+    {
+        // if conversion was not successfull while trying to load a DLL, we return a
+        // failure. Our parent function will then retry later without a DLL path.
+        if (dllpath)
+            return false;
 
-                // if message cannot be converted, then at least output the text strings.
-                // We render all messages one after the other into msgbuffer, separated
-                // by spaces.
-                memset(msgbuffer, 0, sizeof(msgbuffer)); // avoids problems with 0-termination
-                char *w = msgbuffer;
-                int sizeleft = sizeof(msgbuffer) - 1; // leave one byte for termination
-                int n = 0;
-                while (strings[n]) // string array is zero terminated
-                {
-                    WCHAR *s = strings[n];
-                    DWORD len = WideCharToMultiByte(CP_UTF8, 0, s, -1, w, sizeleft, NULL, NULL);
-                    if (!len)
-                        break;
-                    sizeleft -= len;
-                    w += len;
-                    if (sizeleft <= 0)
-                        break;
-                    n++;
-                    if (strings[n])
-                        *w++ = ' ';
-                }
-            }
+        // if message cannot be converted, then at least output the text strings.
+        // We render all messages one after the other into msgbuffer, separated
+        // by spaces.
+        memset(msgbuffer, 0, sizeof(msgbuffer)); // avoids problems with 0-termination
+        char *w = msgbuffer;
+        int sizeleft = sizeof(msgbuffer) - 1; // leave one byte for termination
+        int n = 0;
+        while (strings[n]) // string array is zero terminated
+        {
+            WCHAR *s = strings[n];
+            DWORD len = WideCharToMultiByte(CP_UTF8, 0, s, -1, w, sizeleft, NULL, NULL);
+            if (!len)
+                break;
+            sizeleft -= len;
+            w += len;
+            if (sizeleft <= 0)
+                break;
+            n++;
+            if (strings[n])
+                *w++ = ' ';
+        }
+    }
 
     // replace newlines with spaces. check_mk expects one message each line.
     char *w = msgbuffer;
@@ -1120,7 +1138,7 @@ bool output_eventlog_entry(SOCKET &out, char *dllpath, EVENTLOGRECORD *event, ch
 
 void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
         DWORD bytesread, DWORD *record_number, bool just_find_end,
-        int *worst_state, int level)
+        int *worst_state, int level, int hide_context)
 {
     WCHAR *strings[64];
     char regpath[128];
@@ -1146,7 +1164,7 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
                 break;
             case EVENTLOG_INFORMATION_TYPE:
             case EVENTLOG_AUDIT_SUCCESS:
-                type_char = level == 0 ? 'I' : '.';
+                type_char = level == 0 ? 'O' : '.';
                 this_state = 0;
                 break;
             case EVENTLOG_AUDIT_FAILURE:
@@ -1163,7 +1181,7 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
 
         // If we are not just scanning for the current end and the worst state,
         // we output the event message
-        if (!just_find_end)
+        if (!just_find_end && (!hide_context || type_char != '.'))
         {
             // The source name is the name of the application that produced the event
             // It is UTF-16 encoded
@@ -1181,12 +1199,18 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
             DWORD num_strings = event->NumStrings;
             WCHAR *s = (WCHAR *)(((char *)event) + event->StringOffset);
             unsigned ns;
-            for (ns = 0; ns < num_strings; ns++) {
-                if (ns >= 63) break;
-                strings[ns] = s;
-                s += wcslen(s) + 1;
+            for (ns = 0; ns < 63; ns++) {
+                if (ns < num_strings) {
+                    strings[ns] = s;
+                    s += wcslen(s) + 1;
+                }
+                else
+                    // Sometimes the eventlog record does not provide
+                    // enough strings for the message template. Causes crash...
+                    // -> Fill the rest with empty strings
+                    strings[ns] = (WCHAR *)"";
             }
-            strings[ns] = 0; // end marker in array
+            strings[63] = 0; // end marker in array
 
             // Windows eventlog entries refer to texts stored in a DLL >:-P
             // We need to load this DLL. First we need to look up which
@@ -1234,14 +1258,14 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
         } // type_char != '.'
 
         bytesread -= event->Length;
-        crash_log("     - record %d: event_processed, bytesread %d, event->Length %d", *record_number, bytesread, event->Length); 
+        crash_log("     - record %d: event_processed, bytesread %d, event->Length %d", *record_number, bytesread, event->Length);
         event = (EVENTLOGRECORD *) ((LPBYTE) event + event->Length);
     }
 }
 
 
 void output_eventlog(SOCKET &out, const char *logname,
-        DWORD *record_number, bool just_find_end, int level)
+        DWORD *record_number, bool just_find_end, int level, int hide_context)
 {
     crash_log(" - event log \"%s\":", logname);
 
@@ -1298,7 +1322,7 @@ void output_eventlog(SOCKET &out, const char *logname,
                 {
                     crash_log("   . got entries starting at %d (%d bytes)", *record_number + 1, bytesread);
                     process_eventlog_entries(out, logname, eventlog_buffer,
-                            bytesread, record_number, just_find_end || t==0, &worst_state, level);
+                            bytesread, record_number, just_find_end || t==0, &worst_state, level, hide_context);
                 }
                 else {
                     DWORD error = GetLastError();
@@ -1482,7 +1506,7 @@ void save_logwatch_offsets()
     fclose(file);
 }
 
-void parse_logwatch_state_line(char *line) 
+void parse_logwatch_state_line(char *line)
 {
     /* Example: line = "M://log1.log|98374598374|0|16"; */
     rstrip(line);
@@ -1491,11 +1515,17 @@ void parse_logwatch_state_line(char *line)
     *p = 0;
     char *path = line;
     p++;
+
     char *token = strtok(p, "|");
+    if (!token) return; // Ignore invalid lines
     unsigned long long file_id = string_to_llu(token);
+
     token = strtok(NULL, "|");
+    if (!token) return;
     unsigned long long file_size = string_to_llu(token);
+
     token = strtok(NULL, "|");
+    if (!token) return;
     unsigned long long offset = string_to_llu(token);
 
     logwatch_textfile *tf = new logwatch_textfile();
@@ -1532,20 +1562,20 @@ void update_script_statistics()
     memset(&g_script_stat, 0, sizeof(g_script_stat));
     while (it != script_containers.end()) {
         cont = it->second;
-        if (cont->type == TYPE_PLUGIN)
+        if (cont->type == PLUGIN)
             g_script_stat.pl_count++;
         else
             g_script_stat.lo_count++;
 
         switch (cont->last_problem) {
             case SCRIPT_TIMEOUT:
-                if (cont->type == TYPE_PLUGIN)
+                if (cont->type == PLUGIN)
                     g_script_stat.pl_timeouts++;
                 else
                     g_script_stat.lo_timeouts++;
                 break;
             case SCRIPT_ERROR:
-                if (cont->type == TYPE_PLUGIN)
+                if (cont->type == PLUGIN)
                     g_script_stat.pl_errors++;
                 else
                     g_script_stat.lo_errors++;
@@ -1928,18 +1958,20 @@ void section_eventlog(SOCKET &out)
             else {
                 // Get the configuration of that log file (which messages to send)
                 int level = 1;
+                int hide_context = 0;
                 for (int j=0; j<num_eventlog_configs; j++) {
                     const char *cname = eventlog_config[j].name;
                     if (!strcmp(cname, "*") ||
                             !strcasecmp(cname, eventlog_names[i]))
                     {
                         level = eventlog_config[j].level;
+                        hide_context = eventlog_config[j].hide_context;
                         break;
                     }
                 }
                 if (level != -1) {
                     output_eventlog(out, eventlog_names[i], &known_record_numbers[i],
-                            first_run && !logwatch_send_initial_entries, level);
+                            first_run && !logwatch_send_initial_entries, level, hide_context);
                 }
             }
         }
@@ -2070,61 +2102,70 @@ bool handle_fileinfo_config_variable(char *var, char *value)
 bool handle_script_config_variable(char *var, char *value, script_type type)
 {
     if (!strncmp(var, "timeout ", 8)) {
-        char* script_pattern  = lstrip(var + 8);
-        timeout_config* entry = new timeout_config();
+        char *script_pattern  = lstrip(var + 8);
+        timeout_config *entry = new timeout_config();
         entry->pattern        = strdup(script_pattern);
         entry->timeout        = atoi(value);
-        if (type == TYPE_PLUGIN)
+        if (type == PLUGIN)
             timeout_configs_plugin.push_back(entry);
         else
             timeout_configs_local.push_back(entry);
     }
     else if (!strncmp(var, "cache_age ", 10)) {
-        char* plugin_pattern = lstrip(var + 10);
+        char *plugin_pattern = lstrip(var + 10);
         cache_config* entry  = new cache_config();
         entry->pattern       = strdup(plugin_pattern);
         entry->max_age       = atoi(value);
-        if (type == TYPE_PLUGIN)
+        if (type == PLUGIN)
             cache_configs_plugin.push_back(entry);
         else
             cache_configs_local.push_back(entry);
     } else if (!strncmp(var, "retry_count ", 12)) {
-        char* plugin_pattern = lstrip(var + 12);
-        retry_config* entry  = new retry_config();
+        char *plugin_pattern = lstrip(var + 12);
+        retry_config *entry  = new retry_config();
         entry->pattern       = strdup(plugin_pattern);
         entry->retries       = atoi(value);
-        if (type == TYPE_PLUGIN)
+        if (type == PLUGIN)
             retry_configs_plugin.push_back(entry);
         else
             retry_configs_local.push_back(entry);
+    } else if (!strncmp(var, "execution ", 10)) {
+        char *plugin_pattern = lstrip(var + 10);
+        execution_mode_config *entry  = new execution_mode_config();
+        entry->pattern       = strdup(plugin_pattern);
+        entry->mode          = !strncmp(value, "async", 5) ? ASYNC : SYNC;
+        if (type == PLUGIN)
+            execution_mode_configs_plugin.push_back(entry);
+        else
+            execution_mode_configs_local.push_back(entry);
     }
     return true;
 }
 
 bool handle_plugin_config_variable(char *var, char *value)
 {
-    return handle_script_config_variable(var, value, TYPE_PLUGIN);
+    return handle_script_config_variable(var, value, PLUGIN);
 }
 
 bool handle_local_config_variable(char *var, char *value)
 {
-    return handle_script_config_variable(var, value, TYPE_LOCAL);
+    return handle_script_config_variable(var, value, LOCAL);
 }
 
 int get_script_timeout(char *name, script_type type)
 {
-    timeout_config_t* configs = type == TYPE_PLUGIN ? &timeout_configs_plugin : &timeout_configs_local;
-    for (timeout_config_t::iterator it = configs->begin();
+    timeout_configs_t* configs = type == PLUGIN ? &timeout_configs_plugin : &timeout_configs_local;
+    for (timeout_configs_t::iterator it = configs->begin();
             it != configs->end(); it++)
         if (globmatch((*it)->pattern, name))
             return (*it)->timeout;
-    return type == TYPE_PLUGIN ? DEFAULT_PLUGIN_TIMEOUT : DEFAULT_LOCAL_TIMEOUT;
+    return type == PLUGIN ? DEFAULT_PLUGIN_TIMEOUT : DEFAULT_LOCAL_TIMEOUT;
 }
 
 int get_script_cache_age(char *name, script_type type)
 {
-    cache_config_t* configs = type == TYPE_PLUGIN ? &cache_configs_plugin : &cache_configs_local;
-    for (cache_config_t::iterator it = configs->begin();
+    cache_configs_t* configs = type == PLUGIN ? &cache_configs_plugin : &cache_configs_local;
+    for (cache_configs_t::iterator it = configs->begin();
             it != configs->end(); it++)
         if (globmatch((*it)->pattern, name))
             return (*it)->max_age;
@@ -2133,14 +2174,23 @@ int get_script_cache_age(char *name, script_type type)
 
 int get_script_max_retries(char *name, script_type type)
 {
-    retry_config_t* configs = type == TYPE_PLUGIN ? &retry_configs_plugin : &retry_configs_local;
-    for (retry_config_t::iterator it = configs->begin();
+    retry_count_configs_t* configs = type == PLUGIN ? &retry_configs_plugin : &retry_configs_local;
+    for (retry_count_configs_t::iterator it = configs->begin();
             it != configs->end(); it++)
         if (globmatch((*it)->pattern, name))
             return (*it)->retries;
     return 0;
 }
 
+script_execution_mode get_script_execution_mode(char *name, script_type type)
+{
+    execution_mode_configs_t* configs = type == PLUGIN ? &execution_mode_configs_plugin : &execution_mode_configs_local;
+    for (execution_mode_configs_t::iterator it = configs->begin();
+            it != configs->end(); it++)
+        if (globmatch((*it)->pattern, name))
+            return (*it)->mode;
+    return g_default_script_execution_mode;
+}
 
 //   .----------------------------------------------------------------------.
 //   |     ____                    _                                        |
@@ -2364,80 +2414,38 @@ DWORD WINAPI ScriptWorkerThread(LPVOID lpParam)
     return 0;
 }
 
-// Run all programs in given dir. If dry_run is set, only create the script_container and return
-void run_external_programs(char *dirname, script_type type, bool dry_run = false)
+
+void run_script_container(script_container *cont)
 {
-    DIR *dir = opendir(dirname);
+    if ( (cont->type == PLUGIN && !(enabled_sections & SECTION_PLUGINS)) ||
+         (cont->type == LOCAL  && !(enabled_sections & SECTION_LOCAL)) )
+        return;
+
     time_t now = time(0);
-    if (dir) {
-        struct dirent *de;
-        while (0 != (de = readdir(dir))) {
-            char *name = de->d_name;
-
-            if (name[0] != '.' && !banned_exec_name(name)) {
-                char path[512];
-                snprintf(path, sizeof(path), "%s\\%s", dirname, name);
-                char newpath[512];
-                // If the path in question is a directory -> return
-                DWORD dwAttr = GetFileAttributes(path);
-                if(dwAttr != 0xffffffff && (dwAttr & FILE_ATTRIBUTE_DIRECTORY)) {
-                    continue;
-                }
-
-                char *command = add_interpreter(path, newpath);
-                // Look if there is already an script_container available for this program
-                script_container* cont = NULL;
-                script_containers_t::iterator it_cont = script_containers.find(string(command));
-                if (it_cont == script_containers.end()) {
-                    // create new entry for this program
-                    cont = new script_container();
-                    cont->path             = strdup(command);
-                    cont->buffer_time      = 0;
-                    cont->buffer           = NULL;
-                    cont->buffer_work      = NULL;
-                    cont->type             = type;
-                    cont->should_terminate = 0;
-                    cont->timeout          = get_script_timeout(name, type);
-                    cont->max_retries      = get_script_max_retries(name, type);
-                    cont->max_age          = get_script_cache_age(name, type);
-                    cont->status           = SCRIPT_IDLE;
-                    cont->last_problem     = SCRIPT_NONE;
-                    script_containers[cont->path] = cont;
-                    if (dry_run)
-                        continue;
-                } else
-                    cont = it_cont->second;
-
-                if (now - cont->buffer_time >= cont->max_age) {
-                    // Check if the thread within this cont is still collecting data
-                    // or a thread has finished but its data wasnt processed yet
-                    if (cont->status == SCRIPT_COLLECT || cont->status == SCRIPT_FINISHED) {
-                        crash_log("Thread skip start: %s ; reason: %s", cont->path,
-                                cont->status == SCRIPT_COLLECT ? "thread already running" : "new data available");
-                        continue;
-                    }
-                    cont->buffer_time = time(0);
-                    cont->status = SCRIPT_COLLECT;
-                    crash_log("Thread start: %s", cont->path);
-                    cont->worker_thread  = CreateThread(
-                            NULL,                 // default security attributes
-                            0,                    // use default stack size
-                            ScriptWorkerThread,   // thread function name
-                            cont,                 // argument to thread function
-                            0,                    // use default creation flags
-                            NULL);                // returns the thread identifier
-                    if (g_caching_method == CACHE_OFF || g_caching_method == CACHE_SYNC) {
-                        crash_log("Thread wait (%s): %s",
-                                 (g_caching_method == CACHE_OFF ? "CACHE OFF" : "CACHE SYNC"), cont->path);
-                        WaitForSingleObject(cont->worker_thread, INFINITE);
-                        crash_log("Thread finished: %s", cont->path);
-                    }
-                } else
-                    crash_log("Thread skip - using cache: %s", cont->path);
-
-            }
+    if (now - cont->buffer_time >= cont->max_age) {
+        // Check if the thread within this cont is still collecting data
+        // or a thread has finished but its data wasnt processed yet
+        if (cont->status == SCRIPT_COLLECT || cont->status == SCRIPT_FINISHED) {
+            return;
         }
-        closedir(dir);
+        cont->buffer_time = time(0);
+        cont->status = SCRIPT_COLLECT;
+
+        if (cont->worker_thread != INVALID_HANDLE_VALUE)
+            CloseHandle(cont->worker_thread);
+        cont->worker_thread  = CreateThread(
+                NULL,                 // default security attributes
+                0,                    // use default stack size
+                ScriptWorkerThread,   // thread function name
+                cont,                 // argument to thread function
+                0,                    // use default creation flags
+                NULL);                // returns the thread identifier
+
+        if (cont->execution_mode == SYNC ||
+            cont->execution_mode == ASYNC && g_default_script_async_execution == SEQUENTIAL)
+        {
+            WaitForSingleObject(cont->worker_thread, INFINITE);
+        }
     }
 }
 
@@ -2489,6 +2497,7 @@ void section_mrpe(SOCKET &out)
     {
         mrpe_entry *entry = *it_mrpe;
         output(out, "(%s) %s ", entry->plugin_name, entry->service_description);
+        crash_log("(%s) %s ", entry->plugin_name, entry->service_description);
 
         FILE *f = _popen(entry->command_line, "r");
         if (!f) {
@@ -2496,6 +2505,7 @@ void section_mrpe(SOCKET &out)
             continue;
         }
 
+        crash_log("Script started -> collecting data");
         if (f) {
             char buffer[8192];
             int bytes = fread(buffer, 1, sizeof(buffer) - 1, f);
@@ -2513,6 +2523,7 @@ void section_mrpe(SOCKET &out)
             int nagios_code = status;
             output(out, "%d %s\n", nagios_code, plugin_output);
         }
+        crash_log("Script finished");
     }
 }
 
@@ -2526,16 +2537,11 @@ void section_mrpe(SOCKET &out)
 //  |                                                                      |
 //  '----------------------------------------------------------------------'
 
-void section_local_collect()
-{
-    run_external_programs(g_local_dir, TYPE_LOCAL);
-}
-
 void section_local(SOCKET &out)
 {
     crash_log("<<<local>>>");
     output(out, "<<<local>>>\n");
-    output_external_programs(out, TYPE_LOCAL);
+    output_external_programs(out, LOCAL);
 }
 
 //  .----------------------------------------------------------------------.
@@ -2547,16 +2553,79 @@ void section_local(SOCKET &out)
 //  |                                 |___/                                |
 //  '----------------------------------------------------------------------'
 
-void section_plugins_collect()
-{
-    run_external_programs(g_plugins_dir, TYPE_PLUGIN);
-}
-
 void section_plugins(SOCKET &out)
 {
-    output_external_programs(out, TYPE_PLUGIN);
+    output_external_programs(out, PLUGIN);
 }
 
+
+// .-----------------------------------------------------------------------.
+// |                      ____                    _                        |
+// |                     / ___| _ __   ___   ___ | |                       |
+// |                     \___ \| '_ \ / _ \ / _ \| |                       |
+// |                      ___) | |_) | (_) | (_) | |                       |
+// |                     |____/| .__/ \___/ \___/|_|                       |
+// |                           |_|                                         |
+// '-----------------------------------------------------------------------'
+void section_spool(SOCKET &out)
+{
+    crash_log("<<<spool>>>");
+    // Look for files in the spool directory and append these files to
+    // the agent output. The name of the files may begin with a number
+    // of digits. If this is the case then it is interpreted as a time
+    // in seconds: the maximum allowed age of the file. Outdated files
+    // are simply being ignored.
+    DIR  *dir = opendir(g_spool_dir);
+    if (dir) {
+        WIN32_FIND_DATA filedata;
+        char path[512];
+        char buffer[4096];
+        time_t now = time(0);
+
+        struct dirent *de;
+        while (0 != (de = readdir(dir))) {
+            char *name = de->d_name;
+            if (name[0] == '.')
+                continue;
+
+            snprintf(path, sizeof(path), "%s\\%s", g_spool_dir, name);
+            int max_age = -1;
+            if (isdigit(*name))
+                max_age = atoi(name);
+
+            if (max_age >= 0) {
+                HANDLE h = FindFirstFileEx(path, FindExInfoStandard, &filedata, FindExSearchNameMatch, NULL, 0);
+                if (h != INVALID_HANDLE_VALUE) {
+                    double mtime = file_time(&(filedata.ftLastWriteTime));
+                    FindClose(h);
+                    int age = now - mtime;
+                    if (age > max_age) {
+                        crash_log("    %s: skipping outdated file: age is %d sec, max age is %d sec.",
+                            name, age, max_age);
+                        continue;
+                    }
+                }
+                else {
+                    crash_log("    %s: cannot determine file age", name);
+                    continue;
+                }
+            }
+            crash_log("    %s", name);
+
+            // Output file in blocks of 4kb
+            FILE *file = fopen(path, "r");
+            if (file) {
+                int bytes_read;
+                while (0 < (bytes_read = fread(buffer, 1, sizeof(buffer)-1, file))) {
+                    buffer[bytes_read] = 0;
+                    output(out, "%s", buffer);
+                }
+                fclose(file);
+            }
+        }
+        closedir(dir);
+    }
+}
 
 
 
@@ -2587,6 +2656,7 @@ void section_check_mk(SOCKET &out)
     output(out, "ConfigFile: %s\n",       g_config_file);
     output(out, "AgentDirectory: %s\n",   g_agent_directory);
     output(out, "PluginsDirectory: %s\n", g_plugins_dir);
+    output(out, "SpoolDirectory: %s\n",   g_spool_dir);
     output(out, "LocalDirectory: %s\n",   g_local_dir);
     output(out, "ScriptStatistics: Plugin C:%d E:%d T:%d "
             "Local C:%d E:%d T:%d\n",
@@ -2838,7 +2908,14 @@ void open_crash_log()
             g_found_crash = true;
         }
 
-        g_connectionlog_file = fopen(g_connection_log, "w");
+        // Threads are not allowed to access the crash_log
+        g_connectionlog_file = CreateFile(TEXT(g_connection_log),
+            GENERIC_WRITE,            // open for writing
+            FILE_SHARE_READ,          // do not share
+            NULL,                     // no security
+            CREATE_ALWAYS,            // existing file only
+            FILE_ATTRIBUTE_NORMAL,    // normal file
+            NULL);
         gettimeofday(&g_crashlog_start, 0);
         time_t now = time(0);
         struct tm *t = localtime(&now);
@@ -2854,9 +2931,10 @@ void close_crash_log()
     if (g_crash_debug) {
         WaitForSingleObject(crashlogMutex, INFINITE);
         crash_log("Closing crash log (no crash this time)");
-        fclose(g_connectionlog_file);
-        unlink(g_success_log);
-        rename(g_connection_log, g_success_log);
+
+        CloseHandle(g_connectionlog_file);
+        DeleteFile(g_success_log);
+        MoveFile(g_connection_log, g_success_log);
         ReleaseMutex(crashlogMutex);
     }
 }
@@ -2875,7 +2953,8 @@ void crash_log(const char *format, ...)
 //    printf("\n");
 //    va_end (args);
 
-    if (g_connectionlog_file) {
+    char buffer[1024];
+    if (g_connectionlog_file != INVALID_HANDLE_VALUE) {
         gettimeofday(&tv, 0);
         long int ellapsed_usec = tv.tv_usec - g_crashlog_start.tv_usec;
         long int ellapsed_sec  = tv.tv_sec - g_crashlog_start.tv_sec;
@@ -2886,10 +2965,18 @@ void crash_log(const char *format, ...)
 
         va_list ap;
         va_start(ap, format);
-        fprintf(g_connectionlog_file, "%ld.%06ld ", ellapsed_sec, ellapsed_usec);
-        vfprintf(g_connectionlog_file, format, ap);
-        fputs("\n", g_connectionlog_file);
-        fflush(g_connectionlog_file);
+
+        DWORD dwBytesWritten = 0;
+        snprintf(buffer, sizeof(buffer), "%ld.%06ld ", ellapsed_sec, ellapsed_usec);
+        DWORD dwBytesToWrite = (DWORD)strlen(buffer);
+        WriteFile(g_connectionlog_file, buffer, dwBytesToWrite, &dwBytesWritten, NULL);
+
+        vsnprintf(buffer, sizeof(buffer), format, ap);
+        dwBytesToWrite = (DWORD)strlen(buffer);
+        WriteFile(g_connectionlog_file, buffer, dwBytesToWrite, &dwBytesWritten, NULL);
+
+        WriteFile(g_connectionlog_file, "\n", 1, &dwBytesWritten, NULL);
+        FlushFileBuffers(g_connectionlog_file);
     }
     ReleaseMutex(crashlogMutex);
 }
@@ -3105,13 +3192,27 @@ bool handle_global_config_variable(char *var, char *value)
         parse_execute(value);
         return true;
     }
+    else if (!strcmp(var, "async_script_execution")) {
+        if (!strcmp(value, "parallel"))
+            g_default_script_async_execution = PARALLEL;
+        else if (!strcmp(value, "sequential"))
+            g_default_script_async_execution = SEQUENTIAL;
+        return true;
+    }
+    // Do no longer use this!
     else if (!strcmp(var, "caching_method")) {
-        if (!strcmp(value, "async"))
-            g_caching_method = CACHE_ASYNC;
-        else if (!strcmp(value, "sync"))
-            g_caching_method = CACHE_SYNC;
-        else if (!strcmp(value, "off"))
-            g_caching_method = CACHE_OFF;
+        if (!strcmp(value, "async")) {
+            g_default_script_async_execution = PARALLEL;
+            g_default_script_execution_mode  = ASYNC;
+        }
+        else if (!strcmp(value, "sync")) {
+            g_default_script_async_execution = SEQUENTIAL;
+            g_default_script_execution_mode  = ASYNC;
+        }
+        else if (!strcmp(value, "off")) {
+            g_default_script_async_execution = SEQUENTIAL;
+            g_default_script_execution_mode  = SYNC;
+        }
         return true;
     }
     else if (!strcmp(var, "crash_debug")) {
@@ -3145,6 +3246,8 @@ bool handle_global_config_variable(char *var, char *value)
                 enabled_sections |= SECTION_PLUGINS;
             else if (!strcmp(word, "local"))
                 enabled_sections |= SECTION_LOCAL;
+            else if (!strcmp(word, "spool"))
+                enabled_sections |= SECTION_SPOOL;
             else if (!strcmp(word, "mrpe"))
                 enabled_sections |= SECTION_MRPE;
             else if (!strcmp(word, "fileinfo"))
@@ -3214,6 +3317,18 @@ bool handle_logwatch_config_variable(char *var, char *value)
         int level;
         char *logfilename = lstrip(var + 8);
         lowercase(logfilename);
+
+        // value might have the option nocontext
+        int hide_context = 0;
+        char *s = value;
+        while (*s && *s != ' ')
+            s++;
+        if (*s == ' ') {
+            if (!strcmp(s+1, "nocontext"))
+                hide_context = 1;
+        }
+        *s = 0;
+
         if (!strcmp(value, "off"))
             level = -1;
         else if (!strcmp(value, "all"))
@@ -3230,6 +3345,7 @@ bool handle_logwatch_config_variable(char *var, char *value)
 
         if (num_eventlog_configs < MAX_EVENTLOGS) {
             eventlog_config[num_eventlog_configs].level = level;
+            eventlog_config[num_eventlog_configs].hide_context = hide_context;
             strncpy(eventlog_config[num_eventlog_configs].name, logfilename, 256);
             num_eventlog_configs++;
         }
@@ -3645,6 +3761,7 @@ void output(SOCKET &out, const char *format, ...)
 }
 
 
+
 //   .----------------------------------------------------------------------.
 //   |                        __  __       _                                |
 //   |                       |  \/  | __ _(_)_ __                           |
@@ -3681,7 +3798,11 @@ void do_test()
 {
     do_tcp = false;
     SOCKET dummy;
+    open_crash_log();
+    crash_log("Started in test mode.");
+    output(dummy, "Enabld: %08x\n", enabled_sections);
     output_data(dummy);
+    close_crash_log();
 }
 
 
@@ -3704,52 +3825,94 @@ DWORD WINAPI DataCollectionThread( LPVOID lpParam )
     do
     {
         g_data_collection_retriggered = false;
-        if (enabled_sections & SECTION_PLUGINS) {
-            section_plugins_collect();
-        }
-        if (enabled_sections & SECTION_LOCAL) {
-            section_local_collect();
-        }
+        for (script_containers_t::iterator it_cont = script_containers.begin();
+                it_cont != script_containers.end(); it_cont++)
+            if (it_cont->second->execution_mode == ASYNC)
+                run_script_container(it_cont->second);
     } while (g_data_collection_retriggered);
     return 0;
 }
 
-void start_external_data_collection()
+void determine_available_scripts(script_type type)
 {
+    char *dirname = type == PLUGIN ? g_plugins_dir : g_local_dir;
+    DIR  *dir     = opendir(dirname);
+    if (dir) {
+        struct dirent *de;
+        while (0 != (de = readdir(dir))) {
+            char *name = de->d_name;
 
-    // If the thread is still running, just tell him to do another cycle
-    // This can only apply to CACHE_SYNC and CACHE_ASYNC, since in
-    // CACHE_OFF mode we always wait till the thread has finished
-    DWORD dwExitCode = 0;
-    if(GetExitCodeThread(g_collection_thread, &dwExitCode))
-    {
-        if (dwExitCode == STILL_ACTIVE) {
-            g_data_collection_retriggered = true;
-            return;
+            if (name[0] != '.' && !banned_exec_name(name)) {
+                char path[512];
+                snprintf(path, sizeof(path), "%s\\%s", dirname, name);
+                char newpath[512];
+                // If the path in question is a directory -> continue
+                DWORD dwAttr = GetFileAttributes(path);
+                if(dwAttr != 0xffffffff && (dwAttr & FILE_ATTRIBUTE_DIRECTORY)) {
+                    continue;
+                }
+
+                char *command = add_interpreter(path, newpath);
+                // Look if there is already an script_container available for this program
+                script_container* cont = NULL;
+                script_containers_t::iterator it_cont = script_containers.find(string(command));
+                if (it_cont == script_containers.end()) {
+                    // create new entry for this program
+                    cont = new script_container();
+                    cont->path             = strdup(command);
+                    cont->buffer_time      = 0;
+                    cont->buffer           = NULL;
+                    cont->buffer_work      = NULL;
+                    cont->type             = type;
+                    cont->should_terminate = 0;
+                    cont->execution_mode   = get_script_execution_mode(name, type);
+                    cont->timeout          = get_script_timeout(name, type);
+                    cont->max_retries      = get_script_max_retries(name, type);
+                    cont->max_age          = get_script_cache_age(name, type);
+                    cont->status           = SCRIPT_IDLE;
+                    cont->last_problem     = SCRIPT_NONE;
+                    script_containers[cont->path] = cont;
+                }
+            }
         }
+        closedir(dir);
     }
+}
 
-    crash_log("Start thread for collecting local/plugin data");
-    g_collection_thread = CreateThread(NULL, // default security attributes
-            0,                    // use default stack size
-            DataCollectionThread, // thread function name
-            NULL,                 // argument to thread function
-            0,                    // use default creation flags
-            NULL);                // returns the thread identifier
+void collect_script_data(script_execution_mode mode)
+{
+    if (mode == SYNC) {
+        crash_log("Collecting sync local/plugin data");
+        for (script_containers_t::iterator it_cont = script_containers.begin();
+             it_cont != script_containers.end(); it_cont++)
+            if (it_cont->second->execution_mode == SYNC)
+                run_script_container(it_cont->second);
+    }
+    else if (mode == ASYNC) {
+        // If the thread is still running, just tell him to do another cycle
+        DWORD dwExitCode = 0;
+        if (GetExitCodeThread(g_collection_thread, &dwExitCode))
+        {
+            if (dwExitCode == STILL_ACTIVE) {
+                g_data_collection_retriggered = true;
+                return;
+            }
+        }
 
-    // If CACHE_OFF is set are waiting till the thread has finished
-    if (g_caching_method == CACHE_OFF)
-        WaitForSingleObject(g_collection_thread, INFINITE);
+        if (g_collection_thread != INVALID_HANDLE_VALUE)
+            CloseHandle(g_collection_thread);
+        crash_log("Start async thread for collecting local/plugin data");
+        g_collection_thread = CreateThread(NULL, // default security attributes
+                0,                    // use default stack size
+                DataCollectionThread, // thread function name
+                NULL,                 // argument to thread function
+                0,                    // use default creation flags
+                NULL);                // returns the thread identifier
+    }
 }
 
 void do_adhoc()
 {
-
-    // If caching is activated do an initial data collection run on startup
-    // Otherwise we might miss some important data on the first inventory
-    if (g_caching_method != CACHE_OFF)
-        start_external_data_collection();
-
     do_tcp = true;
     printf("Listening for TCP connections on port %d\n", g_port);
     printf("Close window or press Ctrl-C to exit\n");
@@ -3769,6 +3932,9 @@ void output_data(SOCKET &out)
         output_crash_log(out);
 
     update_script_statistics();
+    // Check if there are new scripts available
+    determine_available_scripts(PLUGIN);
+    determine_available_scripts(LOCAL);
 
     if (enabled_sections & SECTION_CHECK_MK)
         section_check_mk(out);
@@ -3791,15 +3957,15 @@ void output_data(SOCKET &out)
     if (enabled_sections & SECTION_LOGFILES)
         section_logfiles(out);
 
-    // Collect local / plugins data for later usage
-    // These sections are handled in seperate threads and processes
-    if (g_caching_method == CACHE_OFF)
-        start_external_data_collection();
+    // Start data collection of SYNC scripts
+    collect_script_data(SYNC);
 
     if (enabled_sections & SECTION_PLUGINS)
         section_plugins(out);
     if (enabled_sections & SECTION_LOCAL)
         section_local(out);
+    if (enabled_sections & SECTION_SPOOL)
+        section_spool(out);
     if (enabled_sections & SECTION_MRPE)
         section_mrpe(out);
     if (enabled_sections & SECTION_SYSTEMTIME)
@@ -3812,8 +3978,8 @@ void output_data(SOCKET &out)
         force_tcp_output = false;
     }
 
-    if (g_caching_method != CACHE_OFF)
-        start_external_data_collection();
+    // Start data collection of ASYNC scripts
+    collect_script_data(ASYNC);
 }
 
 
@@ -3824,7 +3990,7 @@ void cleanup()
 
     unregister_all_eventlogs(); // frees a few bytes
 
-    for (execute_suffixes_t::iterator it_ex = g_execute_suffixes.begin(); 
+    for (execute_suffixes_t::iterator it_ex = g_execute_suffixes.begin();
             it_ex != g_execute_suffixes.end(); it_ex++)
         free(*it_ex);
     g_execute_suffixes.clear();
@@ -3881,13 +4047,14 @@ void get_agent_dir(char *buffer, int size)
 
 }
 
-void determine_directories() 
+void determine_directories()
 {
     // Determine directories once and forever
     getcwd(g_current_directory, sizeof(g_current_directory));
     get_agent_dir(g_agent_directory, sizeof(g_agent_directory));
     snprintf(g_plugins_dir, sizeof(g_plugins_dir), "%s\\plugins", g_agent_directory);
     snprintf(g_local_dir, sizeof(g_local_dir), "%s\\local", g_agent_directory);
+    snprintf(g_spool_dir, sizeof(g_spool_dir), "%s\\spool", g_agent_directory);
     snprintf(g_logwatch_statefile, sizeof(g_logwatch_statefile), "%s\\logstate.txt", g_agent_directory);
 }
 

@@ -93,10 +93,13 @@ def render_json(rows, view, group_painters, painters, num_columns, show_checkbox
             else:
                 html.write(",")
             tdclass, content = paint_painter(p[0], row)
-            content = str(content).replace("<br>","\n")
+            if type(content) == unicode:
+	        content = content.encode("utf-8")
+            else:
+                content = str(content)
+            content = content.replace("<br>","\n")
             stripped = html.strip_tags(content)
-            utf8 = stripped.encode("utf-8")
-            html.write(encode_string_json(utf8))
+            html.write(encode_string_json(content))
         html.write("]")
 
     html.write("\n]\n")
@@ -131,6 +134,7 @@ def render_csv(rows, view, group_painters, painters, num_columns, show_checkboxe
         else:
             html.write(csv_separator)
         content = p[0]["name"]
+        content = type(content) in [ int, float ] and str(content) or content
         stripped = html.strip_tags(content).replace('\n', '').replace('"', '""')
         html.write('"%s"' % stripped.encode("utf-8"))
 
@@ -143,6 +147,7 @@ def render_csv(rows, view, group_painters, painters, num_columns, show_checkboxe
             else:
                 html.write(csv_separator)
             tdclass, content = paint_painter(p[0], row)
+            content = type(content) in [ int, float ] and str(content) or content
             stripped = html.strip_tags(content).replace('\n', '').replace('"', '""')
             html.write('"%s"' % stripped.encode("utf-8"))
 

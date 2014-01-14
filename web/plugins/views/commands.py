@@ -249,10 +249,10 @@ def command_acknowledgement(cmdtag, spec, row):
 multisite_commands.append({
     "tables"      : [ "host", "service" ],
     "permission"  : "action.acknowledge",
-    "title"       : _("Acknowledge"),
+    "title"       : _("Acknowledging Problems"),
     "render"      : lambda: \
         html.button("_acknowledge", _("Acknowledge")) == \
-        html.button("_remove_ack", _("Remove Acknowledge")) == \
+        html.button("_remove_ack", _("Remove Acknowledgement")) == \
         html.write("<hr>") == \
         html.checkbox("_ack_sticky", True, label=_("sticky")) == \
         html.checkbox("_ack_notify", True, label=_("send notification")) == \
@@ -504,3 +504,57 @@ multisite_commands.append({
       ( "DEL_%s_COMMENT;%d" % (cmdtag, spec),
         _("remove"))
 })
+
+#   .--Stars *-------------------------------------------------------------.
+#   |                   ____  _                                            |
+#   |                  / ___|| |_ __ _ _ __ ___  __/\__                    |
+#   |                  \___ \| __/ _` | '__/ __| \    /                    |
+#   |                   ___) | || (_| | |  \__ \ /_  _\                    |
+#   |                  |____/ \__\__,_|_|  |___/   \/                      |
+#   |                                                                      |
+#   '----------------------------------------------------------------------'
+
+def load_stars():
+    return set(config.load_user_file("favorites", []))
+
+def save_stars(stars):
+    config.save_user_file("favorites", list(stars))
+
+
+def command_star(cmdtag, spec, row):
+    if html.var("_star") or html.var("_unstar"):
+        star = html.var("_star") and 1 or 0
+        if star:
+            title = _("<b>add to you favorites</b>")
+        else:
+            title = _("<b>remove from your favorites</b>")
+        return "STAR;%d;%s" % (star, spec), title
+
+
+def command_executor_star(command, site):
+    foo, star, spec = command.split(";", 2)
+    stars = load_stars()
+    if star == "0" and spec in stars:
+        stars.remove(spec)
+    elif star == "1":
+        stars.add(spec)
+    save_stars(stars)
+
+config.declare_permission("action.star",
+    _("Use favorites"),
+    _("This permission allows a user to make certain host and services "
+      "his personal favorites. Favorites can be used for a having a fast "
+      "access to items that are needed on a regular base."),
+    [ "user", "admin" ])
+
+multisite_commands.append({
+    "tables"         : [ "host", "service" ],
+    "permission"     : "action.star",
+    "title"          : _("Favorites"),
+    "render"         : lambda: \
+       html.button("_star",   _("Add to Favorites")) == \
+       html.button("_unstar", _("Remove from Favorites")),
+    "action"         : command_star,
+    "executor"       : command_executor_star,
+})
+

@@ -65,11 +65,11 @@ def etherbox_get_sensor(item, item_type, info):
     raise Exception("Sensor not found")
 
 def etherbox_scan(oid):
-    return oid(".1.3.6.1.4.1.14848.2.1.1.1.0").startswith("Version"),
+    return oid(".1.3.6.1.4.1.14848.2.1.1.1.0").startswith("Version")
 
 etherbox_info = [
                  ( ".1.3.6.1.4.1.14848.2.1.1.3", [ '' ]), # temperature unit
-                 ( ".1.3.6.1.4.1.14848.2.1.2.1.1", [ OID_END, '' ]), # index 
+                 ( ".1.3.6.1.4.1.14848.2.1.2.1.1", [ OID_END, '' ]), # index
                  ( ".1.3.6.1.4.1.14848.2.1.2.1.2", [ OID_END, '' ]), # name
                  ( ".1.3.6.1.4.1.14848.2.1.2.1.3", [ OID_END, '' ]), # type
                  ( ".1.3.6.1.4.1.14848.2.1.2.1.5", [ OID_END, '' ]), # value * 10
