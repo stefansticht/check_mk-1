@@ -30,12 +30,19 @@ def check_dns_arguments(params):
 
     if "server" in settings:
         args += ' -s %s' % quote_shell_string(settings["server"])
+    else:
+        args += " -s '$HOSTADDRESS$'"
 
     if "expected_address" in settings:
-        args += ' -a %s' % quote_shell_string(settings["expected_address"])
+        # Convert from old (str) to new (list of strings)
+        exp = settings["expected_address"]
+        if type(exp) in ( str, unicode ):
+            exp = [ exp ]
+        for entry in exp:
+            args += ' -a %s' % quote_shell_string(entry)
 
-    if "expected_authority" in settings:
-        args += ' -A %s' % quote_shell_string(settings["expected_authority"])
+    if settings.get("expected_authority"):
+        args += ' -A'
 
     if "response_time" in settings:
         args += ' -w %d' % int(settings["response_time"][0])

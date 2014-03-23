@@ -77,6 +77,7 @@ def inventory_esx_vsphere_counters_diskio(info):
 def check_esx_vsphere_counters_diskio(_no_item, _no_params, info):
     reads = 0
     writes = 0
+    latency = 0
     for counter, item, value, unit in info:
         if item == '':
             if counter == 'disk.read':
@@ -87,10 +88,12 @@ def check_esx_vsphere_counters_diskio(_no_item, _no_params, info):
             reads += int(value)
         elif counter == 'disk.numberWrite':
             writes += int(value)
+        elif counter == 'disk.deviceLatency':
+            latency = max(latency, int(value))
 
-    return 0, "%s/sec read, %s/sec write, IOs: %.2f/sec" % (
-        get_bytes_human_readable(read_bytes), get_bytes_human_readable(write_bytes), reads + writes,), \
-        [ ("read", read_bytes), ("write", write_bytes), ("ios", reads + writes) ]
+    return 0, "%s/sec read, %s/sec write, IOs: %.2f/sec, latency: %d ms" % (
+        get_bytes_human_readable(read_bytes), get_bytes_human_readable(write_bytes), reads + writes, latency), \
+        [ ("read", read_bytes), ("write", write_bytes), ("ios", reads + writes), ("latency" , latency) ]
 
 
 check_info['esx_vsphere_counters.diskio'] = {
@@ -272,6 +275,7 @@ check_info['esx_vsphere_counters.uptime'] = {
    'group':                   'uptime',
 }
 
+#.
 #   .--Ramdisk-------------------------------------------------------------.
 #   |                ____                     _ _     _                    |
 #   |               |  _ \ __ _ _ __ ___   __| (_)___| | __                |
@@ -282,12 +286,17 @@ check_info['esx_vsphere_counters.uptime'] = {
 #   +----------------------------------------------------------------------+
 
 # We assume that all ramdisks have the same size (in mb) on all hosts
+# -> To get size infos about unknown ramdisks, connect to the ESX host via
+#    SSH and check the size of the disk via "du" command
 esx_vsphere_counters_ramdisk_sizes = {
-    'root':       32,
-    'etc':        28,
-    'tmp':        192,
-    'hostdstats': 319,
-    'snmptraps':  1,
+    'root':           32,
+    'etc':            28,
+    'tmp':            192,
+    'hostdstats':     319,
+    'snmptraps':      1,
+    'upgradescratch': 300,
+    'ibmscratch':     300,
+    'sfcbtickets':    1,
 }
 
 def inventory_esx_vsphere_counters_ramdisk(info):
@@ -308,7 +317,10 @@ def check_esx_vsphere_counters_ramdisk(item, params, info):
             try:
                 size_mb  = esx_vsphere_counters_ramdisk_sizes[name]
             except KeyError:
-                return 3, 'Unhandled ramdisk found (%s)' % name
+                if item == name:
+                    return 3, 'Unhandled ramdisk found (%s)' % name
+                else:
+                    continue
             used_mb  = float(counter) / 1000
             avail_mb = size_mb - used_mb
             ramdisks.append((name, size_mb, avail_mb))

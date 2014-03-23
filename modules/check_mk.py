@@ -25,6 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 import os, sys, socket, time, getopt, glob, re, stat, py_compile, urllib, inspect
+import subprocess
 
 # These variable will be substituted at 'make dist' time
 check_mk_version  = '(inofficial)'
@@ -48,12 +49,24 @@ else:
     opt_verbose = False
     opt_debug = False
 
+#.
+#   .--Pathnames-----------------------------------------------------------.
+#   |        ____       _   _                                              |
+#   |       |  _ \ __ _| |_| |__  _ __   __ _ _ __ ___   ___  ___          |
+#   |       | |_) / _` | __| '_ \| '_ \ / _` | '_ ` _ \ / _ \/ __|         |
+#   |       |  __/ (_| | |_| | | | | | | (_| | | | | | |  __/\__ \         |
+#   |       |_|   \__,_|\__|_| |_|_| |_|\__,_|_| |_| |_|\___||___/         |
+#   |                                                                      |
+#   '----------------------------------------------------------------------'
+
+
 # are we running OMD? If yes, honor local/ hierarchy
 omd_root = os.getenv("OMD_ROOT", None)
 if omd_root:
     local_share              = omd_root + "/local/share/check_mk"
     local_checks_dir         = local_share + "/checks"
     local_notifications_dir  = local_share + "/notifications"
+    local_inventory_dir      = local_share + "/inventory"
     local_check_manpages_dir = local_share + "/checkman"
     local_agents_dir         = local_share + "/agents"
     local_mibs_dir           = local_share + "/mibs"
@@ -64,6 +77,7 @@ if omd_root:
 else:
     local_checks_dir         = None
     local_notifications_dir  = None
+    local_inventory_dir      = None
     local_check_manpages_dir = None
     local_agents_dir         = None
     local_mibs_dir           = None
@@ -71,15 +85,6 @@ else:
     local_pnp_templates_dir  = None
     local_doc_dir            = None
     local_locale_dir         = None
-
-#   +----------------------------------------------------------------------+
-#   |        ____       _   _                                              |
-#   |       |  _ \ __ _| |_| |__  _ __   __ _ _ __ ___   ___  ___          |
-#   |       | |_) / _` | __| '_ \| '_ \ / _` | '_ ` _ \ / _ \/ __|         |
-#   |       |  __/ (_| | |_| | | | | | | (_| | | | | | |  __/\__ \         |
-#   |       |_|   \__,_|\__|_| |_|_| |_|\__,_|_| |_| |_|\___||___/         |
-#   |                                                                      |
-#   +----------------------------------------------------------------------+
 
 # Pathnames, directories   and  other  settings.  All  these  settings
 # should be  overriden by  /usr/share/check_mk/modules/defaults, which
@@ -90,6 +95,7 @@ default_config_dir                 = '/etc/check_mk'
 check_mk_configdir                 = default_config_dir + "/conf.d"
 checks_dir                         = '/usr/share/check_mk/checks'
 notifications_dir                  = '/usr/share/check_mk/notifications'
+inventory_dir                      = '/usr/share/check_mk/inventory'
 agents_dir                         = '/usr/share/check_mk/agents'
 check_manpages_dir                 = '/usr/share/doc/check_mk/checks'
 modules_dir                        = '/usr/share/check_mk/modules'
@@ -167,6 +173,11 @@ if __name__ == "__main__":
             if not os.path.exists(check_mk_configfile):
                 sys.stderr.write("Missing configuration file %s.\n" % check_mk_configfile)
                 sys.exit(1)
+
+            # Also rewrite the location of the conf.d directory
+            if os.path.exists(check_mk_basedir + "/conf.d"):
+                check_mk_configdir = check_mk_basedir + "/conf.d"
+
         else:
             sys.stderr.write("Missing argument to option -c.\n")
             sys.exit(1)
@@ -185,18 +196,18 @@ else:
     check_mk_basedir = default_config_dir
     check_mk_configfile = default_config_dir + "/main.mk"
 
-
-#   +----------------------------------------------------------------------+
-#   |        ____       _     ____        __             _ _               |
-#   |       / ___|  ___| |_  |  _ \  ___ / _| __ _ _   _| | |_ ___         |
-#   |       \___ \ / _ \ __| | | | |/ _ \ |_ / _` | | | | | __/ __|        |
-#   |        ___) |  __/ |_  | |_| |  __/  _| (_| | |_| | | |_\__ \        |
-#   |       |____/ \___|\__| |____/ \___|_|  \__,_|\__,_|_|\__|___/        |
+#.
+#   .--Defaults------------------------------------------------------------.
+#   |                ____        __             _ _                        |
+#   |               |  _ \  ___ / _| __ _ _   _| | |_ ___                  |
+#   |               | | | |/ _ \ |_ / _` | | | | | __/ __|                 |
+#   |               | |_| |  __/  _| (_| | |_| | | |_\__ \                 |
+#   |               |____/ \___|_|  \__,_|\__,_|_|\__|___/                 |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
-
-# Before we read the configuration files we create default settings
-# for all variables. The user can easily override them.
+#   | Before we read the configuration files we create default settings    |
+#   | for all variables. The user can easily override them.                |
+#   '----------------------------------------------------------------------'
 
 # define magic keys for use in host extraconf lists
 PHYSICAL_HOSTS = [ '@physical' ] # all hosts but not clusters
@@ -211,6 +222,7 @@ agent_port                         = 6556
 agent_ports                        = []
 snmp_ports                         = [] # UDP ports used for SNMP
 tcp_connect_timeout                = 5.0
+use_dns_cache                      = True # prevent DNS by using own cache file
 delay_precompile                   = False  # delay Python compilation to Nagios execution
 restart_locking                    = "abort" # also possible: "wait", None
 check_submission                   = "file" # alternative: "pipe"
@@ -224,11 +236,13 @@ simulation_mode                    = False
 agent_simulator                    = False
 perfdata_format                    = "pnp" # also possible: "standard"
 check_mk_perfdata_with_times       = True
-debug_log                          = None
+debug_log                          = False
 monitoring_host                    = None # deprecated
 max_num_processes                  = 50
 
 # SNMP communities and encoding
+has_inline_snmp                    = False # is set to True by inline_snmp module, when available
+use_inline_snmp                    = True
 snmp_default_community             = 'public'
 snmp_communities                   = []
 snmp_timing                        = []
@@ -238,8 +252,10 @@ explicit_snmp_communities          = {} # override the rule based configuration
 # Inventory and inventory checks
 inventory_check_interval           = None # Nagios intervals (4h = 240)
 inventory_check_severity           = 1    # warning
+inventory_check_do_scan            = True # include SNMP scan for SNMP devices
 inventory_max_cachefile_age        = 120  # secs.
-always_cleanup_autochecks          = True
+inventory_check_autotrigger        = True # Automatically trigger inv-check after automation-inventory
+always_cleanup_autochecks          = None # For compatiblity with old configuration
 
 # Nagios templates and other settings concerning generation
 # of Nagios configuration files. No need to change these values.
@@ -274,6 +290,7 @@ snmp_hosts                           = [ (['snmp'], ALL_HOSTS) ]
 tcp_hosts                            = [ (['tcp'], ALL_HOSTS), (NEGATE, ['snmp'], ALL_HOSTS), (['!ping'], ALL_HOSTS) ]
 bulkwalk_hosts                       = []
 snmpv2c_hosts                        = []
+snmp_without_sys_descr               = []
 usewalk_hosts                        = []
 dyndns_hosts                         = [] # use host name as ip address for these hosts
 ignored_checktypes                   = [] # exclude from inventory
@@ -295,6 +312,7 @@ timeperiods                          = {} # needed for WATO
 clusters                             = {}
 clustered_services                   = []
 clustered_services_of                = {} # new in 1.1.4
+clustered_services_mapping           = [] # new for 1.2.5i1 Wato Rule
 datasource_programs                  = []
 service_aggregations                 = []
 service_dependencies                 = []
@@ -322,8 +340,10 @@ host_attributes                      = {} # needed by WATO, ignored by Check_MK
 ping_levels                          = [] # special parameters for host/PING check_command
 host_check_commands                  = [] # alternative host check instead of check_icmp
 check_mk_exit_status                 = [] # Rule for specifying CMK's exit status in case of various errors
+check_mk_agent_target_versions       = [] # Rule for defining expected version for agents
 check_periods                        = []
 snmp_check_interval                  = []
+inv_exports                          = {} # Rulesets for inventory export hooks
 
 
 # global variables used to cache temporary values (not needed in check_mk_base)
@@ -349,7 +369,7 @@ special_agent_info                 = {}
 # Now include the other modules. They contain everything that is needed
 # at check time (and many of what is also needed at administration time).
 try:
-    modules =  [ 'check_mk_base', 'snmp', 'notify', 'prediction', 'cmc' ]
+    modules =  [ 'check_mk_base', 'snmp', 'notify', 'prediction', 'cmc', 'inline_snmp' ]
     for module in modules:
         filename = modules_dir + "/" + module + ".py"
         if os.path.exists(filename):
@@ -375,8 +395,9 @@ except Exception, e:
 # those checks that do not support inventory. It must be known before
 # we read in all the checks
 def no_inventory_possible(checkname, info):
-    sys.stderr.write("Sorry. No inventory possible for check type %s.\n" % checkname)
-    sys.exit(3)
+    if opt_verbose:
+        sys.stdout.write("%s does not support inventory. Skipping it.\n" % checkname)
+    return []
 
 
 #   +----------------------------------------------------------------------+
@@ -435,30 +456,45 @@ if __name__ == "__main__":
 def output_check_info():
     print "Available check types:"
     print
-    print "                      plugin   perf-  in- "
-    print "Name                  type     data   vent.  service description"
+    print "                                 plugin  perf-  in- "
+    print "Name                             type    data   vent.  service description"
     print "-------------------------------------------------------------------------"
 
-    checks_sorted = check_info.items()
+    checks_sorted = check_info.items() + active_check_info.items()
     checks_sorted.sort()
     for check_type, check in checks_sorted:
         try:
+            if 'command_line' in check:
+                what = 'active'
+                ty_color = tty_blue
+            elif check_uses_snmp(check_type):
+                what = 'snmp'
+                ty_color = tty_magenta
+            else:
+                what = 'tcp'
+                ty_color = tty_yellow
+
             if check.get("has_perfdata", False):
                 p = tty_green + tty_bold + "yes" + tty_normal
             else:
                 p = "no"
-            if check["inventory_function"] == None:
+
+            if what == 'active':
+                i = '-'
+            elif check["inventory_function"] == None:
                 i = "no"
             else:
                 i = tty_blue + tty_bold + "yes" + tty_normal
 
-            if check_uses_snmp(check_type):
-                typename = tty_magenta + "snmp" + tty_normal
+            if what == 'active':
+                descr = '-'
             else:
-                typename = tty_yellow + "tcp " + tty_normal
+                descr = check["service_description"]
 
-            print (tty_bold + "%-19s" + tty_normal + "   %s     %-3s    %-3s    %s") % \
-                  (check_type, typename, p, i, check["service_description"])
+            print (tty_bold + "%-32s" + tty_normal
+                   + ty_color + " %-6s " + tty_normal
+                   + " %-3s    %-3s    %s") % \
+                  (check_type, what, p, i, descr)
         except Exception, e:
             sys.stderr.write("ERROR in check_type %s: %s\n" % (check_type, e))
 
@@ -567,8 +603,69 @@ def aggregated_service_name(hostname, servicedesc):
                     return aggrname
     return ""
 
-
+#.
+#   .--Helpers-------------------------------------------------------------.
+#   |                  _   _      _                                        |
+#   |                 | | | | ___| |_ __   ___ _ __ ___                    |
+#   |                 | |_| |/ _ \ | '_ \ / _ \ '__/ __|                   |
+#   |                 |  _  |  __/ | |_) |  __/ |  \__ \                   |
+#   |                 |_| |_|\___|_| .__/ \___|_|  |___/                   |
+#   |                              |_|                                     |
 #   +----------------------------------------------------------------------+
+#   | Misc functions which do not belong to any other topic                |
+#   '----------------------------------------------------------------------'
+
+def is_tcp_host(hostname):
+    return in_binary_hostlist(hostname, tcp_hosts)
+
+def is_ping_host(hostname):
+    return not is_snmp_host(hostname) and not is_tcp_host(hostname)
+
+def is_dual_host(hostname):
+    return is_tcp_host(hostname) and is_snmp_host(hostname)
+
+def check_period_of(hostname, service):
+    periods = service_extra_conf(hostname, service, check_periods)
+    if periods:
+        period = periods[0]
+        if period == "24X7":
+            return None
+        else:
+            return period
+    else:
+        return None
+
+def check_interval_of(hostname, checkname):
+    if not check_uses_snmp(checkname):
+        return # no values at all for non snmp checks
+    for match, minutes in host_extra_conf(hostname, snmp_check_interval):
+        if match is None or match == checkname:
+            return minutes # use first match
+
+def agent_target_version(hostname):
+    agent_target_versions = host_extra_conf(hostname, check_mk_agent_target_versions)
+    if len(agent_target_versions) > 0:
+        if agent_target_versions[0] == "ignore":
+            return None
+        elif agent_target_versions[0] == "site":
+            return check_mk_version
+        else:
+            return agent_target_versions[0]
+
+regex_cache = {}
+def regex(r):
+    rx = regex_cache.get(r)
+    if rx:
+        return rx
+    try:
+        rx = re.compile(r)
+    except Exception, e:
+        raise MKGeneralException("Invalid regular expression '%s': %s" % (r, e))
+    regex_cache[r] = rx
+    return rx
+
+#.
+#   .--SNMP----------------------------------------------------------------.
 #   |                      ____  _   _ __  __ ____                         |
 #   |                     / ___|| \ | |  \/  |  _ \                        |
 #   |                     \___ \|  \| | |\/| | |_) |                       |
@@ -576,6 +673,64 @@ def aggregated_service_name(hostname, servicedesc):
 #   |                     |____/|_| \_|_|  |_|_|                           |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   |  Some basic SNMP functions. Note: most of the SNMP related code is   |
+#   |  the separate module snmp.py.                                        |
+#   '----------------------------------------------------------------------'
+
+# Determine SNMP community for a specific host.  It the host is found
+# int the map snmp_communities, that community is returned. Otherwise
+# the snmp_default_community is returned (wich is preset with
+# "public", but can be overridden in main.mk
+def snmp_credentials_of(hostname):
+    try:
+        return explicit_snmp_communities[hostname]
+    except KeyError:
+        pass
+
+    communities = host_extra_conf(hostname, snmp_communities)
+    if len(communities) > 0:
+        return communities[0]
+
+    # nothing configured for this host -> use default
+    return snmp_default_community
+
+def get_snmp_character_encoding(hostname):
+    entries = host_extra_conf(hostname, snmp_character_encodings)
+    if len(entries) > 0:
+        return entries[0]
+
+def check_uses_snmp(check_type):
+    return snmp_info.get(check_type.split(".")[0]) != None
+
+def is_snmp_host(hostname):
+    return in_binary_hostlist(hostname, snmp_hosts)
+
+def is_bulkwalk_host(hostname):
+    if bulkwalk_hosts:
+        return in_binary_hostlist(hostname, bulkwalk_hosts)
+    else:
+        return False
+
+def is_snmpv2c_host(hostname):
+    return is_bulkwalk_host(hostname) or \
+        in_binary_hostlist(hostname, snmpv2c_hosts)
+
+def is_usewalk_host(hostname):
+    return in_binary_hostlist(hostname, usewalk_hosts)
+
+def snmp_timing_of(hostname):
+    timing = host_extra_conf(hostname, snmp_timing)
+    if len(timing) > 0:
+        return timing[0]
+    else:
+        return {}
+
+def snmp_port_spec(hostname):
+    port = snmp_port_of(hostname)
+    if port == None:
+        return ""
+    else:
+        return ":%d" % port
 
 # Returns command lines for snmpwalk and snmpget including
 # options for authentication. This handles communities and
@@ -583,9 +738,6 @@ def aggregated_service_name(hostname, servicedesc):
 def snmp_walk_command(hostname):
     return snmp_base_command('walk', hostname) + " -Cc"
 
-# Constructs the basic snmp commands for a host with all important information
-# like the commandname, SNMP version and credentials.
-# This function also changes snmpbulkwalk to snmpwalk for snmpv1.
 def snmp_base_command(what, hostname):
     # if the credentials are a string, we use that as community,
     # if it is a four-tuple, we use it as V3 auth parameters:
@@ -606,7 +758,7 @@ def snmp_base_command(what, hostname):
         command = 'snmpbulkwalk'
 
     # Handle V1 and V2C
-    if type(credentials) == str:
+    if type(credentials) in [ str, unicode ]:
         if is_bulkwalk_host(hostname):
             options = '-v2c'
         else:
@@ -633,84 +785,57 @@ def snmp_base_command(what, hostname):
     # Configuration of timing and retries
     settings = snmp_timing_of(hostname)
     if "timeout" in settings:
-        options += " -t %d" % settings["timeout"]
+        options += " -t %0.2f" % settings["timeout"]
     if "retries" in settings:
         options += " -r %d" % settings["retries"]
 
     return command + ' ' + options
 
-
-# Determine SNMP community for a specific host.  It the host is found
-# int the map snmp_communities, that community is returned. Otherwise
-# the snmp_default_community is returned (wich is preset with
-# "public", but can be overridden in main.mk
-def snmp_credentials_of(hostname):
-    try:
-        return explicit_snmp_communities[hostname]
-    except KeyError:
-        pass
-
-    communities = host_extra_conf(hostname, snmp_communities)
-    if len(communities) > 0:
-        return communities[0]
-
-    # nothing configured for this host -> use default
-    return snmp_default_community
-
-def snmp_timing_of(hostname):
-    timing = host_extra_conf(hostname, snmp_timing)
-    if len(timing) > 0:
-        return timing[0]
+def snmp_get_oid(hostname, ipaddress, oid):
+    if oid.endswith(".*"):
+        oid_prefix = oid[:-2]
+        commandtype = "getnext"
     else:
-        return {}
+        oid_prefix = oid
+        commandtype = "get"
 
-def get_snmp_character_encoding(hostname):
-    entries = host_extra_conf(hostname, snmp_character_encodings)
-    if len(entries) > 0:
-        return entries[0]
+    portspec = snmp_port_spec(hostname)
+    command = snmp_base_command(commandtype, hostname) + \
+              " -On -OQ -Oe -Ot %s%s %s" % (ipaddress, portspec, oid_prefix)
 
-def check_uses_snmp(check_type):
-    return snmp_info.get(check_type.split(".")[0]) != None
+    if opt_debug:
+        sys.stdout.write("Running '%s'\n" % command)
 
-def is_snmp_host(hostname):
-    return in_binary_hostlist(hostname, snmp_hosts)
-
-def is_tcp_host(hostname):
-    return in_binary_hostlist(hostname, tcp_hosts)
-
-def is_ping_host(hostname):
-    return not is_snmp_host(hostname) and not is_tcp_host(hostname)
-
-def is_bulkwalk_host(hostname):
-    if bulkwalk_hosts:
-        return in_binary_hostlist(hostname, bulkwalk_hosts)
-    else:
-        return False
-
-def is_snmpv2c_host(hostname):
-    return is_bulkwalk_host(hostname) or \
-        in_binary_hostlist(hostname, snmpv2c_hosts)
-
-def is_usewalk_host(hostname):
-    return in_binary_hostlist(hostname, usewalk_hosts)
-
-def check_period_of(hostname, service):
-    periods = service_extra_conf(hostname, service, check_periods)
-    if periods:
-        period = periods[0]
-        if period == "24X7":
-            return None
-        else:
-            return period
-    else:
+    snmp_process = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+    exitstatus = snmp_process.wait()
+    if exitstatus:
+        if opt_verbose:
+            sys.stderr.write(tty_red + tty_bold + "ERROR: " + tty_normal + "SNMP error\n")
+            sys.stderr.write(snmp_process.stderr.read())
         return None
 
-def check_interval_of(hostname, checkname):
-    if not check_uses_snmp(checkname):
-        return # no values at all for non snmp checks
-    for match, minutes in host_extra_conf(hostname, snmp_check_interval):
-        if match is None or match == checkname:
-            return minutes # use first match
+    line = snmp_process.stdout.readline().strip()
+    if not line:
+        if opt_debug:
+            sys.stdout.write("Error in response to snmpget.\n")
+        return None
+
+    item, value = line.split("=", 1)
+    value = value.strip()
+    if opt_debug:
+        sys.stdout.write("SNMP answer: ==> [%s]\n" % value)
+    if value.startswith('No more variables') or value.startswith('End of MIB') \
+       or value.startswith('No Such Object available') or value.startswith('No Such Instance currently exists'):
+        value = None
+
+    # In case of .*, check if prefix is the one we are looking for
+    if commandtype == "getnext" and not item.startswith(oid_prefix + "."):
+        value = None
+
+    # Strip quotes
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    return value
 
 def get_single_oid(hostname, ipaddress, oid):
     # New in Check_MK 1.1.11: oid can end with ".*". In that case
@@ -734,43 +859,14 @@ def get_single_oid(hostname, ipaddress, oid):
         else:
             return None
 
-    if oid.endswith(".*"):
-        oid_prefix = oid[:-2]
-        commandtype = "getnext"
-    else:
-        oid_prefix = oid
-        commandtype = "get"
-
-    portspec = snmp_port_spec(hostname)
-    command = snmp_base_command(commandtype, hostname) + \
-         " -On -OQ -Oe -Ot %s%s %s 2>/dev/null" % (ipaddress, portspec, oid_prefix)
     try:
-        if opt_debug:
-            sys.stdout.write("Running '%s'\n" % command)
-
-        snmp_process = os.popen(command, "r")
-        line = snmp_process.readline().strip()
-        item, value = line.split("=", 1)
-        value = value.strip()
-        if opt_debug:
-            sys.stdout.write("SNMP answer: ==> [%s]\n" % value)
-        if value.startswith('No more variables') or value.startswith('End of MIB') \
-           or value.startswith('No Such Object available') or value.startswith('No Such Instance currently exists'):
-            value = None
-
-        # In case of .*, check if prefix is the one we are looking for
-        if commandtype == "getnext" and not item.startswith(oid_prefix + "."):
-            value = None
-
-        # Strip quotes
-        if value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        # try to remove text, only keep number
-        # value_num = value_text.split(" ")[0]
-        # value_num = value_num.lstrip("+")
-        # value_num = value_num.rstrip("%")
-        # value = value_num
+        if has_inline_snmp and use_inline_snmp:
+            value = inline_snmp_get_oid(hostname, oid)
+        else:
+            value = snmp_get_oid(hostname, ipaddress, oid)
     except:
+        if opt_debug:
+            raise
         value = None
 
     g_single_oid_cache[oid] = value
@@ -785,11 +881,15 @@ def snmp_scan(hostname, ipaddress):
 
     if opt_verbose:
         sys.stdout.write("Scanning host %s(%s) for SNMP checks..." % (hostname, ipaddress))
-    sys_descr = get_single_oid(hostname, ipaddress, ".1.3.6.1.2.1.1.1.0")
-    if sys_descr == None:
-        if opt_debug:
-            sys.stderr.write("no SNMP answer\n")
-        return []
+        sys.stdout.flush()
+    if not in_binary_hostlist(hostname, snmp_without_sys_descr):
+        sys_descr_oid = ".1.3.6.1.2.1.1.1.0"
+        sys_descr = get_single_oid(hostname, ipaddress, sys_descr_oid)
+        if sys_descr == None:
+            raise MKSNMPError("Cannot fetch system description OID %s" % sys_descr_oid)
+            # if opt_verbose:
+            #     sys.stderr.write("no SNMP answer\n")
+            # return []
 
     found = []
     for check_type, check in check_info.items():
@@ -806,7 +906,12 @@ def snmp_scan(hostname, ipaddress):
                 snmp_scan_functions.get(basename))
         if scan_function:
             try:
-                if scan_function(lambda oid: get_single_oid(hostname, ipaddress, oid)):
+                result = scan_function(lambda oid: get_single_oid(hostname, ipaddress, oid))
+                if result is not None and type(result) not in [ str, bool ]:
+                    if opt_debug:
+                        sys.stderr.write("[%s] Scan function returns invalid type (%s).\n" %
+                                                                (check_type, type(result)))
+                elif result:
                     found.append(check_type)
                     if opt_verbose:
                         sys.stdout.write(tty_green + tty_bold + check_type
@@ -826,8 +931,8 @@ def snmp_scan(hostname, ipaddress):
     found.sort()
     return found
 
-
-#   +----------------------------------------------------------------------+
+#.
+#   .--Cluster-------------------------------------------------------------.
 #   |                    ____ _           _                                |
 #   |                   / ___| |_   _ ___| |_ ___ _ __                     |
 #   |                  | |   | | | | / __| __/ _ \ '__|                    |
@@ -835,6 +940,10 @@ def snmp_scan(hostname, ipaddress):
 #   |                   \____|_|\__,_|___/\__\___|_|                       |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   | Code dealing with clusters (virtual hosts that are used to deal with |
+#   | services that can move between physical nodes.                       |
+#   '----------------------------------------------------------------------'
+
 
 # clusternames (keys into dictionary) might be tagged :-(
 # names of nodes not!
@@ -857,6 +966,10 @@ def host_of_clustered_service(hostname, servicedesc):
     if not the_clusters:
         return hostname
 
+    cluster_mapping = service_extra_conf(hostname, servicedesc, clustered_services_mapping)
+    if cluster_mapping:
+        return cluster_mapping[0]
+
     # 1. New style: explicitly assigned services
     for cluster, conf in clustered_services_of.items():
         nodes = nodes_of(cluster)
@@ -874,15 +987,17 @@ def host_of_clustered_service(hostname, servicedesc):
 
     return hostname
 
-
-#   +----------------------------------------------------------------------+
-#   |          _   _           _       _               _                   |
-#   |         | | | | ___  ___| |_ ___| |__   ___  ___| | _____            |
-#   |         | |_| |/ _ \/ __| __/ __| '_ \ / _ \/ __| |/ / __|           |
-#   |         |  _  | (_) \__ \ || (__| | | |  __/ (__|   <\__ \           |
-#   |         |_| |_|\___/|___/\__\___|_| |_|\___|\___|_|\_\___/           |
+#.
+#   .--Checktable----------------------------------------------------------.
+#   |           ____ _               _    _        _     _                 |
+#   |          / ___| |__   ___  ___| | _| |_ __ _| |__ | | ___            |
+#   |         | |   | '_ \ / _ \/ __| |/ / __/ _` | '_ \| |/ _ \           |
+#   |         | |___| | | |  __/ (__|   <| || (_| | |_) | |  __/           |
+#   |          \____|_| |_|\___|\___|_|\_\\__\__,_|_.__/|_|\___|           |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   | Code for computing the table of checks of a host.                    |
+#   '----------------------------------------------------------------------'
 
 
 # Returns check table for a specific host
@@ -896,13 +1011,16 @@ g_check_table_cache = {}
 # are used in the autochecks and assumed be make up the vast majority.
 g_singlehost_checks = None
 g_multihost_checks = None
-def get_check_table(hostname):
+def get_check_table(hostname, remove_duplicates=False):
     global g_singlehost_checks
     global g_multihost_checks
 
     # speed up multiple lookup of same host
     if hostname in g_check_table_cache:
-        return g_check_table_cache[hostname]
+        if remove_duplicates and is_dual_host(hostname):
+            return remove_duplicate_checks(g_check_table_cache[hostname])
+        else:
+            return g_check_table_cache[hostname]
 
     check_table = {}
 
@@ -971,7 +1089,8 @@ def get_check_table(hostname):
             for nodename, checkname, item, params in node_checks:
                 descr = service_description(checkname, item)
                 if hostname == host_of_clustered_service(node, descr):
-                    handle_entry((hostname, checkname, item, params))
+                    cluster_params = compute_check_parameters(hostname, checkname, item, params)
+                    handle_entry((hostname, checkname, item, cluster_params))
 
 
     # Remove dependencies to non-existing services
@@ -984,15 +1103,42 @@ def get_check_table(hostname):
                 deps.append(d)
 
     g_check_table_cache[hostname] = check_table
-    return check_table
+    if remove_duplicates and is_dual_host(hostname):
+        return remove_duplicate_checks(check_table)
+    else:
+        return check_table
+
+def remove_duplicate_checks(check_table):
+    have_with_tcp = {}
+    have_with_snmp = {}
+    without_duplicates = {}
+    for key, value in check_table.iteritems():
+        checkname = key[0]
+        descr = value[1]
+        if check_uses_snmp(checkname):
+            if descr in have_with_tcp:
+                continue
+            have_with_snmp[descr] = key
+        else:
+            if descr in have_with_snmp:
+                snmp_key = have_with_snmp[descr]
+                del without_duplicates[snmp_key]
+                del have_with_snmp[descr]
+            have_with_tcp[descr] = key
+        without_duplicates[key] = value
+    return without_duplicates
 
 
-def get_sorted_check_table(hostname):
+
+# remove_duplicates: Automatically remove SNMP based checks
+# if there already is a TCP based one with the same
+# description. E.g: df vs hr_fs.
+def get_sorted_check_table(hostname, remove_duplicates=False):
     # Convert from dictionary into simple tuple list. Then sort
     # it according to the service dependencies.
     unsorted = [ (checkname, item, params, descr, deps)
                  for ((checkname, item), (params, descr, deps))
-                 in get_check_table(hostname).items() ]
+                 in get_check_table(hostname, remove_duplicates=remove_duplicates).items() ]
     def cmp(a, b):
         if a[3] < b[3]:
             return -1
@@ -1031,6 +1177,11 @@ def get_sorted_check_table(hostname):
 # be None in most cases -> to TCP connect on port 6556
 # HACK:
 special_agent_dir = agents_dir + "/special"
+if local_agents_dir:
+    special_agent_local_dir = local_agents_dir + "/special"
+else:
+    special_agent_local_dir = None
+
 def get_datasource_program(hostname, ipaddress):
     # First check WATO-style special_agent rules
     for agentname, ruleset in special_agents.items():
@@ -1038,7 +1189,12 @@ def get_datasource_program(hostname, ipaddress):
         if params: # rule match!
             # Create command line using the special_agent_info
             cmd_arguments = special_agent_info[agentname](params[0], hostname, ipaddress)
-            return '%s/agent_%s %s' % ( special_agent_dir, agentname, cmd_arguments)
+            if special_agent_local_dir and \
+                os.path.exists(special_agent_local_dir + "/agent_" + agentname):
+                path = special_agent_local_dir + "/agent_" + agentname
+            else:
+                path = special_agent_dir + "/agent_" + agentname
+            return path + " " + cmd_arguments
 
     programs = host_extra_conf(hostname, datasource_programs)
     if len(programs) == 0:
@@ -1071,25 +1227,38 @@ def lookup_ipaddress(hostname):
     if hostname in g_dns_cache:
         return g_dns_cache[hostname]
 
+    # Prepare file based fall-back DNS cache in case resolution fails
     init_ip_lookup_cache()
+
+    cached_ip = g_ip_lookup_cache.get(hostname)
+    if cached_ip and use_dns_cache:
+        g_dns_cache[hostname] = cached_ip
+        return cached_ip
 
     # Now do the actual DNS lookup
     try:
         ipa = socket.gethostbyname(hostname)
 
-        # Cache the result (persistant) when resolving succeeded
-        if ipa != g_ip_lookup_cache.get(hostname):
+        # Update our cached address if that has changed or was missing
+        if ipa != cached_ip:
+            if opt_verbose:
+                print "Updating DNS cache for %s: %s" % (hostname, ipa)
             g_ip_lookup_cache[hostname] = ipa
             write_ip_lookup_cache()
+
+        g_dns_cache[hostname] = ipa # Update in-memory-cache
+        return ipa
+
     except:
-        # Initialize the lookup cache when called for the first time
-        if hostname in g_ip_lookup_cache:
-            ipa = g_ip_lookup_cache[hostname]
+        # DNS failed. Use cached IP address if present, even if caching
+        # is disabled.
+        if cached_ip:
+            g_dns_cache[hostname] = cached_ip
+            return cached_ip
         else:
             g_dns_cache[hostname] = None
             raise
-    g_dns_cache[hostname] = ipa
-    return ipa
+
 
 def init_ip_lookup_cache():
     global g_ip_lookup_cache
@@ -1100,7 +1269,29 @@ def init_ip_lookup_cache():
             g_ip_lookup_cache = {}
 
 def write_ip_lookup_cache():
-    file(var_dir + '/ipaddresses.cache', 'w').write(repr(g_ip_lookup_cache))
+    suffix = "." + str(os.getpid())
+    file(var_dir + '/ipaddresses.cache' + suffix, 'w').write(repr(g_ip_lookup_cache))
+    os.rename(var_dir + '/ipaddresses.cache' + suffix, var_dir + '/ipaddresses.cache')
+
+def do_update_dns_cache():
+    # Temporarily disable *use* of cache, we want to force an update
+    global use_dns_cache
+    use_dns_cache = False
+
+    if opt_verbose:
+        print "Updating DNS cache..."
+    for hostname in all_active_hosts() + all_active_clusters():
+        # Use intelligent logic. This prevents DNS lookups for hosts
+        # with statically configured addresses, etc.
+        try:
+            lookup_ipaddress(hostname)
+        except Exception, e:
+            if opt_verbose:
+                print "Failed to lookup IP address of %s: %s" % (hostname, e)
+            if opt_debug:
+                raise
+            continue
+
 
 def agent_port_of(hostname):
     ports = host_extra_conf(hostname, agent_ports)
@@ -1115,13 +1306,6 @@ def snmp_port_of(hostname):
         return None # do not specify a port, use default
     else:
         return ports[0]
-
-def snmp_port_spec(hostname):
-    port = snmp_port_of(hostname)
-    if port == None:
-        return ""
-    else:
-        return ":%d" % port
 
 def exit_code_spec(hostname):
     spec = {}
@@ -1174,14 +1358,17 @@ def get_piggyback_translation(hostname):
     return translations
 
 
+#.
+#   .--Config Ouptut-------------------------------------------------------.
+#   |    ____             __ _          ___              _         _       |
+#   |   / ___|___  _ __  / _(_) __ _   / _ \ _   _ _ __ | |_ _   _| |_     |
+#   |  | |   / _ \| '_ \| |_| |/ _` | | | | | | | | '_ \| __| | | | __|    |
+#   |  | |__| (_) | | | |  _| | (_| | | |_| | |_| | |_) | |_| |_| | |_     |
+#   |   \____\___/|_| |_|_| |_|\__, |  \___/ \__,_| .__/ \__|\__,_|\__|    |
+#   |                          |___/              |_|                      |
 #   +----------------------------------------------------------------------+
-#   |    ____             __ _                     _               _       |
-#   |   / ___|___  _ __  / _(_) __ _    ___  _   _| |_ _ __  _   _| |_     |
-#   |  | |   / _ \| '_ \| |_| |/ _` |  / _ \| | | | __| '_ \| | | | __|    |
-#   |  | |__| (_) | | | |  _| | (_| | | (_) | |_| | |_| |_) | |_| | |_     |
-#   |   \____\___/|_| |_|_| |_|\__, |  \___/ \__,_|\__| .__/ \__,_|\__|    |
-#   |                          |___/                  |_|                  |
-#   +----------------------------------------------------------------------+
+#   | Output an ASCII configuration file for the monitoring core.          |
+#   '----------------------------------------------------------------------'
 
 def make_utf8(x):
     if type(x) == unicode:
@@ -1224,8 +1411,10 @@ def host_is_member_of_site(hostname, site):
     # hosts without a site: tag belong to all sites
     return True
 
-def parse_hostname_list(args):
-    valid_hosts = all_active_hosts() + all_active_clusters()
+def parse_hostname_list(args, with_clusters = True):
+    valid_hosts = all_active_hosts()
+    if with_clusters:
+        valid_hosts += all_active_clusters()
     hostlist = []
     for arg in args:
         if arg[0] != '@' and arg in valid_hosts:
@@ -1278,14 +1467,10 @@ def host_contactgroups_of(hostlist):
                 first_list = False
             else:
                 cgrs.append(entry)
+    if monitoring_core == "nagios" and enable_rulebased_notifications:
+        cgrs.append("check-mk-notify")
     return list(set(cgrs))
 
-def host_contactgroups_nag(hostlist):
-    cgrs = host_contactgroups_of(hostlist)
-    if len(cgrs) > 0:
-        return "    contact_groups " + ",".join(cgrs) + "\n"
-    else:
-        return ""
 
 def parents_of(hostname):
     par = host_extra_conf(hostname, parents)
@@ -1315,6 +1500,8 @@ def extra_service_conf_of(hostname, description):
     sercgr = service_extra_conf(hostname, description, service_contactgroups)
     contactgroups_to_define.update(sercgr)
     if len(sercgr) > 0:
+        if enable_rulebased_notifications:
+            sercgr.append("check-mk-notify") # not nessary if not explicit groups defined
         conf += "  contact_groups\t\t" + ",".join(sercgr) + "\n"
 
     sergr = service_extra_conf(hostname, description, service_groups)
@@ -1345,10 +1532,18 @@ def host_check_command(hostname, ip, is_clust):
     values = host_extra_conf(hostname, host_check_commands)
     if values:
         value = values[0]
+    elif monitoring_core == "cmc":
+        value = "smart"
     else:
         value = "ping"
 
-    if value == "ping":
+    if monitoring_core != "cmc" and value == "smart":
+        value = "ping" # avoid problems when switching back to nagios core
+
+    if value == "smart" and not is_clust:
+        return "check-mk-host-smart"
+
+    elif value in [ "ping", "smart" ]:
         ping_args = check_icmp_arguments(hostname)
         if is_clust and ip: # Do check cluster IP address if one is there
             return "check-mk-host-ping!%s" % ping_args
@@ -1363,11 +1558,9 @@ def host_check_command(hostname, ip, is_clust):
         return "check-mk-host-ok"
 
     elif value == "agent" or value[0] == "service":
-        if monitoring_core == "cmc":
-            raise MKGeneralException("Cannot configure host check command for host <b>%s</b>: "
-                   "Sorry, host checks of type 'Use status of a service' "
-                   "are not implemented in the Check_MK Micro Core" % hostname)
         service = value == "agent" and "Check_MK" or value[1]
+        if monitoring_core == "cmc":
+            return "check-mk-host-service!" + service
         command = "check-mk-host-custom-%d" % (len(hostcheck_commands_to_define) + 1)
         hostcheck_commands_to_define.append((command,
            'echo "$SERVICEOUTPUT:%s:%s$" && exit $SERVICESTATEID:%s:%s$' % (hostname, service, hostname, service)))
@@ -1375,6 +1568,13 @@ def host_check_command(hostname, ip, is_clust):
 
     elif value[0] == "tcp":
         return "check-mk-host-tcp!" + str(value[1])
+
+    elif value[0] == "custom":
+        try:
+            custom_commands_to_define.add("check-mk-custom")
+        except:
+            pass # not needed and not available with CMC
+        return "check-mk-custom!" + autodetect_plugin(value[1])
 
     raise MKGeneralException("Invalid value %r for host_check_command of host %s." % (
             value, hostname))
@@ -1519,34 +1719,122 @@ def get_rule_options(entry):
         return entry, {}
 
 
-# Compute list of service_groups or contact_groups of service
-# conf is either service_groups or service_contactgroups
-def service_extra_conf(hostname, service, conf):
-    entries = []
-    for entry in conf:
-        entry, rule_options = get_rule_options(entry)
+def all_matching_hosts(tags, hostlist):
+    matching = set([])
+    for taggedhost in all_hosts + clusters.keys():
+        parts = taggedhost.split("|")
+        hostname = parts[0]
+        hosttags = parts[1:]
+
+        if hosttags_match_taglist(hosttags, tags) and \
+           in_extraconf_hostlist(hostlist, hostname):
+           matching.add(hostname)
+    return matching
+
+
+def convert_service_ruleset(ruleset):
+    new_rules = []
+    for rule in ruleset:
+        rule, rule_options = get_rule_options(rule) # Das könnte man einmal umbauen und so lassen (8 sec von 137)
         if rule_options.get("disabled"):
             continue
 
-        if len(entry) == 3:
-            item, hostlist, servlist = entry
+        if len(rule) == 3:
+            item, hostlist, servlist = rule
             tags = []
-        elif len(entry) == 4:
-            item, tags, hostlist, servlist = entry
+        elif len(rule) == 4:
+            item, tags, hostlist, servlist = rule
         else:
-            raise MKGeneralException("Invalid entry '%r' in service configuration list: must have 3 or 4 elements" % (entry,))
+            raise MKGeneralException("Invalid rule '%r' in service configuration list: must have 3 or 4 elements" % (rule,))
 
-        if hosttags_match_taglist(tags_of_host(hostname), tags) and \
-           in_extraconf_hostlist(hostlist, hostname) and \
-           in_extraconf_servicelist(servlist, service):
+        # Directly compute set of all matching hosts here, this
+        # will avoid recomputation later
+        hosts = all_matching_hosts(tags, hostlist)
+        new_rules.append((item, hosts, servlist))
+
+    # Replace rules inplace. This finally modifies it, so we
+    # need this conversion only once
+    ruleset[:] = new_rules
+
+def serviceruleset_is_converted(ruleset):
+    if not ruleset:
+        return True # empty rulesets are converted in a trivial way
+
+    if type(ruleset[0]) != tuple:
+        return False
+
+    return type(ruleset[0][1]) == set
+
+
+# Compute outcome of a service rule set that has an item
+def service_extra_conf(hostname, service, ruleset):
+    if not serviceruleset_is_converted(ruleset):
+        convert_service_ruleset(ruleset)
+
+    entries = []
+    for item, hosts, servlist in ruleset:
+        if hostname in hosts and in_extraconf_servicelist(servlist, service):
             entries.append(item)
     return entries
+
+def convert_boolean_service_ruleset(ruleset):
+    new_rules = []
+    for rule in ruleset:
+        entry, rule_options = get_rule_options(rule)
+        if rule_options.get("disabled"):
+            continue
+
+        if entry[0] == NEGATE: # this entry is logically negated
+            negate = True
+            entry = entry[1:]
+        else:
+            negate = False
+
+        if len(entry) == 2:
+            hostlist, servlist = entry
+            tags = []
+        elif len(entry) == 3:
+            tags, hostlist, servlist = entry
+        else:
+            raise MKGeneralException("Invalid entry '%r' in configuration: must have 2 or 3 elements" % (entry,))
+
+        # Directly compute set of all matching hosts here, this
+        # will avoid recomputation later
+        hosts = all_matching_hosts(tags, hostlist)
+        new_rules.append((negate, hosts, servlist))
+
+    # Replace rules inplace. This finally modifies it, so we
+    # need this conversion only once
+    ruleset[:] = new_rules
+
+
+def boolean_serviceruleset_is_converted(ruleset):
+    if not ruleset:
+        return True # empty rulesets are converted in a trivial way
+
+    if type(ruleset[0]) != tuple:
+        return False
+
+    return type(ruleset[0][1]) == set
+
+
+# Compute outcome of a service rule set that just say yes/no
+def in_boolean_serviceconf_list(hostname, service_description, ruleset):
+    if not boolean_serviceruleset_is_converted(ruleset):
+        convert_boolean_service_ruleset(ruleset)
+
+    for negate, hosts, servlist in ruleset:
+        if hostname in hosts and \
+           in_extraconf_servicelist(servlist, service_description):
+            return not negate
+    return False # no match. Do not ignore
 
 
 
 # Entries in list are (tagged) hostnames that must equal the
 # (untagged) hostname. Expressions beginning with ! are negated: if
-# they match, the item is excluded from the list. Also the three
+# they match, the item is excluded from the list. Expressions beginning
+# withy ~ are treated as Regular Expression. Also the three
 # special tags '@all', '@clusters', '@physical' are allowed.
 def in_extraconf_hostlist(hostlist, hostname):
 
@@ -1557,6 +1845,8 @@ def in_extraconf_hostlist(hostlist, hostname):
     for hostentry in hostlist:
         if len(hostentry) == 0:
             raise MKGeneralException('Empty hostname in host list %r' % hostlist)
+        negate = False
+        use_regex = False
         if hostentry[0] == '@':
             if hostentry == '@all':
                 return True
@@ -1567,14 +1857,25 @@ def in_extraconf_hostlist(hostlist, hostname):
                 return True
 
         # Allow negation of hostentry with prefix '!'
-        elif hostentry[0] == '!':
-            hostentry = hostentry[1:]
-            negate = True
         else:
-            negate = False
+            if hostentry[0] == '!':
+                hostentry = hostentry[1:]
+                negate = True
+            # Allow regex with prefix '~'
+            if hostentry[0] == '~':
+                hostentry = hostentry[1:]
+                use_regex = True
 
-        if hostname == strip_tags(hostentry):
-            return not negate
+        hostentry = strip_tags(hostentry)
+        try:
+            if not use_regex and hostname == hostentry:
+                return not negate
+            # Handle Regex
+            elif use_regex and regex(hostentry).match(hostname):
+                return not negate
+        except MKGeneralException:
+            if opt_debug:
+                raise
 
     return False
 
@@ -1597,7 +1898,7 @@ def in_extraconf_servicelist(list, item):
     # no match in list -> negative answer
     return False
 
-# NEW IMPLEMENTATION
+
 def create_nagios_config(outfile = sys.stdout, hostnames = None):
     global hostgroups_to_define
     hostgroups_to_define = set([])
@@ -1625,6 +1926,15 @@ def create_nagios_config(outfile = sys.stdout, hostnames = None):
 
     if summary_service_notification_periods != []:
         raise MKGeneralException("summary_service_notification_periods is not longer supported. Please use extra_summary_service_conf['notification_period'] instead.")
+
+    # Map service_period to _SERVICE_PERIOD. This field das not exist in Nagios/Icinga.
+    # The CMC has this field natively.
+    if "service_period" in extra_host_conf:
+        extra_host_conf["_SERVICE_PERIOD"] = extra_host_conf["service_period"]
+        del extra_host_conf["service_period"]
+    if "service_period" in extra_service_conf:
+        extra_service_conf["_SERVICE_PERIOD"] = extra_service_conf["service_period"]
+        del extra_service_conf["service_period"]
 
     if filesystem_levels != []:
         raise MKGeneralException("filesystem_levels is not longer supported.\n"
@@ -1794,18 +2104,36 @@ def create_nagios_servicedefs(outfile, hostname):
 
     def do_omit_service(hostname, description):
         if service_ignored(hostname, None, description):
-            return True 
+            return True
         if hostname != host_of_clustered_service(hostname, description):
             return True
         return False
 
-    host_checks = get_check_table(hostname).items()
+    def get_dependencies(hostname,servicedesc):
+        result = ""
+        for dep in service_deps(hostname, servicedesc):
+            result += """
+define servicedependency {
+  use\t\t\t\t%s
+  host_name\t\t\t%s
+  service_description\t%s
+  dependent_host_name\t%s
+  dependent_service_description %s
+}\n
+""" % (service_dependency_template, hostname, dep, hostname, servicedesc)
+
+        return result
+
+    host_checks = get_check_table(hostname, remove_duplicates=True).items()
     host_checks.sort() # Create deterministic order
     aggregated_services_conf = set([])
     do_aggregation = host_is_aggregated(hostname)
     have_at_least_one_service = False
     used_descriptions = {}
     for ((checkname, item), (params, description, deps)) in host_checks:
+        if checkname not in check_info:
+            continue # simply ignore missing checks
+
         # Make sure, the service description is unique on this host
         if description in used_descriptions:
             cn, it = used_descriptions[description]
@@ -1934,27 +2262,6 @@ define service {
 %s  service_description\t\tCheck_MK
 }
 """ % (active_service_template, hostname, extra_service_conf_of(hostname, "Check_MK")))
-        # Inventory checks - if user has configured them. Not for clusters.
-        if inventory_check_interval and not is_cluster(hostname):
-            outfile.write("""
-define service {
-  use\t\t\t\t%s
-  host_name\t\t\t%s
-  normal_check_interval\t\t%d
-  retry_check_interval\t\t%d
-%s  service_description\t\tCheck_MK inventory
-}
-
-define servicedependency {
-  use\t\t\t\t%s
-  host_name\t\t\t%s
-  service_description\t\tCheck_MK
-  dependent_host_name\t\t%s
-  dependent_service_description\tCheck_MK inventory
-}
-""" % (inventory_check_template, hostname, inventory_check_interval, inventory_check_interval,
-       extra_service_conf_of(hostname, "Check_MK inventory"),
-       service_dependency_template, hostname, hostname))
 
     # legacy checks via legacy_checks
     legchecks = host_extra_conf(hostname, legacy_checks)
@@ -1990,6 +2297,9 @@ define service {
 %s}
 """ % (template, hostname, make_utf8(description), simulate_command(command), extraconf))
 
+        # write service dependencies for legacy checks
+        outfile.write(get_dependencies(hostname,description))
+
     # legacy checks via active_checks
     actchecks = []
     needed_commands = []
@@ -2010,15 +2320,22 @@ define service {
 
             has_perfdata = act_info.get('has_perfdata', False)
             description = act_info["service_description"](params)
+            description = description.replace('$HOSTNAME$', g_hostname)
 
             if do_omit_service(hostname, description):
-                continue 
+                continue
 
             # compute argument, and quote ! and \ for Nagios
             args = act_info["argument_function"](params).replace("\\", "\\\\").replace("!", "\\!")
 
             if description in used_descriptions:
                 cn, it = used_descriptions[description]
+                # If we have the same active check again with the same description,
+                # then we do not regard this as an error, but simply ignore the
+                # second one. That way one can override a check with other settings.
+                if cn == "active(%s)" % acttype:
+                    continue
+
                 raise MKGeneralException(
                         "ERROR: Duplicate service description (active check) '%s' for host '%s'!\n"
                         " - 1st occurrance: checktype = %s, item = %r\n"
@@ -2041,6 +2358,8 @@ define service {
 %s}
 """ % (template, hostname, make_utf8(description), simulate_command(command), extraconf))
 
+            # write service dependencies for active checks
+            outfile.write(get_dependencies(hostname,description))
 
     # Legacy checks via custom_checks
     custchecks = host_extra_conf(hostname, custom_checks)
@@ -2060,19 +2379,10 @@ define service {
             command_line = entry.get("command_line", "")
 
             if do_omit_service(hostname, description):
-                continue 
+                continue
 
             if command_line:
-                plugin_name = command_line.split()[0]
-                if command_line[0] not in [ '$', '/' ]:
-                    try:
-                        for dir in [ "/local", "" ]:
-                            path = omd_root + dir + "/lib/nagios/plugins/"
-                            if os.path.exists(path + plugin_name):
-                                command_line = path + command_line
-                                break
-                    except:
-                        pass
+                command_line = autodetect_plugin(command_line)
 
             if "freshness" in entry:
                 freshness = "  check_freshness\t\t1\n" + \
@@ -2082,11 +2392,15 @@ define service {
             else:
                 freshness = ""
 
-
             custom_commands_to_define.add(command_name)
 
             if description in used_descriptions:
                 cn, it = used_descriptions[description]
+                # If we have the same active check again with the same description,
+                # then we do not regard this as an error, but simply ignore the
+                # second one.
+                if cn == "custom(%s)" % command_name:
+                    continue
                 raise MKGeneralException(
                         "ERROR: Duplicate service description (custom check) '%s' for host '%s'!\n"
                         " - 1st occurrance: checktype = %s, item = %r\n"
@@ -2109,6 +2423,36 @@ define service {
 """ % (template, hostname, make_utf8(description), simulate_command(command),
        (command_line and not freshness) and 1 or 0, extraconf, freshness))
 
+            # write service dependencies for custom checks
+            outfile.write(get_dependencies(hostname,description))
+
+    # Inventory checks - if user has configured them. Not for clusters.
+    if inventory_check_interval and not is_cluster(hostname) \
+        and not service_ignored(hostname, None, 'Check_MK inventory') \
+        and not "ping" in tags_of_host(hostname):
+        outfile.write("""
+define service {
+  use\t\t\t\t%s
+  host_name\t\t\t%s
+  normal_check_interval\t\t%d
+  retry_check_interval\t\t%d
+%s  service_description\t\tCheck_MK inventory
+}
+""" % (inventory_check_template, hostname, inventory_check_interval,
+       inventory_check_interval,
+       extra_service_conf_of(hostname, "Check_MK inventory")))
+
+        if have_at_least_one_service:
+            outfile.write("""
+define servicedependency {
+  use\t\t\t\t%s
+  host_name\t\t\t%s
+  service_description\t\tCheck_MK
+  dependent_host_name\t\t%s
+  dependent_service_description\tCheck_MK inventory
+}
+""" % (service_dependency_template, hostname, hostname))
+
     # Levels for host check
     if is_cluster(hostname):
         ping_command = 'check-mk-ping-cluster'
@@ -2125,6 +2469,19 @@ define service {
 }
 
 """ % (pingonly_template, ping_command, check_icmp_arguments(hostname), extra_service_conf_of(hostname, "PING"), hostname))
+
+def autodetect_plugin(command_line):
+    plugin_name = command_line.split()[0]
+    if command_line[0] not in [ '$', '/' ]:
+        try:
+            for dir in [ "/local", "" ]:
+                path = omd_root + dir + "/lib/nagios/plugins/"
+                if os.path.exists(path + plugin_name):
+                    command_line = path + command_line
+                    break
+        except:
+            pass
+    return command_line
 
 def simulate_command(command):
     if simulation_mode:
@@ -2291,7 +2648,11 @@ def create_nagios_config_contacts(outfile):
                 outfile.write("  email\t\t\t\t%s\n" % contact["email"])
             if "pager" in contact:
                 outfile.write("  pager\t\t\t\t%s\n" % contact["pager"])
-            not_enabled = contact.get("notifications_enabled", True)
+            if enable_rulebased_notifications:
+                not_enabled = False
+            else:
+                not_enabled = contact.get("notifications_enabled", True)
+
             for what in [ "host", "service" ]:
                 no = contact.get(what + "_notification_options", "")
                 if not no or not not_enabled:
@@ -2300,9 +2661,27 @@ def create_nagios_config_contacts(outfile):
                 outfile.write("  %s_notification_options\t%s\n" % (what, ",".join(list(no))))
                 outfile.write("  %s_notification_period\t%s\n" % (what, contact.get("notification_period", "24X7")))
                 outfile.write("  %s_notification_commands\t%s\n" % (what, contact.get("%s_notification_commands" % what, "check-mk-notify")))
+            # Add custom macros
+            for macro in [ m for m in contact.keys() if m.startswith('_') ]:
+                outfile.write("  %s\t%s\n" % ( macro, contact[macro] ))
 
             outfile.write("  contactgroups\t\t\t%s\n" % ", ".join(cgrs))
             outfile.write("}\n\n")
+
+    if enable_rulebased_notifications:
+        outfile.write(
+            "# Needed for rule based notifications\n"
+            "define contact {\n"
+            "  contact_name\t\t\tcheck-mk-notify\n"
+            "  alias\t\t\t\tContact for rule based notifications\n"
+            "  host_notification_options\td,u,r,f,s\n"
+            "  service_notification_options\tu,c,w,r,f,s\n"
+            "  host_notification_period\t24X7\n"
+            "  service_notification_period\t24X7\n"
+            "  host_notification_commands\tcheck-mk-notify\n"
+            "  service_notification_commands\tcheck-mk-notify\n"
+            "  contactgroups\t\t\tcheck-mk-notify\n"
+            "}\n\n");
 
 
 # Quote string for use in a nagios command execution.
@@ -2312,9 +2691,8 @@ def quote_nagios_string(s):
     return "'" + s.replace('\\', '\\\\').replace("'", "'\"'\"'").replace('!', '\\!') + "'"
 
 
-
-
-#   +----------------------------------------------------------------------+
+#.
+#   .--Inventory-----------------------------------------------------------.
 #   |            ___                      _                                |
 #   |           |_ _|_ ____   _____ _ __ | |_ ___  _ __ _   _              |
 #   |            | || '_ \ \ / / _ \ '_ \| __/ _ \| '__| | | |             |
@@ -2322,6 +2700,70 @@ def quote_nagios_string(s):
 #   |           |___|_| |_|\_/ \___|_| |_|\__\___/|_|   \__, |             |
 #   |                                                   |___/              |
 #   +----------------------------------------------------------------------+
+#   | Automatic service detection                                          |
+#   '----------------------------------------------------------------------'
+
+def do_inventory(hostnames, checknames, only_new):
+        # For clusters add their nodes to the list
+        nodes = []
+        for h in hostnames:
+            nodes = nodes_of(h)
+            if nodes:
+                hostnames += nodes
+
+        # Then remove clusters and make list unique
+        hostnames = list(set([ h for h in hostnames if not is_cluster(h) ]))
+        hostnames.sort()
+
+        if opt_verbose:
+            if len(hostnames) > 0:
+                sys.stdout.write("Inventorizing %s.\n" % ", ".join(hostnames))
+            else:
+                sys.stdout.write("Inventorizing all hosts.\n")
+
+        # remove existing checks, if option -I is used twice
+        if seen_I > 1:
+            if not checknames:
+                checks_to_remove = inventorable_checktypes("all")
+            else:
+                checks_to_remove = checknames
+            if len(hostnames) > 0:
+                # Entries in hostnames that are either prefixed with @
+                # or are no valid hostnames are considered to be tags.
+                for host in hostnames:
+                    remove_autochecks_of(host, checks_to_remove)
+                    # If all nodes of a cluster are contained in the list, then
+                    # also remove the autochecks of that cluster. Beware: a host
+                    # can be part more multiple clusters
+                    for clust in clusters_of(host):
+                        missing = [] # collect nodes missing on the command line
+                        for node in nodes_of(clust):
+                            if node not in hostnames:
+                                missing.append(node)
+
+                        if len(missing) == 0:
+                            if opt_verbose:
+                                sys.stdout.write("All nodes of %s specified, dropping checks of %s, too.\n" % (clust, node))
+                            remove_autochecks_of(clust, checks_to_remove)
+
+                        else:
+                            sys.stdout.write("Warning: %s is part of cluster %s, but you didn't specify %s as well.\nChecks on %s will be kept.\n" %
+                            (host, clust, ",".join(missing), clust))
+
+            else:
+                for host in all_active_hosts() + all_active_clusters():
+                    remove_autochecks_of(host, checks_to_remove)
+            reread_autochecks()
+
+        if checknames == None:
+            do_snmp_scan(hostnames)
+            checknames = inventorable_checktypes("tcp")
+
+        for checkname in checknames:
+            make_inventory(checkname, hostnames, False)
+
+        do_cleanup_autochecks()
+
 
 
 def inventorable_checktypes(what): # snmp, tcp, all
@@ -2355,7 +2797,14 @@ def do_snmp_scan(hostnamelist, check_only=False, include_state=False):
         except:
             sys.stdout.write("Cannot resolve %s into IP address. Skipping.\n" % hostname)
             continue
-        checknames = snmp_scan(hostname, ipaddress)
+        try:
+            checknames = snmp_scan(hostname, ipaddress)
+        except Exception, e:
+            if opt_debug:
+                raise
+            sys.stdout.write("SNMP scan for %s failed: %s\n" % (hostname, e))
+            continue
+
         for checkname in checknames:
             if opt_debug:
                 sys.stdout.write("Trying inventory for %s on %s\n" % (checkname, hostname))
@@ -2560,7 +3009,6 @@ def make_inventory(checkname, hostnamelist, check_only=False, include_state=Fals
     except KeyboardInterrupt:
         sys.stderr.write('<Interrupted>\n')
 
-
     if not check_only:
         if newchecks != []:
             filename = autochecksdir + "/" + checkname + "-" + time.strftime("%Y-%m-%d_%H.%M.%S")
@@ -2583,13 +3031,21 @@ def check_inventory(hostname):
     is_snmp = is_snmp_host(hostname)
     is_tcp  = is_tcp_host(hostname)
     check_table = get_check_table(hostname)
-    hosts_checktypes = set([ ct for (ct, item), params in check_table.items() ])
+
     try:
+        if is_snmp and inventory_check_do_scan:
+            ipaddress = lookup_ipaddress(hostname)
+            snmp_checktypes = snmp_scan(hostname, ipaddress)
+        else:
+            snmp_checktypes = []
+
+        hosts_checktypes = set([ ct for (ct, item), params in check_table.items() ])
+
         for ct in inventorable_checktypes("all"):
             if check_uses_snmp(ct) and not is_snmp:
                 continue # Skip SNMP checks on non-SNMP hosts
-            elif check_uses_snmp(ct) and ct not in hosts_checktypes:
- 		continue # Do not look for new SNMP services (maybe change in future)
+            elif check_uses_snmp(ct) and ct not in hosts_checktypes and ct not in snmp_checktypes:
+ 		continue # Only try positive scans and existing types
             elif not check_uses_snmp(ct) and not is_tcp:
                 continue # Skip TCP checks on non-TCP hosts
 
@@ -2615,8 +3071,16 @@ def check_inventory(hostname):
     except Exception, e:
         if opt_debug:
             raise
-        sys.stdout.write("UNKNOWN - %s\n" % (e,))
-        sys.exit(3)
+        # Honor rule settings for "Status of the Check_MK service". In case of
+        # a problem we assume a connection error here.
+        spec = exit_code_spec(hostname)
+        if isinstance(e, MKAgentError) or isinstance(e, MKSNMPError):
+            what = "connection"
+        else:
+            what = "exception"
+        status = spec.get(what, 3)
+        sys.stdout.write("%s - %s\n" % (nagios_state_names[status], e))
+        sys.exit(status)
 
 
 def service_ignored(hostname, checktype, service_description):
@@ -2629,41 +3093,10 @@ def service_ignored(hostname, checktype, service_description):
     return False
 
 
-def in_boolean_serviceconf_list(hostname, service_description, conflist):
-    for entry in conflist:
-        entry, rule_options = get_rule_options(entry)
-        if rule_options.get("disabled"):
-            continue
-
-        if entry[0] == NEGATE: # this entry is logically negated
-            negate = True
-            entry = entry[1:]
-        else:
-            negate = False
-
-        if len(entry) == 2:
-            hostlist, servlist = entry
-            tags = []
-        elif len(entry) == 3:
-            tags, hostlist, servlist = entry
-        else:
-            raise MKGeneralException("Invalid entry '%r' in configuration: must have 2 or 3 elements" % (entry,))
-
-        if hosttags_match_taglist(tags_of_host(hostname), tags) and \
-           in_extraconf_hostlist(hostlist, hostname) and \
-           in_extraconf_servicelist(servlist, service_description):
-            if opt_verbose:
-                print "Ignoring service '%s' on host %s." % (service_description, hostname)
-            return not negate
-    return False # no match. Do not ignore
-
-
 # Remove all autochecks of certain types of a certain host
 def remove_autochecks_of(hostname, checktypes = None): # None = all
     removed = 0
     for fn in glob.glob(autochecksdir + "/*.mk"):
-        if opt_debug:
-            sys.stdout.write("Scanning %s...\n" % fn)
         lines = []
         count = 0
         for line in file(fn):
@@ -2706,7 +3139,8 @@ def reread_autochecks():
     read_all_autochecks()
     checks = autochecks + checks
 
-#   +----------------------------------------------------------------------+
+#.
+#   .--Precompile----------------------------------------------------------.
 #   |          ____                                     _ _                |
 #   |         |  _ \ _ __ ___  ___ ___  _ __ ___  _ __ (_) | ___           |
 #   |         | |_) | '__/ _ \/ __/ _ \| '_ ` _ \| '_ \| | |/ _ \          |
@@ -2714,6 +3148,13 @@ def reread_autochecks():
 #   |         |_|   |_|  \___|\___\___/|_| |_| |_| .__/|_|_|\___|          |
 #   |                                            |_|                       |
 #   +----------------------------------------------------------------------+
+#   | Precompiling creates on dedicated Python file per host, which just   |
+#   | contains that code and information that is needed for executing all  |
+#   | checks of that host. Also static data that cannot change during the  |
+#   | normal monitoring process is being precomputed and hard coded. This  |
+#   | all saves substantial CPU ressources as opposed to running Check_MK  |
+#   | in adhoc mode (about 75%).                                           |
+#   '----------------------------------------------------------------------'
 
 # Find files to be included in precompile host check for a certain
 # check (for example df or mem.used). In case of checks with a period
@@ -2740,7 +3181,7 @@ def find_check_plugins(checktype):
     return paths
 
 def get_precompiled_check_table(hostname):
-    host_checks = get_sorted_check_table(hostname)
+    host_checks = get_sorted_check_table(hostname, remove_duplicates=True)
     precomp_table = []
     for checktype, item, params, description, deps in host_checks:
         aggr_name = aggregated_service_name(hostname, description)
@@ -2834,18 +3275,19 @@ no_inventory_possible = None
                  'perfdata_format', 'aggregation_output_format',
                  'aggr_summary_hostname', 'nagios_command_pipe_path',
                  'check_result_path', 'check_submission', 'monitoring_core',
-                 'var_dir', 'counters_directory', 'tcp_cache_dir', 'tmp_dir',
+                 'var_dir', 'counters_directory', 'tcp_cache_dir', 'tmp_dir', 'log_dir',
                  'snmpwalks_dir', 'check_mk_basedir', 'nagios_user', 'rrd_path', 'rrdcached_socket',
                  'omd_root',
                  'www_group', 'cluster_max_cachefile_age', 'check_max_cachefile_age',
                  'piggyback_max_cachefile_age',
                  'simulation_mode', 'agent_simulator', 'aggregate_check_mk', 'debug_log',
                  'check_mk_perfdata_with_times', 'livestatus_unix_socket',
+                 'has_inline_snmp', 'use_inline_snmp',
                  ]:
         output.write("%s = %r\n" % (var, globals()[var]))
 
     output.write("\n# Checks for %s\n\n" % hostname)
-    output.write("def get_sorted_check_table(hostname):\n    return %r\n\n" % check_table)
+    output.write("def get_sorted_check_table(hostname, remove_duplicates=False):\n    return %r\n\n" % check_table)
 
     # Do we need to load the SNMP module? This is the case, if the host
     # has at least one SNMP based check. Also collect the needed check
@@ -2878,6 +3320,9 @@ no_inventory_possible = None
 
     if need_snmp_module:
         output.write(stripped_python_file(modules_dir + "/snmp.py"))
+
+        if has_inline_snmp and use_inline_snmp:
+            output.write(stripped_python_file(modules_dir + "/inline_snmp.py"))
 
     if agent_simulator:
         output.write(stripped_python_file(modules_dir + "/agent_simulator.py"))
@@ -2939,8 +3384,16 @@ no_inventory_possible = None
     # snmp hosts
     output.write("def is_snmp_host(hostname):\n   return %r\n\n" % is_snmp_host(hostname))
     output.write("def is_tcp_host(hostname):\n   return %r\n\n" % is_tcp_host(hostname))
-    output.write("def snmp_walk_command(hostname):\n   return %r\n\n" % snmp_walk_command(hostname))
     output.write("def is_usewalk_host(hostname):\n   return %r\n\n" % is_usewalk_host(hostname))
+    if has_inline_snmp and use_inline_snmp:
+        output.write("def is_snmpv2c_host(hostname):\n   return %r\n\n" % is_snmpv2c_host(hostname))
+        output.write("def is_bulkwalk_host(hostname):\n   return %r\n\n" % is_bulkwalk_host(hostname))
+        output.write("def snmp_timing_of(hostname):\n   return %r\n\n" % snmp_timing_of(hostname))
+        output.write("def snmp_credentials_of(hostname):\n   return %s\n\n" % pprint.pformat(snmp_credentials_of(hostname)))
+        output.write("def snmp_port_of(hostname):\n   return %r\n\n" % snmp_port_of(hostname))
+    else:
+        output.write("def snmp_port_spec(hostname):\n    return %r\n\n" % snmp_port_spec(hostname))
+        output.write("def snmp_walk_command(hostname):\n   return %r\n\n" % snmp_walk_command(hostname))
 
     # IP addresses
     needed_ipaddresses = {}
@@ -2979,13 +3432,15 @@ no_inventory_possible = None
 
     # TCP and SNMP port of agent
     output.write("def agent_port_of(hostname):\n    return %d\n\n" % agent_port_of(hostname))
-    output.write("def snmp_port_spec(hostname):\n    return %r\n\n" % snmp_port_spec(hostname))
 
     # Exit code of Check_MK in case of various errors
     output.write("def exit_code_spec(hostname):\n    return %r\n\n" % exit_code_spec(hostname))
 
     # Piggyback translations
     output.write("def get_piggyback_translation(hostname):\n    return %r\n\n" % get_piggyback_translation(hostname))
+
+    # Expected agent version
+    output.write("def agent_target_version(hostname):\n    return %r\n\n" % agent_target_version(hostname))
 
     # SNMP character encoding
     output.write("def get_snmp_character_encoding(hostname):\n    return %r\n\n"
@@ -3019,7 +3474,9 @@ no_inventory_possible = None
     output.write("    sys.stdout.write(\"Traceback: %s\\n\" % traceback.format_exc())\n")
 
     # debug logging
-    output.write("    if debug_log:\n")
+    output.write("\n    if debug_log:\n")
+    output.write("        if debug_log == True:\n")
+    output.write("            debug_log = log_dir + \"/crashed-checks.log\"\n")
     output.write("        l = file(debug_log, \"a\")\n")
     output.write("        l.write((\"Exception in precompiled check:\\n\"\n")
     output.write("                \"  Check_MK Version: %s\\n\"\n")
@@ -3060,14 +3517,19 @@ no_inventory_possible = None
         sys.stderr.write(" ==> %s.\n" % compiled_filename)
 
 
+#.
+#   .--Man-Pages-----------------------------------------------------------.
+#   |         __  __                   ____                                |
+#   |        |  \/  | __ _ _ __       |  _ \ __ _  __ _  ___  ___          |
+#   |        | |\/| |/ _` | '_ \ _____| |_) / _` |/ _` |/ _ \/ __|         |
+#   |        | |  | | (_| | | | |_____|  __/ (_| | (_| |  __/\__ \         |
+#   |        |_|  |_|\__,_|_| |_|     |_|   \__,_|\__, |\___||___/         |
+#   |                                             |___/                    |
 #   +----------------------------------------------------------------------+
-#   |                  __  __                         _                    |
-#   |                 |  \/  | __ _ _ __  _   _  __ _| |                   |
-#   |                 | |\/| |/ _` | '_ \| | | |/ _` | |                   |
-#   |                 | |  | | (_| | | | | |_| | (_| | |                   |
-#   |                 |_|  |_|\__,_|_| |_|\__,_|\__,_|_|                   |
-#   |                                                                      |
-#   +----------------------------------------------------------------------+
+#   | Each Check has a man page. Here is that code for displaying that in- |
+#   | line documentation and also some code for outputting it in a format  |
+#   | that is used by the official Check_MK documentation ("nowiki").      |
+#   '----------------------------------------------------------------------'
 
 opt_nowiki   = False
 
@@ -3158,7 +3620,7 @@ def manpage_browser_folder(cat, subtrees):
     execfile(modules_dir + "/catalog.py", globals())
     titles = []
     for e in subtrees:
-        title = manpage_catalog_titles.get(e,e) 
+        title = manpage_catalog_titles.get(e,e)
         count = manpage_num_entries(cat + (e,))
         if count:
             title += " (%d)" % count
@@ -3195,7 +3657,6 @@ def manpage_display_header(cat):
     return " -> ".join([manpage_catalog_titles.get(e,e) for e in cat ])
 
 def run_dialog(args):
-    import subprocess
     env = {
         "TERM": os.getenv("TERM", "linux"),
         "LANG": "de_DE.UTF-8"
@@ -3331,7 +3792,7 @@ def show_check_manual(checkname):
             return line.replace('{{', '{&#123;').replace('}}', '&#125;}').replace("{", "<b>").replace("}", "</b>")
 
         def print_sectionheader(line, title):
-            print "H1:" + title 
+            print "H1:" + title
 
         def print_subheader(line):
             print "H2:" + line
@@ -3573,14 +4034,20 @@ def show_check_manual(checkname):
     except Exception, e:
         print "Invalid check manpage %s: missing %s" % (filename, e)
 
+
+#.
+#   .--Backup & Restore----------------------------------------------------.
+#   |  ____             _                   ___     ____           _       |
+#   | | __ )  __ _  ___| | ___   _ _ __    ( _ )   |  _ \ ___  ___| |_     |
+#   | |  _ \ / _` |/ __| |/ / | | | '_ \   / _ \/\ | |_) / _ \/ __| __|    |
+#   | | |_) | (_| | (__|   <| |_| | |_) | | (_>  < |  _ <  __/\__ \ |_ _   |
+#   | |____/ \__,_|\___|_|\_\\__,_| .__/   \___/\/ |_| \_\___||___/\__(_)  |
+#   |                             |_|                                      |
 #   +----------------------------------------------------------------------+
-#   |                  ____             _                                  |
-#   |                 | __ )  __ _  ___| | ___   _ _ __                    |
-#   |                 |  _ \ / _` |/ __| |/ / | | | '_ \                   |
-#   |                 | |_) | (_| | (__|   <| |_| | |_) |                  |
-#   |                 |____/ \__,_|\___|_|\_\\__,_| .__/                   |
-#   |                                             |_|                      |
-#   +----------------------------------------------------------------------+
+#   | Check_MK comes with a simple backup and restore of the current con-  |
+#   | figuration and cache files (cmk --backup and cmk --restore). This is |
+#   | implemented here.                                                    |
+#   '----------------------------------------------------------------------'
 
 class fake_file:
     def __init__(self, content):
@@ -3772,21 +4239,28 @@ def do_flush(hosts):
             flushed = True
             sys.stdout.write(tty_bold + tty_cyan + " autochecks(%d)" % d)
 
+        # inventory
+        path = var_dir + "/inventory/" + host
+        if os.path.exists(path):
+            os.remove(path)
+            sys.stdout.write(tty_bold + tty_yellow + " inventory")
+
         if not flushed:
             sys.stdout.write("(nothing)")
 
-
         sys.stdout.write(tty_normal + "\n")
 
-
-#   +----------------------------------------------------------------------+
-#   |   __  __       _        __                  _   _                    |
-#   |  |  \/  | __ _(_)_ __  / _|_   _ _ __   ___| |_(_) ___  _ __  ___    |
-#   |  | |\/| |/ _` | | '_ \| |_| | | | '_ \ / __| __| |/ _ \| '_ \/ __|   |
-#   |  | |  | | (_| | | | | |  _| |_| | | | | (__| |_| | (_) | | | \__ \   |
-#   |  |_|  |_|\__,_|_|_| |_|_|  \__,_|_| |_|\___|\__|_|\___/|_| |_|___/   |
+#.
+#   .--Main Functions------------------------------------------------------.
+#   | __  __       _         _____                 _   _                   |
+#   ||  \/  | __ _(_)_ __   |  ___|   _ _ __   ___| |_(_) ___  _ __  ___   |
+#   || |\/| |/ _` | | '_ \  | |_ | | | | '_ \ / __| __| |/ _ \| '_ \/ __|  |
+#   || |  | | (_| | | | | | |  _|| |_| | | | | (__| |_| | (_) | | | \__ \  |
+#   ||_|  |_|\__,_|_|_| |_| |_|   \__,_|_| |_|\___|\__|_|\___/|_| |_|___/  |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   | Implementation of some of the toplevel functions.                    |
+#   '----------------------------------------------------------------------'
 
 # Create a list of all hosts of a certain hostgroup. Needed only for
 # option --list-hosts
@@ -3875,12 +4349,13 @@ def do_snmptranslate(walk):
     translated_lines = []
 
     walk_lines = file(path_walk).readlines()
-    print("Processing %d lines (%d per dot)" %  (len(walk_lines), entries_per_cycle))
+    sys.stderr.write("Processing %d lines (%d per dot)\n" %  (len(walk_lines), entries_per_cycle))
     for i in range(0, len(walk_lines), entries_per_cycle):
-        sys.stdout.write(".")
-        sys.stdout.flush()
+        sys.stderr.write(".")
+        sys.stderr.flush()
         process_lines = walk_lines[i:i+entries_per_cycle]
         translated_lines.extend(translate(process_lines))
+    sys.stderr.write("\n")
 
     # Output formatted
     longest_translation = 40
@@ -3909,41 +4384,23 @@ def do_snmpwalk_on(hostname, filename):
     if opt_verbose:
         sys.stdout.write("%s:\n" % hostname)
     ip = lookup_ipaddress(hostname)
-    portspec = snmp_port_spec(hostname)
-    cmd = snmp_walk_command(hostname) + " -On -Ob -OQ -Ot %s%s " % (ip, portspec)
-    if opt_debug:
-        print 'Executing: %s' % cmd
-    out = file(filename, "w")
-    for oid in [ "", "1.3.6.1.4.1" ]: # SNMPv2-SMI::enterprises
-        oids = []
-        values = []
-        if opt_verbose:
-            sys.stdout.write("%s..." % (cmd + oid))
-            sys.stdout.flush()
-        count = 0
-        f = os.popen(cmd + oid)
-        while True:
-            line = f.readline()
-            if not line:
-                break
-            parts = line.split("=", 1)
-            if len(parts) != 2:
-                continue
-            oid, value = parts
-            value = value.rstrip("\n")
-            if value.lstrip().startswith('"'):
-                while value[-1] != '"':
-                    value += f.readline().rstrip("\n")
 
-            if not oid.startswith("."):
-                oid = "." + oid
-            oids.append(oid)
-            values.append(value)
-        for oid, value in zip(oids, values):
-            out.write("%s %s\n" % (oid, value.strip()))
-            count += 1
+    out = file(filename, "w")
+    for oid in [
+            ".1.3.6.1.2.1", # SNMPv2-SMI::mib-2
+            ".1.3.6.1.4.1"  # SNMPv2-SMI::enterprises
+          ]:
         if opt_verbose:
-            sys.stdout.write("%d variables.\n" % count)
+            sys.stdout.write("Walk on \"%s\"..." % oid)
+            sys.stdout.flush()
+
+        results = snmpwalk_on_suboid(hostname, ip, oid, hex_plain = True)
+
+        for oid, value in results:
+            out.write("%s %s\n" % (oid, value))
+
+        if opt_verbose:
+            sys.stdout.write("%d variables.\n" % len(results))
 
     out.close()
     if opt_verbose:
@@ -3974,6 +4431,7 @@ def show_paths():
         ( modules_dir,                 dir, inst, "Main components of check_mk"),
         ( checks_dir,                  dir, inst, "Checks"),
         ( notifications_dir,           dir, inst, "Notification scripts"),
+        ( inventory_dir,               dir, inst, "Inventory plugins"),
         ( agents_dir,                  dir, inst, "Agents for operating systems"),
         ( doc_dir,                     dir, inst, "Documentation files"),
         ( web_dir,                     dir, inst, "Check_MK's web pages"),
@@ -4014,6 +4472,7 @@ def show_paths():
         paths += [
          ( local_checks_dir,           dir, local, "Locally installed checks"),
          ( local_notifications_dir,    dir, local, "Locally installed notification scripts"),
+         ( local_inventory_dir,        dir, local, "Locally installed inventory plugins"),
          ( local_check_manpages_dir,   dir, local, "Locally installed check man pages"),
          ( local_agents_dir,           dir, local, "Locally installed agents and plugins"),
          ( local_web_dir,              dir, local, "Locally installed Multisite addons"),
@@ -4090,6 +4549,10 @@ def dump_host(hostname):
         if is_usewalk_host(hostname):
             agenttypes.append("SNMP (use stored walk)")
         else:
+            if has_inline_snmp and use_inline_snmp:
+                inline = "yes"
+            else:
+                inline = "no"
             credentials = snmp_credentials_of(hostname)
             if is_bulkwalk_host(hostname):
                 bulk = "yes"
@@ -4098,7 +4561,8 @@ def dump_host(hostname):
             portinfo = snmp_port_of(hostname)
             if portinfo == None:
                 portinfo = 'default'
-            agenttypes.append("SNMP (community: '%s', bulk walk: %s, port: %s)" % (credentials, bulk, portinfo))
+            agenttypes.append("SNMP (community: '%s', bulk walk: %s, port: %s, inline: %s)" %
+                (credentials, bulk, portinfo, inline))
 
     if is_ping_host(hostname):
         agenttypes.append('PING only')
@@ -4186,9 +4650,8 @@ Copyright (C) 2009 Mathias Kettner
 def usage():
     print """WAYS TO CALL:
  cmk [-n] [-v] [-p] HOST [IPADDRESS]  check all services on HOST
- cmk [-u] -I [HOST ..]                inventory - find new services
- cmk [-u] -II ...                     renew inventory, drop old services
- cmk -u, --cleanup-autochecks         reorder autochecks files
+ cmk -I [HOST ..]                     inventory - find new services
+ cmk -II ...                          renew inventory, drop old services
  cmk -N [HOSTS...]                    output Nagios configuration
  cmk -B                               create configuration for core
  cmk -C, --compile                    precompile host checks
@@ -4198,7 +4661,8 @@ def usage():
  cmk -D, --dump [H1 H2 ..]            dump all or some hosts
  cmk -d HOSTNAME|IPADDRESS            show raw information from agent
  cmk --check-inventory HOSTNAME       check for items not yet checked
- cmk --list-hosts [G1 G2 ...]         print list of hosts
+ cmk --update-dns-cache               update IP address lookup cache
+ cmk -l, --list-hosts [G1 G2 ...]     print list of all hosts
  cmk --list-tag TAG1 TAG2 ...         list hosts having certain tags
  cmk -L, --list-checks                list all available check types
  cmk -M, --man [CHECKTYPE]            show manpage for check CHECKTYPE
@@ -4217,6 +4681,8 @@ def usage():
  cmk --localize COMMAND               do localization operations
  cmk --notify                         used to send notifications from core
  cmk --create-rrd [--keepalive|SPEC]  create round robin database
+ cmk -i, --inventory [HOST1 HOST2...] Do a HW/SW-Inventory of some ar all hosts
+ cmk --inventory-as-check HOST        Do HW/SW-Inventory, behave like check plugin
  cmk -V, --version                    print version
  cmk -h, --help                       print this help
 
@@ -4248,10 +4714,6 @@ NOTES:
 
   -II does the same as -I but deletes all existing checks of the
   specified types and hosts.
-
-  -u, --cleanup-autochecks resorts all checks found by inventory
-  into per-host files. It can be used as an options to -I or as
-  a standalone operation.
 
   -N outputs the Nagios configuration. You may optionally add a list
   of hosts. In that case the configuration is generated only for
@@ -4285,9 +4747,9 @@ NOTES:
   compressed tar file. --restore *erases* the current configuration
   and data and replaces it with that from the backup file.
 
-  --flush deletes all runtime data belonging to a host (not
-  inventory data). This includes the state of performance counters,
-  cached agent output,  and logfiles. Precompiled host checks
+  --flush deletes all runtime data belonging to a host. This includes
+  the inventorized checks, the state of performance counters,
+  cached agent output, and logfiles. Precompiled host checks
   are not deleted.
 
   -P, --package brings you into packager mode. Packages are
@@ -4510,8 +4972,6 @@ def do_cleanup_autochecks():
     os.chdir(autochecksdir)
     checks = 0
     for fn in glob.glob("*.mk"):
-        if opt_debug:
-            sys.stdout.write("Scanning %s...\n" % fn)
         for line in file(fn):
             testline = line.lstrip().replace("'", '"')
             if testline.startswith('("'):
@@ -4521,7 +4981,7 @@ def do_cleanup_autochecks():
                 hostchecks.append(line)
                 checks += 1
                 hostdata[hostname] = hostchecks
-    if opt_verbose:
+    if opt_debug:
         sys.stdout.write("Found %d checks from %d hosts.\n" % (checks, len(hostdata)))
 
     # 2. Write out new autochecks.
@@ -4529,8 +4989,6 @@ def do_cleanup_autochecks():
     for host, lines in hostdata.items():
         lines.sort()
         fn = host.replace(":","_") + ".mk"
-        if opt_verbose:
-            sys.stdout.write("Writing %s: %d checks\n" % (fn, len(lines)))
         newfiles.add(fn)
         f = file(fn, "w+")
         f.write("[\n")
@@ -4541,7 +4999,7 @@ def do_cleanup_autochecks():
     # 3. Remove obsolete files
     for f in glob.glob("*.mk"):
         if f not in newfiles:
-            if opt_verbose:
+            if opt_debug:
                 sys.stdout.write("Deleting %s\n" % f)
             os.remove(f)
 
@@ -4818,16 +5276,188 @@ def ip_to_dnsname(ip):
     except:
         return None
 
+def config_timestamp():
+    mtime = 0
+    for dirpath, dirnames, filenames in os.walk(check_mk_configdir):
+        for f in filenames:
+            mtime = max(mtime, os.stat(dirpath + "/" + f).st_mtime)
+    mtime = max(mtime, os.stat(default_config_dir + "/main.mk").st_mtime)
+    try:
+        mtime = max(mtime, os.stat(default_config_dir + "/final.mk").st_mtime)
+    except:
+        pass
+    try:
+        mtime = max(mtime, os.stat(default_config_dir + "/local.mk").st_mtime)
+    except:
+        pass
+    return mtime
 
 
-#   +----------------------------------------------------------------------+
-#   |         ____                _                    __ _                |
-#   |        |  _ \ ___  __ _  __| |   ___ ___  _ __  / _(_) __ _          |
-#   |        | |_) / _ \/ _` |/ _` |  / __/ _ \| '_ \| |_| |/ _` |         |
-#   |        |  _ <  __/ (_| | (_| | | (_| (_) | | | |  _| | (_| |         |
-#   |        |_| \_\___|\__,_|\__,_|  \___\___/|_| |_|_| |_|\__, |         |
+
+# Reset some global variable to their original value. This
+# is needed in keepalive mode.
+# We could in fact do some positive caching in keepalive
+# mode - e.g. the counters of the hosts could be saved in memory.
+def cleanup_globals():
+    global g_agent_already_contacted
+    g_agent_already_contacted = {}
+    global g_hostname
+    g_hostname = "unknown"
+    global g_counters
+    g_counters = {}
+    global g_infocache
+    g_infocache = {}
+    global g_broken_agent_hosts
+    g_broken_agent_hosts = set([])
+    global g_broken_snmp_hosts
+    g_broken_snmp_hosts = set([])
+    global g_inactive_timerperiods
+    g_inactive_timerperiods = None
+    global g_walk_cache
+    g_walk_cache = {}
+
+    if 'g_snmp_sessions' in globals():
+        global g_snmp_sessions
+        g_snmp_sessions = {}
+
+
+# Diagnostic function for detecting global variables that have
+# changed during checking. This is slow and canno be used
+# in production mode.
+def copy_globals():
+    import copy
+    global_saved = {}
+    for varname, value in globals().items():
+        # Some global caches are allowed to change.
+        if varname not in [ "g_service_description", "g_multihost_checks", "g_check_table_cache", "g_singlehost_checks", "total_check_outout" ] \
+            and type(value).__name__ not in [ "function", "module", "SRE_Pattern" ]:
+            global_saved[varname] = copy.copy(value)
+    return global_saved
+
+
+def do_check_keepalive():
+    global g_initial_times
+
+    def check_timeout(signum, frame):
+        raise MKCheckTimeout()
+
+    signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
+
+    # Prevent against plugins that output debug information (but shouldn't).
+    # Their stdout will interfer with communication with the Micro Core.
+    # We do this with a trick:
+    # 1. move the filedescriptor 1 to a parking position
+    # 2. re-open 0 on /dev/null
+    # 3. Send our answers to the Micro Core with the parked FD.
+    # BEWARE: this must not happen after we have execve'd ourselves!
+    if opt_keepalive_fd:
+        keepalive_fd = opt_keepalive_fd
+    else:
+        keepalive_fd = os.dup(1)
+        devnull = os.open("/dev/null", os.O_WRONLY | os.O_CREAT)
+        os.dup2(devnull, 1)
+        os.close(devnull)
+
+    global total_check_output
+    total_check_output = ""
+    if opt_debug:
+        before = copy_globals()
+
+    ipaddress_cache = {}
+
+    while True:
+        cleanup_globals()
+        hostname = keepalive_read_line()
+        g_initial_times = os.times()
+        if not hostname:
+            break
+        hostname = hostname.strip()
+        if hostname == "*":
+            os.execvp("cmk", sys.argv + [ "--keepalive-fd=%d" % keepalive_fd ])
+        elif not hostname:
+            break
+
+        timeout = int(keepalive_read_line())
+        try: # catch non-timeout exceptions
+            try: # catch timeouts
+                signal.signal(signal.SIGALRM, check_timeout)
+                signal.alarm(timeout)
+                if ';' in hostname:
+                    hostname, ipaddress = hostname.split(";", 1)
+                elif hostname in ipaddress_cache:
+                    ipaddress = ipaddress_cache[hostname]
+                else:
+                    if is_cluster(hostname):
+                        ipaddress = None
+                    else:
+                        try:
+                            ipaddress = lookup_ipaddress(hostname)
+                        except:
+                            raise MKGeneralException("Cannot resolve hostname %s into IP address" % hostname)
+                    ipaddress_cache[hostname] = ipaddress
+
+                status = do_check(hostname, ipaddress)
+                signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
+                signal.alarm(0)
+            except MKCheckTimeout:
+                signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
+                status = 3
+                total_check_output = "UNKNOWN - Check_MK timed out after %d seconds\n" % timeout
+
+            os.write(keepalive_fd, "%03d\n%08d\n%s" %
+                 (status, len(total_check_output), total_check_output))
+            total_check_output = ""
+            cleanup_globals()
+
+            # Check if all global variables are clean, but only in debug mode
+            if opt_debug:
+                after = copy_globals()
+                for varname, value in before.items():
+                    if value != after[varname]:
+                        sys.stderr.write("WARNING: global variable %s has changed: %r ==> %s\n"
+                               % (varname, value, repr(after[varname])[:50]))
+                new_vars = set(after.keys()).difference(set(before.keys()))
+                if (new_vars):
+                    sys.stderr.write("WARNING: new variable appeared: %s" % ", ".join(new_vars))
+
+        except Exception, e:
+            if opt_debug:
+                raise
+            total_check_output = "UNKNOWN - %s\n" % e
+            os.write(keepalive_fd, "%03d\n%08d\n%s" %
+                 (3, len(total_check_output), total_check_output))
+
+
+# Just one lines from stdin. But: make sure that
+# nothing more is read - not even into some internal
+# buffer of sys.stdin! We do this by reading every
+# single byte. I know that this is not performant,
+# but we just read hostnames - not much data.
+
+def keepalive_read_line():
+    line = ""
+    while True:
+        byte = os.read(0, 1)
+        if byte == '\n':
+            return line
+        elif not byte: # EOF
+            return ''
+        else:
+            line += byte
+
+
+#.
+#   .--Read Config---------------------------------------------------------.
+#   |        ____                _    ____             __ _                |
+#   |       |  _ \ ___  __ _  __| |  / ___|___  _ __  / _(_) __ _          |
+#   |       | |_) / _ \/ _` |/ _` | | |   / _ \| '_ \| |_| |/ _` |         |
+#   |       |  _ <  __/ (_| | (_| | | |__| (_) | | | |  _| | (_| |         |
+#   |       |_| \_\___|\__,_|\__,_|  \____\___/|_| |_|_| |_|\__, |         |
 #   |                                                       |___/          |
 #   +----------------------------------------------------------------------+
+#   | Code for reading the configuration files.                            |
+#   '----------------------------------------------------------------------'
+
 
 # Now - at last - we can read in the user's configuration files
 def all_nonfunction_vars():
@@ -4968,9 +5598,21 @@ def read_config_files(with_autochecks=True, with_conf_d=True):
                             params[key] = value
 
             static.append((taglist, hostlist, checktype, item, params))
+
+    # Note: We need to reverse the order of the static_checks. This is because
+    # users assume that earlier rules have precedence over later ones. For static
+    # checks that is important if there are two rules for a host with the same
+    # combination of check type and item. When the variable 'checks' is evaluated,
+    # *later* rules have precedence. This is not consistent with the rest, but a
+    # result of this "historic implementation".
+    static.reverse()
+
+    # Now prepend to checks. That makes that checks variable have precedence
+    # over WATO.
     checks = static + checks
 
-    # Read autochecks and append them to explicit checks
+    # Read autochecks and prepend them to explicit checks. That way autochecks
+    # will have the *least* precedence!
     if with_autochecks:
         read_all_autochecks()
         checks = autochecks + checks
@@ -5084,6 +5726,12 @@ def compute_check_parameters(host, checktype, item, params):
             if type(params) == dict and type(entry) == dict:
                 params.update(entry)
             else:
+                if type(entry) == dict:
+                    # The entry still has the reference from the rule..
+                    # If we don't make a deepcopy the rule might be modified by
+                    # a followup params.update(...)
+                    import copy
+                    entry = copy.deepcopy(entry)
                 params = entry
     return params
 
@@ -5140,7 +5788,9 @@ def output_profile():
 
         sys.stderr.write("Profile '%s' written. Please run %s.\n" % (g_profile_path, show_profile))
 
-#   +----------------------------------------------------------------------+
+
+#.
+#   .--Main----------------------------------------------------------------.
 #   |                        __  __       _                                |
 #   |                       |  \/  | __ _(_)_ __                           |
 #   |                       | |\/| |/ _` | | '_ \                          |
@@ -5148,25 +5798,26 @@ def output_profile():
 #   |                       |_|  |_|\__,_|_|_| |_|                         |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
-
-
+#   | Main entry point and option parsing. Here is where all begins.       |
+#   '----------------------------------------------------------------------'
 
 # Do option parsing and execute main function -
 # if check_mk is not called as module
 if __name__ == "__main__":
-    short_options = 'SHVLCURODMmd:Ic:nhvpXPuNB'
+    short_options = 'SHVLCURODMmd:Ic:nhvpXPNBil'
     long_options = [ "help", "version", "verbose", "compile", "debug",
                      "list-checks", "list-hosts", "list-tag", "no-tcp", "cache",
                      "flush", "package", "localize", "donate", "snmpwalk", "snmptranslate",
                      "usewalk", "scan-parents", "procs=", "automation=", "notify",
-                     "snmpget=", "profile", "keepalive", "create-rrd",
+                     "snmpget=", "profile", "keepalive", "keepalive-fd=", "create-rrd",
                      "no-cache", "update", "restart", "reload", "dump", "fake-dns=",
                      "man", "nowiki", "config-check", "backup=", "restore=",
-                     "check-inventory=", "paths", "cleanup-autochecks", "checks=", 
-                     "cmc-file=", "browse-man", "list-man" ]
+                     "check-inventory=", "paths", "checks=", "inventory", "inventory-as-check=",
+                     "cmc-file=", "browse-man", "list-man", "update-dns-cache" ]
 
     non_config_options = ['-L', '--list-checks', '-P', '--package', '-M', '--notify',
-                          '--man', '-V', '--version' ,'-h', '--help', '--automation']
+                          '--man', '-V', '--version' ,'-h', '--help', '--automation',
+                          '--create-rrd' ]
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -5182,7 +5833,7 @@ if __name__ == "__main__":
 
     done = False
     seen_I = 0
-    inventory_checks = None
+    check_types = None
     # Scan modifying options first (makes use independent of option order)
     for o,a in opts:
         if o in [ '-v', '--verbose' ]:
@@ -5201,12 +5852,12 @@ if __name__ == "__main__":
             opt_showperfdata = True
         elif o == '-n':
             opt_dont_submit = True
-        elif o in [ '-u', '--cleanup-autochecks' ]:
-            opt_cleanup_autochecks = True
         elif o == '--fake-dns':
             fake_dns = a
         elif o == '--keepalive':
             opt_keepalive = True
+        elif o == '--keepalive-fd':
+            opt_keepalive_fd = int(a)
         elif o == '--usewalk':
             opt_use_snmp_walk = True
         elif o == '--procs':
@@ -5218,7 +5869,7 @@ if __name__ == "__main__":
         elif o == '-I':
             seen_I += 1
         elif o == "--checks":
-            inventory_checks = a
+            check_types = a.split(",")
         elif o == "--cmc-file":
             opt_cmc_relfilename = a
 
@@ -5283,6 +5934,9 @@ if __name__ == "__main__":
             elif o == '--donate':
                 do_donation()
                 done = True
+            elif o == '--update-dns-cache':
+                do_update_dns_cache()
+                done = True
             elif o == '--snmpwalk':
                 do_snmpwalk(args)
                 done = True
@@ -5305,7 +5959,7 @@ if __name__ == "__main__":
             elif o in [ '-m', '--browse-man' ]:
                 manpage_browser()
                 done = True
-            elif o == '--list-hosts':
+            elif o in [ '-l', '--list-hosts' ]:
                 l = list_all_hosts(args)
                 sys.stdout.write("\n".join(l))
                 if l != []:
@@ -5333,6 +5987,18 @@ if __name__ == "__main__":
                 execfile(modules_dir + "/automation.py")
                 do_automation(a, args)
                 done = True
+            elif o in [ '-i', '--inventory' ]:
+                execfile(modules_dir + "/inventory.py")
+                if args:
+                    hostnames = parse_hostname_list(args, with_clusters = False)
+                else:
+                    hostnames = None
+                do_inv(hostnames)
+                done = True
+            elif o == '--inventory-as-check':
+                execfile(modules_dir + "/inventory.py")
+                do_inv_check(a)
+                done = True
             elif o == '--notify':
                 read_config_files(False, True)
                 sys.exit(do_notify(args))
@@ -5349,77 +6015,11 @@ if __name__ == "__main__":
             raise
         sys.exit(3)
 
+    # handle -I / -II
     if not done and seen_I > 0:
-
         hostnames = parse_hostname_list(args)
-        # For clusters add their nodes to the list
-        nodes = []
-        for h in hostnames:
-            nodes = nodes_of(h)
-            if nodes:
-                hostnames += nodes
-
-        # Then remove clusters and make list unique
-        hostnames = list(set([ h for h in hostnames if not is_cluster(h) ]))
-        hostnames.sort()
-
-        if opt_verbose:
-            if len(hostnames) > 0:
-                sys.stdout.write("Inventorizing %s.\n" % ", ".join(hostnames))
-            else:
-                sys.stdout.write("Inventorizing all hosts.\n")
-
-        if inventory_checks:
-            checknames = inventory_checks.split(",")
-
-        # remove existing checks, if option -I is used twice
-        if seen_I > 1:
-            if inventory_checks == None:
-                checknames = inventorable_checktypes("all")
-            if len(hostnames) > 0:
-                # Entries in hostnames that are either prefixed with @
-                # or are no valid hostnames are considered to be tags.
-                for host in hostnames:
-                    remove_autochecks_of(host, checknames)
-                    # If all nodes of a cluster are contained in the list, then
-                    # also remove the autochecks of that cluster. Beware: a host
-                    # can be part more multiple clusters
-                    for clust in clusters_of(host):
-                        missing = [] # collect nodes missing on the command line
-                        for node in nodes_of(clust):
-                            if node not in hostnames:
-                                missing.append(node)
-
-                        if len(missing) == 0:
-                            if opt_verbose:
-                                sys.stdout.write("All nodes of %s specified, dropping checks of %s, too.\n" % (clust, node))
-                            remove_autochecks_of(clust, checknames)
-
-                        else:
-                            sys.stdout.write("Warning: %s is part of cluster %s, but you didn't specify %s as well.\nChecks on %s will be kept.\n" %
-                            (host, clust, ",".join(missing), clust))
-
-            else:
-                for host in all_active_hosts() + all_active_clusters():
-                    remove_autochecks_of(host, checknames)
-            reread_autochecks()
-
-        if inventory_checks == None:
-            do_snmp_scan(hostnames)
-            checknames = inventorable_checktypes("tcp")
-
-        for checkname in checknames:
-            make_inventory(checkname, hostnames, False)
-
-        # -u, --cleanup-autochecks called in stand alone mode
-        if opt_cleanup_autochecks or always_cleanup_autochecks:
-            do_cleanup_autochecks()
+        do_inventory(hostnames, check_types, seen_I == 1)
         done = True
-
-    if not done and opt_cleanup_autochecks: # -u as standalone option
-        do_cleanup_autochecks()
-        done = True
-
 
     if done:
         output_profile()
@@ -5427,10 +6027,13 @@ if __name__ == "__main__":
     elif (len(args) == 0 and not opt_keepalive) or len(args) > 2:
         usage()
         sys.exit(1)
+
+    # handle --keepalive
     elif opt_keepalive:
         do_check_keepalive()
-    else:
 
+    # handle adhoc-check
+    else:
         hostname = args[0]
         if len(args) == 2:
             ipaddress = args[1]
@@ -5443,12 +6046,6 @@ if __name__ == "__main__":
                 except:
                     print "Cannot resolve hostname '%s'." % hostname
                     sys.exit(2)
-
-        # honor --checks= also when checking (makes testing easier)
-        if inventory_checks:
-            check_types = inventory_checks.split(",")
-        else:
-            check_types = None
 
         do_check(hostname, ipaddress, check_types)
 

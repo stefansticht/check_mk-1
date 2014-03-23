@@ -32,6 +32,7 @@
 #include "OffsetTimeColumn.h"
 #include "OffsetDoubleColumn.h"
 #include "OffsetTimeperiodColumn.h"
+#include "CustomTimeperiodColumn.h"
 #include "OffsetStringHostMacroColumn.h"
 #include "AttributelistColumn.h"
 #include "HostContactsColumn.h"
@@ -88,16 +89,25 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "An alias name for the host", (char *)(&hst.alias) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "address",
                 "IP address", (char *)(&hst.address) - ref, indirect_offset));
+#ifdef NAGIOS4
+    table->addColumn(new OffsetStringColumn(prefix + "check_command",
+                "Nagios command for active host check of this host", (char *)(&hst.check_command) - ref, indirect_offset));
+    table->addColumn(new OffsetStringHostMacroColumn(prefix + "check_command_expanded",
+                "Nagios command for active host check of this host with the macros expanded", (char *)(&hst.check_command) - ref, indirect_offset));
+#else
     table->addColumn(new OffsetStringColumn(prefix + "check_command",
                 "Nagios command for active host check of this host", (char *)(&hst.host_check_command) - ref, indirect_offset));
     table->addColumn(new OffsetStringHostMacroColumn(prefix + "check_command_expanded",
                 "Nagios command for active host check of this host with the macros expanded", (char *)(&hst.host_check_command) - ref, indirect_offset));
+#endif
     table->addColumn(new OffsetStringColumn(prefix + "event_handler",
                 "Nagios command used as event handler", (char *)(&hst.event_handler) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "notification_period",
                 "Time period in which problems of this host will be notified. If empty then notification will be always", (char *)(&hst.notification_period) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "check_period",
                 "Time period in which this host will be checked. If empty then the host will always be checked.", (char *)(&hst.check_period) - ref, indirect_offset));
+    table->addColumn(new CustomVarsExplicitColumn(prefix + "service_period",
+                "The name of the service period of the host", (char *)(&hst.custom_variables) - ref, indirect_offset, "SERVICE_PERIOD"));
     table->addColumn(new OffsetStringColumn(prefix + "notes",
                 "Optional notes for this host", (char *)(&hst.notes) - ref, indirect_offset));
     table->addColumn(new OffsetStringHostMacroColumn(prefix + "notes_expanded",
@@ -135,8 +145,13 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "Whether freshness checks are activated (0/1)", (char *)(&hst.check_freshness) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "process_performance_data",
                 "Whether processing of performance data is enabled (0/1)", (char *)(&hst.process_performance_data) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "accept_passive_checks",
                 "Whether passive host checks are accepted (0/1)", (char *)(&hst.accept_passive_host_checks) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetIntColumn(prefix + "accept_passive_checks",
+                "Whether passive host checks are accepted (0/1)", (char *)(&hst.accept_passive_checks) - ref, indirect_offset));
+    #endif // NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "event_handler_enabled",
                 "Whether event handling is enabled (0/1)", (char *)(&hst.event_handler_enabled) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "acknowledgement_type",
@@ -149,10 +164,17 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "Last hard state", (char *)(&hst.last_hard_state) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "current_attempt",
                 "Number of the current check attempts", (char *)(&hst.current_attempt) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetTimeColumn(prefix + "last_notification",
                 "Time of the last notification (Unix timestamp)", (char *)(&hst.last_host_notification) - ref, indirect_offset));
     table->addColumn(new OffsetTimeColumn(prefix + "next_notification",
                 "Time of the next notification (Unix timestamp)", (char *)(&hst.next_host_notification) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetTimeColumn(prefix + "last_notification",
+                "Time of the last notification (Unix timestamp)", (char *)(&hst.last_notification) - ref, indirect_offset));
+    table->addColumn(new OffsetTimeColumn(prefix + "next_notification",
+                "Time of the next notification (Unix timestamp)", (char *)(&hst.next_notification) - ref, indirect_offset));
+    #endif // NAGIOS4
     table->addColumn(new OffsetTimeColumn(prefix + "next_check",
                 "Scheduled time for the next check (Unix timestamp)", (char *)(&hst.next_check) - ref, indirect_offset));
     table->addColumn(new OffsetTimeColumn(prefix + "last_hard_state_change",
@@ -202,8 +224,13 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "Whether active checks are enabled for the host (0/1)", (char *)(&hst.checks_enabled) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "check_options",
                 "The current check option, forced, normal, freshness... (0-2)", (char *)(&hst.check_options) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "obsess_over_host",
                 "The current obsess_over_host setting... (0/1)", (char *)(&hst.obsess_over_host) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetIntColumn(prefix + "obsess_over_host",
+                "The current obsess_over_host setting... (0/1)", (char *)(&hst.obsess) - ref, indirect_offset));
+    #endif // NAGIOS4
     table->addColumn(new AttributelistColumn(prefix + "modified_attributes",
                 "A bitmask specifying which attributes have been modified", (char *)(&hst.modified_attributes) - ref, indirect_offset, false));
     table->addColumn(new AttributelistColumn(prefix + "modified_attributes_list",
@@ -239,6 +266,8 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "Whether this host is currently in its notification period (0/1)", (char *)(&hst.notification_period_ptr) - ref, indirect_offset));
     table->addColumn(new OffsetTimeperiodColumn(prefix + "in_check_period",
                 "Whether this host is currently in its check period (0/1)", (char *)(&hst.check_period_ptr) - ref, indirect_offset));
+    table->addColumn(new CustomTimeperiodColumn(prefix + "in_service_period",
+                "Whether this host is currently in its service period (0/1)", (char *)(&hst.custom_variables) - ref, indirect_offset, "SERVICE_PERIOD"));
 
     table->addColumn(new HostContactsColumn(prefix + "contacts",
                 "A list of all contacts of this host, either direct or via a contact group", indirect_offset));
@@ -316,6 +345,9 @@ void TableHosts::addColumns(Table *table, string prefix, int indirect_offset)
                 "A list of all services of the host together with state and has_been_checked",    (char *)(&hst.services) - ref, indirect_offset, false, 1));
     table->addColumn(new ServicelistColumn(prefix + "services_with_info",
                 "A list of all services including detailed information about each service",    (char *)(&hst.services) - ref, indirect_offset, false, 2));
+    table->addColumn(new ServicelistColumn(prefix + "services_with_fullstate",
+                "A list of all services including full state information. The list of entries can grow in future versions.", 
+                   (char *)(&hst.services) - ref, indirect_offset, false, 3));
 }
 
 void *TableHosts::findObject(char *objectspec)

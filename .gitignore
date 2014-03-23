@@ -15,7 +15,10 @@ check-mk-*.exe
 var/
 .bugs/.my_ids
 .bugs/.last
+.werks/.my_ids
+.werks/.last
 check-mk-agent-*.exe
 .metadata
 RemoteSystemsTempFiles
 .directory
+.site

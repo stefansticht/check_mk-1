@@ -22,121 +22,168 @@
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <strings.h>
-#include <map>
-#include <set>
-
-#include "nagios.h"
-#include "store.h"
 #include "Store.h"
 #include "Query.h"
-#include "ClientQueue.h"
-#include "InputBuffer.h"
-#include "OutputBuffer.h"
 #include "logger.h"
-#include "TimeperiodsCache.h"
+#include "strutil.h"
+#include "OutputBuffer.h"
 
-using namespace std;
+#ifdef EXTERN
+#undef EXTERN
+#endif
+#define EXTERN
+#include "tables.h"
+#undef EXTERN
 
-Store *g_store = 0;
-ClientQueue *g_client_queue = 0;
-TimeperiodsCache *g_timeperiods_cache = 0;
+extern int g_debug_level;
+extern unsigned long g_max_cached_messages;
 
-void store_init()
+Store::Store()
+  : _log_cache(g_max_cached_messages)
+  , _table_hosts(false)
+  , _table_hostsbygroup(true)
+  , _table_services(false, false)
+  , _table_servicesbygroup(true, false)
+  , _table_servicesbyhostgroup(false, true)
+  , _table_downtimes(true)
+  , _table_comments(false)
 {
-	g_store = new Store();
-    g_client_queue = new ClientQueue();
-    g_timeperiods_cache = new TimeperiodsCache();
-}
+    _tables.insert(make_pair("columns", &_table_columns));
+    _tables.insert(make_pair("commands", &_table_commands));
+    _tables.insert(make_pair("comments", &_table_comments));
+    _tables.insert(make_pair("contactgroups", &_table_contactgroups));
+    _tables.insert(make_pair("contacts", &_table_contacts));
+    _tables.insert(make_pair("downtimes", &_table_downtimes));
+    _tables.insert(make_pair("hostgroups", &_table_hostgroups));
+    _tables.insert(make_pair("hostsbygroup", &_table_hostsbygroup));
+    _tables.insert(make_pair("hosts", &_table_hosts));
+    _tables.insert(make_pair("log", &_table_log));
+    _tables.insert(make_pair("servicegroups", &_table_servicegroups));
+    _tables.insert(make_pair("servicesbygroup", &_table_servicesbygroup));
+    _tables.insert(make_pair("servicesbyhostgroup", &_table_servicesbyhostgroup));
+    _tables.insert(make_pair("services", &_table_services));
+    _tables.insert(make_pair("statehist", &_table_statehistory));
+    _tables.insert(make_pair("status", &_table_status));
+    _tables.insert(make_pair("timeperiods", &_table_timeperiods));
 
-void store_deinit()
-{
-    if (g_store) {
-        delete g_store;
-        g_store = 0;
+    g_table_hosts = &_table_hosts;
+    g_table_services = &_table_services;
+    g_table_servicesbygroup = &_table_servicesbygroup;
+    g_table_servicesbyhostgroup = &_table_servicesbyhostgroup;
+    g_table_hostgroups = &_table_hostgroups;
+    g_table_servicegroups = &_table_servicegroups;
+    g_table_contacts = &_table_contacts;
+    g_table_commands = &_table_commands;
+    g_table_downtimes = &_table_downtimes;
+    g_table_comments = &_table_comments;
+    g_table_status = &_table_status;
+    g_table_timeperiods = &_table_timeperiods;
+    g_table_contactgroups = &_table_contactgroups;
+    g_table_log = &_table_log;
+    g_table_statehistory = &_table_statehistory;
+    g_table_columns = &_table_columns;
+
+    for (_tables_t::iterator it = _tables.begin();
+            it != _tables.end();
+            ++it)
+    {
+        _table_columns.addTable(it->second);
     }
-    if (g_client_queue) {
-        delete g_client_queue;
-        g_client_queue = 0;
+}
+
+Table *Store::findTable(string name)
+{
+    _tables_t::iterator it = _tables.find(name);
+    if (it == _tables.end())
+        return 0;
+    else
+        return it->second;
+}
+
+
+void Store::registerComment(nebstruct_comment_data *d)
+{
+    _table_comments.addComment(d);
+}
+
+void Store::registerDowntime(nebstruct_downtime_data *d)
+{
+    _table_downtimes.addDowntime(d);
+}
+
+bool Store::answerRequest(InputBuffer *input, OutputBuffer *output)
+{
+    output->reset();
+    int r = input->readRequest();
+    if (r != IB_REQUEST_READ) {
+        if (r != IB_END_OF_FILE)
+            output->setError(RESPONSE_CODE_INCOMPLETE_REQUEST,
+                "Client connection terminated while request still incomplete");
+        return false;
     }
-    if (g_timeperiods_cache) {
-        delete g_timeperiods_cache;
-        g_timeperiods_cache = 0;
+    string l = input->nextLine();
+    const char *line = l.c_str();
+    if (g_debug_level > 0)
+        logger(LG_INFO, "Query: %s", line);
+    if (!strncmp(line, "GET ", 4))
+        answerGetRequest(input, output, lstrip((char *)line + 4));
+    else if (!strcmp(line, "GET"))
+        answerGetRequest(input, output, ""); // only to get error message
+    else if (!strncmp(line, "COMMAND ", 8)) {
+        answerCommandRequest(lstrip((char *)line + 8));
+        output->setDoKeepalive(true);
     }
+    else if (!strncmp(line, "LOGROTATE", 9)) {
+    	logger(LG_INFO, "Forcing logfile rotation");
+        rotate_log_file(time(0));
+        schedule_new_event(EVENT_LOG_ROTATION,TRUE,get_next_log_rotation_time(),FALSE,0,(void *)get_next_log_rotation_time,TRUE,NULL,NULL,0);
+    }
+    else {
+        logger(LG_INFO, "Invalid request '%s'", line);
+        output->setError(RESPONSE_CODE_INVALID_REQUEST, "Invalid request method");
+    }
+    return output->doKeepalive();
 }
 
-void queue_add_connection(int cc)
+void Store::answerCommandRequest(const char *command)
 {
-    g_client_queue->addConnection(cc);
+#ifdef NAGIOS4
+    process_external_command1((char *)command);
+#else
+    int buffer_items = -1;
+    /* int ret = */
+    submit_external_command((char *)command, &buffer_items);
+#endif
 }
 
-int queue_pop_connection()
+
+void Store::answerGetRequest(InputBuffer *input, OutputBuffer *output, const char *tablename)
 {
-    return g_client_queue->popConnection();
-}
+    output->reset();
+    if (!tablename[0]) {
+        output->setError(RESPONSE_CODE_INVALID_REQUEST, "Invalid GET request, missing tablename");
+    }
+    Table *table = findTable(tablename);
+    if (!table) {
+        output->setError(RESPONSE_CODE_NOT_FOUND, "Invalid GET request, no such table '%s'", tablename);
+    }
+    Query query(input, output, table);
 
-void queue_wakeup_all()
-{
-    return g_client_queue->wakeupAll();
-}
-
-
-void store_register_comment(nebstruct_comment_data *d)
-{
-    g_store->registerComment(d);
-}
-
-void store_register_downtime(nebstruct_downtime_data *d)
-{
-    g_store->registerDowntime(d);
-}
-
-int store_answer_request(void *ib, void *ob)
-{
-    return g_store->answerRequest((InputBuffer *)ib, (OutputBuffer *)ob);
-}
-
-void *create_outputbuffer()
-{
-    return new OutputBuffer();
-}
-
-void flush_output_buffer(void *ob, int fd, int *termination_flag)
-{
-    ((OutputBuffer *)ob)->flush(fd, termination_flag);
-}
-
-void delete_outputbuffer(void *ob)
-{
-    delete (OutputBuffer *)ob;
-}
-
-void *create_inputbuffer(int *termination_flag)
-{
-    return new InputBuffer(termination_flag);
-}
-
-void set_inputbuffer_fd(void *ib, int fd)
-{
-    ((InputBuffer *)ib)->setFd(fd);
-}
-
-void delete_inputbuffer(void *ib)
-{
-    delete (InputBuffer *)ib;
-}
-
-void update_timeperiods_cache(time_t now)
-{
-    g_timeperiods_cache->update(now);
-}
-
-void log_timeperiods_cache(){
-	g_timeperiods_cache->logCurrentTimeperiods();
+    if (table && !output->hasError()) {
+        if (query.hasNoColumns()) {
+            table->addAllColumnsToQuery(&query);
+            query.setShowColumnHeaders(true);
+        }
+        struct timeval before, after;
+        gettimeofday(&before, 0);
+        query.start();
+        table->answerQuery(&query);
+        query.finish();
+        gettimeofday(&after, 0);
+        unsigned long ustime = (after.tv_sec - before.tv_sec) * 1000000 + (after.tv_usec - before.tv_usec);
+        if (g_debug_level > 0)
+            logger(LG_INFO, "Time to process request: %lu us. Size of answer: %d bytes", ustime, output->size());
+    }
 }
 
 

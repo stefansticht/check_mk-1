@@ -1,30 +1,9 @@
-Title: Livestatus/Nagios Core crashes, if nagios.log is not accessible
+Title: Livestatus/Nagios Core crashes, if nagios.log is too large
 Component: livestatus
-State: open
-Date: 2013-08-08 11:30:12
-Targetversion: 1.2.3
 Class: bug
-
-kam an info@mathias-kettner.de, Orginal-Mail im feedback/gitbug noch vorhanden
-
-Date: Tue, 30 Jul 2013 11:36:12 +0200
-From: Oliver Kutscher <ok@addix.net>
-User-Agent: Mozilla/5.0 (Windows NT 6.2; WOW64; rv:17.0) Gecko/20130620 Thunderbird/17.0.7
-MIME-Version: 1.0
-To: info@mathias-kettner.de
-Subject: MK-Livestatus
-Content-Type: text/plain; charset=ISO-8859-15; format=flowed
-Content-Transfer-Encoding: 8bit
-X-ADDIX-Received: 212.51.6.4
-X-ADDIX-Info: Bitte wenden Sie sich an uns, falls Sie mehr Informationen benoetigen.
-X-MailScanner-ID: 1V46Lm-0000Lc-7H
-X-ADDIX-Scan: Virenfrei
-X-ADDIX-From: ok@addix.net
-
-Hallo Herr Kettner,
-
-vermutlich ist das die falsche Mailadresse, um Vorschläger oder Probleme 
-zu melden. Aber ich habe keine passende(re) gefunden.
+State: done
+Date: 2013-08-08 11:30:12
+Targetversion: 1.2.3i5
 
 In Benutzung war: Nagios 3.3, Check_MK check_mk-1.2.2p2 sowie 
 mk-livestatus-1.2.2p2 auf einem Centos 5.5.
@@ -41,21 +20,14 @@ Fehlermeldung bzw. ein Eintrag in der Dokumentation angepasst werden
 könnten. Der Fehler ist in gewisser Weise selbst verschuldet, jedoch war 
 es nicht leicht, die Ursache zu finden.
 
+Lösung: Eventuell müssen wir die maximale Anzahl von Logzeilen,
+die wir untersuchen, beschränken. Wenn man z.B. sagt max.
+5 Mio Zeilen festlegt, dann sind dass etwa 500 MB Dateigröße.
+Das ganze könnte konfigurierbar sein, analog zu den schon
+vorhandenen Caching-Optionen.
+Wichtig hierbei ist, dem Nutzer den Fehler darzustellen und eventuell
+auch einen Eintrag im Logfile zu erzeugen. Der Nutzer sollte dann darauf
+hingewiesen werden seine Logging-/Rotations-Einstellungen zu aendern.
 
-Mit freundlichen Grüßen,
-i.A.
-Oliver Kutscher
-
--- 
-
-Postanschrift:
-
-ADDIX Internet Services GmbH
-Postfach 1225
-D-24011 Kiel
-
-Tel: +49 431 7755 140
-Fax: +49 431 7755 105
-
-ok@addix.net
-www.addix.net
+2013-12-16 13:43:27: changed state open -> done
+Max Zeilen konfigurierbar, default ist 1000000.

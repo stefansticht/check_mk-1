@@ -119,50 +119,57 @@ function hilite_icon(oImg, onoff) {
 }
 
 
-function get_url(url, handler, data, errorHandler) {
+function get_url(url, handler, data, errorHandler, addAjaxId) {
     if (window.XMLHttpRequest) {
         var AJAX = new XMLHttpRequest();
     } else {
         var AJAX = new ActiveXObject("Microsoft.XMLHTTP");
     }
 
+    var addAjaxId = (typeof addAjaxId === "undefined") ? true : addAjaxId;
+
     // Dynamic part to prevent caching
-    var dyn = "_ajaxid="+Math.floor(Date.parse(new Date()) / 1000);
-    if (url.indexOf('\?') !== -1) {
-        dyn = "&"+dyn;
-    } else {
-        dyn = "?"+dyn;
+    var dyn = '';
+    if (addAjaxId) {
+        dyn = "_ajaxid="+Math.floor(Date.parse(new Date()) / 1000);
+        if (url.indexOf('\?') !== -1) {
+            dyn = "&"+dyn;
+        } else {
+            dyn = "?"+dyn;
+        }
     }
 
-    if (AJAX) {
-        AJAX.open("GET", url + dyn, true);
-        if (typeof handler === 'function')
-            AJAX.onreadystatechange = function() {
-                if (AJAX && AJAX.readyState == 4) {
-                    if (AJAX.status == 200) {
-                        handler(data, AJAX.responseText);
-                    }
-                    else if (AJAX.status == 401) {
-                        // This is reached when someone is not authenticated anymore
-                        // but has some webservices running which are still fetching
-                        // infos via AJAX. Reload the whole frameset or only the
-                        // single page in that case.
-                        if(top)
-                            top.location.reload();
-                        else
-                            document.location.reload();
-                    }
-                    else {
-                        if (typeof errorHandler !== 'undefined')
-                            errorHandler(data, AJAX.status);
-                    }
+    if (!AJAX) {
+        return null;
+    }
+
+    AJAX.open("GET", url + dyn, true);
+    if (typeof handler === 'function') {
+        AJAX.onreadystatechange = function() {
+            if (AJAX && AJAX.readyState == 4) {
+                if (AJAX.status == 200) {
+                    handler(data, AJAX.responseText);
+                }
+                else if (AJAX.status == 401) {
+                    // This is reached when someone is not authenticated anymore
+                    // but has some webservices running which are still fetching
+                    // infos via AJAX. Reload the whole frameset or only the
+                    // single page in that case.
+                    if(top)
+                        top.location.reload();
+                    else
+                        document.location.reload();
+                }
+                else {
+                    if (typeof errorHandler !== 'undefined')
+                        errorHandler(data, AJAX.status);
                 }
             }
-        AJAX.send(null);
-        return true;
-    } else {
-        return false;
+        }
     }
+
+    AJAX.send(null);
+    return AJAX;
 }
 
 function get_url_sync(url) {
@@ -465,8 +472,18 @@ function pnp_response_handler(data, code) {
     }
     response = null;
 
-    if(!valid_response)
-        fallback_graphs(data);
+    if(!valid_response) {
+        if (code.match(/_login/)) {
+            // Login failed! This usually happens when one uses a distributed
+            // multisite setup but the transparent authentication is somehow
+            // broken. Display an error message trying to assist.
+            var container = document.getElementById(data['container']);
+            container.innerHTML = '<div class="error">Unable to fetch graphs of the host. Maybe you have a '
+                                + 'distributed setup and not set up the authentication correctly yet.</div>';
+        } else {
+            fallback_graphs(data);
+        }
+    }
 }
 
 // Fallback bei doofer/keiner Antwort
@@ -478,6 +495,10 @@ function fallback_graphs(data) {
 
 function create_graph(data, params) {
     var urlvars = params + '&theme=multisite&baseurl='+data['base_url'];
+
+    if (typeof(data['start']) !== 'undefined' && typeof(data['end']) !== 'undefined')
+        urlvars += '&start='+data['start']+'&end='+data['end'];
+
     var container = document.getElementById(data['container']);
 
     var img = document.createElement('img');
@@ -499,13 +520,23 @@ function create_graph(data, params) {
     urlvars = null;
 }
 
-function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link) {
+function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link, from_ts, to_ts) {
+    from_ts = (typeof from_ts === 'undefined') ? null : from_ts;
+    to_ts   = (typeof to_ts === 'undefined') ? null : to_ts;
+
     var data = { 'container': container, 'base_url': base_url,
                  'pnp_url':   pnp_url,   'site':     site,
                  'host':      host,      'service':  service,
                  'with_link': with_link, 'view':     pnpview};
-    get_url(pnp_url + 'index.php/json?&host=' + encodeURIComponent(host) + '&srv=' + encodeURIComponent(service) + '&source=0&view=' + pnpview,
-        pnp_response_handler, data, pnp_error_response_handler);
+
+    if (from_ts !== null && to_ts !== null) {
+        data['start'] = from_ts;
+        data['end'] = to_ts;
+    }
+
+    var url = pnp_url + 'index.php/json?&host=' + encodeURIComponent(host)
+              + '&srv=' + encodeURIComponent(service) + '&source=0&view=' + pnpview;
+    get_url(url, pnp_response_handler, data, pnp_error_response_handler, false);
 }
 
 // Renders contents for the PNP hover menus
@@ -864,7 +895,7 @@ function updateHeaderTime() {
         var day   = ("0" + t.getDate()).slice(-2);
         var month = ("0" + (t.getMonth() + 1)).slice(-2);
         var year  = t.getFullYear();
-        var date_format = oDate.getAttribute("format"); 
+        var date_format = oDate.getAttribute("format");
         oDate.innerHTML = date_format.replace(/yyyy/, year).replace(/mm/, month).replace(/dd/, day);
     }
     day    = null;
@@ -969,8 +1000,8 @@ function toggle_folding(oImg, state) {
 
 function folding_step(oImg, state, step) {
     // Initialize unset step
-    if(typeof step === 'undefined')
-        if(state == 1)
+    if (typeof step === 'undefined')
+        if (state == 1)
             step = 1;
         else
             step = 8;
@@ -979,14 +1010,15 @@ function folding_step(oImg, state, step) {
     // current rotating angle
     oImg.src = oImg.src.substr(0, oImg.src.length - 6) + step + "0.png";
 
-    if(state == 1) {
-        if(step == 9) {
+    if (state == 1) {
+        if (step == 9) {
             oImg = null;
             return;
         }
         step += 1;
-    } else {
-        if(step == 0) {
+    }
+    else {
+        if (step == 0) {
             oImg = null;
             return;
         }
@@ -1027,16 +1059,20 @@ function change_class(o, a, b) {
 }
 
 
-function toggle_tree_state(tree, name, oContainer) {
+function toggle_tree_state(tree, name, oContainer, fetch_url) {
     var state;
     if (has_class(oContainer, 'closed')) {
         change_class(oContainer, 'closed', 'open');
+        if (fetch_url && !oContainer.innerHTML) {
+            oContainer.innerHTML = get_url_sync(fetch_url);
+        }
         state = 'on';
         if (oContainer.tagName == 'TR') { // handle in-table toggling
             while (oContainer = oContainer.nextSibling)
                 change_class(oContainer, 'closed', 'open');
         }
-    } else {
+    }
+    else {
         change_class(oContainer, 'open', 'closed');
         state = 'off';
         if (oContainer.tagName == 'TR') { // handle in-table toggling
@@ -1049,17 +1085,20 @@ function toggle_tree_state(tree, name, oContainer) {
 }
 
 
-function toggle_foldable_container(treename, id) {
+// fetch_url: dynamically load content of opened element.
+function toggle_foldable_container(treename, id, fetch_url) {
     // Check, if we fold a NG-Norm
     var oNform = document.getElementById('nform.' + treename + '.' + id);
     if (oNform) {
+        var oImg = oNform.childNodes[0];
+        toggle_folding(oImg, oImg.src[oImg.src.length - 6] == '0');
         var oTr = oNform.parentNode.nextSibling;
-        toggle_tree_state(treename, id, oTr);
+        toggle_tree_state(treename, id, oTr, fetch_url);
     }
     else {
         var oImg = document.getElementById('treeimg.' + treename + '.' + id);
         var oBox = document.getElementById('tree.' + treename + '.' + id);
-        toggle_tree_state(treename, id, oBox);
+        toggle_tree_state(treename, id, oBox, fetch_url);
         toggle_folding(oImg, !has_class(oBox, "closed"));
         oImg = null;
         oBox = null;
@@ -1707,6 +1746,19 @@ function valuespec_listof_fixarrows(oTbody) {
     }
 }
 
+function vs_list_choice_toggle_all(varprefix) {
+    var tbl = document.getElementById(varprefix + "_tbl");
+    var checkboxes = tbl.getElementsByTagName("input");
+    if (!checkboxes)
+        return;
+
+    // simply use state of first texbox as base
+    var state = ! checkboxes[0].checked;
+    for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = state;
+    }
+}
+
 function vs_textascii_button(img, text, how) {
     var oInput = img.previousElementSibling;
     while (oInput.tagName == "A")
@@ -1735,7 +1787,69 @@ function vs_passwordspec_randomize(img) {
     oInput.value = password;
 }
 
+function vs_duallist_switch(field, varprefix) {
+    if (field.id != varprefix + '_selected') {
+        // The other field is the one without "_unselected" suffix
+        var other_id = varprefix + '_selected';
+        var positive = true;
+    } else {
+        // The other field is the one with "_unselected" suffix
+        var other_id = varprefix + '_unselected';
+        var positive = false;
+    }
 
+    var other_field = document.getElementById(other_id);
+    if (!other_field)
+        return;
+
+    var helper = document.getElementById(varprefix);
+    if (!helper)
+        return;
+
+    // Move the selected option to the other select field
+    var selected = field.options[field.selectedIndex];
+    field.removeChild(selected);
+
+    // Determine the correct child to insert
+    var sibling = other_field.firstChild;
+    while (sibling != null) {
+        if (sibling.nodeType == 1 && sibling.label.toLowerCase() > selected.label.toLowerCase())
+            break;
+        sibling = sibling.nextSibling
+    }
+
+    if (sibling)
+        other_field.insertBefore(selected, sibling);
+    else
+        other_field.appendChild(selected);
+
+    selected.selected = false;
+
+    // add remove from internal helper field
+    if (positive)
+        var pos_field = other_field;
+    else
+        var pos_field = field;
+    var texts = [];
+    for (var i = 0; i < pos_field.options.length; i++) {
+        texts.push(pos_field.options[i].value);
+    }
+    helper.value = texts.join('|')
+}
+
+function vs_iconselector_select(event, varprefix, value) {
+    // set value of valuespec
+    var obj = document.getElementById(varprefix + '_value');
+    obj.value = value;
+
+    var src_img = document.getElementById(varprefix + '_i_' + value);
+
+    // Set the new choosen icon in the valuespecs image
+    var img = document.getElementById(varprefix + '_img');
+    img.src = src_img.src;
+
+    toggle_popup(event, varprefix);
+}
 
 function help_enable() {
     var aHelp = document.getElementById('helpbutton');
@@ -1761,14 +1875,21 @@ function help_switch(how) {
         helpdivs[i].style.display = how ? "block" : "none";
     }
 
-    // small hack for wato ruleset lists, toggle the "nofloat" class
-    // on those objects to make the layout possible
+    // small hack for wato ruleset lists, toggle the "float" and "nofloat"
+    // classes on those objects to make the layout possible
     var rulesetdivs = document.getElementsByClassName('ruleset');
     for (var i = 0; i < rulesetdivs.length; i++) {
-        if (how)
-            add_class(rulesetdivs[i], 'nofloat');
-        else
-            remove_class(rulesetdivs[i], 'nofloat');
+        if (how) {
+            if (has_class(rulesetdivs[i], 'float')) {
+                remove_class(rulesetdivs[i], 'float');
+                add_class(rulesetdivs[i], 'nofloat');
+            }
+        } else {
+            if (has_class(rulesetdivs[i], 'nofloat')) {
+                remove_class(rulesetdivs[i], 'nofloat');
+                add_class(rulesetdivs[i], 'float');
+            }
+        }
     }
 
     get_url("ajax_switch_help.py?enabled=" + (how ? "yes" : ""));
@@ -2033,4 +2154,40 @@ function keybindings_check_keylist(keylist)
             return false;
     }
     return true;
+}
+
+//   .--Popups--------------------------------------------------------------.
+//   |                  ____                                                |
+//   |                 |  _ \ ___  _ __  _   _ _ __  ___                    |
+//   |                 | |_) / _ \| '_ \| | | | '_ \/ __|                   |
+//   |                 |  __/ (_) | |_) | |_| | |_) \__ \                   |
+//   |                 |_|   \___/| .__/ \__,_| .__/|___/                   |
+//   |                            |_|         |_|                           |
+//   +----------------------------------------------------------------------+
+
+function toggle_popup(event, id)
+{
+    if(!event)
+        event = window.event;
+
+    var obj = document.getElementById(id + '_popup');
+    if(obj) {
+        if(obj.style.display == 'none') {
+            obj.style.display = 'block';
+        } else {
+            obj.style.display = 'none';
+        }
+        obj = null;
+    }
+
+    if (event.stopPropagation)
+        event.stopPropagation();
+    event.cancelBubble = true;
+
+    // Disable the default events for all the different browsers
+    if (event.preventDefault)
+        event.preventDefault();
+    else
+        event.returnValue = false;
+    return false;
 }

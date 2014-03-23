@@ -29,7 +29,7 @@
 # fields: mode, title, icon, permission, help
 
 modules = [
-      ( "folder",           _("Hosts & Folders"),     "folder", "hosts",
+      ( "folder",           _("Hosts"),     "folder", "hosts",
       _("Manage monitored hosts and services and the hosts' folder structure.")),
 
       ( "hosttags",         _("Host Tags"),          "hosttag", "hosttags",
@@ -57,6 +57,9 @@ modules = [
 
       ( "contact_groups",   _("Contact Groups"),     "contactgroups", "users",
       _("Contact groups are used to assign persons to hosts and services") ),
+
+      ( "notifications",    _("Notifications"),     "notifications", "notifications",
+      _("Rules for the notification of contacts about host and service problems")),
 
       ( "timeperiods",      _("Time Periods"),       "timeperiods", "timeperiods",
       _("Timeperiods restrict notifications and other things to certain periods of "

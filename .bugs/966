@@ -1,21 +1,9 @@
 Title: defunct and other entries on ps section of AIX agent confuse ps check
 Component: checks
-State: open
-Date: 2013-08-08 17:05:36
-Targetversion: 1.2.3
 Class: bug
-
-reported on checkmk-en@lists.mathias-kettner.de / original mail available in folder feedback/gitbug
-
-From: Dale Stubblefield <dalestubblefield@gmail.com>
-Date: Thu, 23 May 2013 09:56:16 -0500
-Message-ID: <CABBA0287p4L9eW76op_=qTrccOhdEKOmmkKMhLscLxufw11Jsg@mail.gmail.com>
-To: Mathias Kettner <mk@mathias-kettner.de>
-Cc: "checkmk-en@lists.mathias-kettner.de" <checkmk-en@lists.mathias-kettner.de>
-Subject: Re: [Check_mk (english)] AIX Agent bug regarding "Match all
-	processes"
-
-Mathias,
+State: works4me
+Date: 2013-08-08 17:05:36
+Targetversion: future
 
 The section that needs to be reviewed is "<<<ps>>>".  I would prefer not to
 post the entire agent output, but instead I will provide the relevant
@@ -49,3 +37,8 @@ On Wed, May 22, 2013 at 10:00 AM, Mathias Kettner <mk@mathias-kettner.de>wrote:
 >
 > Mathais
 >
+
+2013-10-18 09:25:11: changed state open -> works4me
+Current state is that the lines in question are simply being 
+ignored and cause now trouble. Counting zombies and stuff could
+be done, but is not a bug but a feature reqeust.

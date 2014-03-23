@@ -43,6 +43,10 @@ This package is only needed on the Nagios server.
 
 %package agent
 Group:     System/Monitoring
+# Requires:  xinetd, time
+# Better do not depend on time. It's just needed for the mk-job
+# Binary, which is useful but not neccessary to run the agent.
+# This dependency could cause more trouble then it helps.
 Requires:  xinetd
 Summary: Linux-Agent for check_mk
 AutoReq:   off
@@ -55,6 +59,7 @@ xinetd to run this agent.
 
 %package agent-scriptless
 Group:     System/Monitoring
+# Requires:  xinetd, time
 Requires:  xinetd
 Summary: Linux-Agent for check_mk
 AutoReq:   off
@@ -69,6 +74,7 @@ own.
 
 %package caching-agent
 Group:     System/Monitoring
+# Requires:  xinetd, time
 Requires:  xinetd
 Summary: Caching Linux-Agent for check_mk
 AutoReq:   off
@@ -138,6 +144,7 @@ install -m 755 $R/usr/share/check_mk/agents/mk-job $R/usr/bin
 mkdir -p $R/usr/lib/check_mk_agent/plugins
 mkdir -p $R/usr/lib/check_mk_agent/local
 mkdir -p $R/var/lib/check_mk_agent
+mkdir -p $R/var/lib/check_mk_agent/job
 
 # logwatch and oracle extension
 install -m 755 $R/usr/share/check_mk/agents/plugins/mk_logwatch $R/usr/lib/check_mk_agent/plugins
@@ -154,6 +161,7 @@ rm -rf $RPM_BUILD_ROOT
 %config(noreplace) /etc/check_mk/multisite.mk
 /etc/check_mk/conf.d/README
 %config(noreplace) /etc/nagios/objects/*
+%config(noreplace) /etc/nagios/auth.serials
 /usr/bin/check_mk
 /usr/bin/cmk
 /usr/bin/mkp
@@ -161,6 +169,7 @@ rm -rf $RPM_BUILD_ROOT
 /usr/share/check_mk/agents
 /usr/share/check_mk/checks
 /usr/share/check_mk/notifications
+/usr/share/check_mk/inventory
 /usr/share/check_mk/modules
 /usr/share/check_mk/pnp-templates/*
 /usr/share/check_mk/check_mk_templates.cfg
@@ -177,27 +186,30 @@ rm -rf $RPM_BUILD_ROOT
 # Spaeter Subpaket draus machen
 /usr/bin/unixcat
 /usr/lib/check_mk/livestatus.o
-/usr/lib/check_mk/livecheck
 
 %files agent
 %config(noreplace) /etc/xinetd.d/check_mk
 /usr/bin/check_mk_agent
+/usr/bin/check_mk_caching_agent
 /usr/bin/waitmax
 /usr/bin/mk-job
 /usr/share/doc/check_mk_agent
 %dir /usr/lib/check_mk_agent/local
 %dir /usr/lib/check_mk_agent/plugins
 %dir /var/lib/check_mk_agent
+%dir %attr(1777,-,-)/var/lib/check_mk_agent/job
 
 %files agent-scriptless
 %config(noreplace) /etc/xinetd.d/check_mk
 /usr/bin/check_mk_agent
 /usr/bin/waitmax
+/usr/bin/check_mk_caching_agent
 /usr/bin/mk-job
 /usr/share/doc/check_mk_agent
 %dir /usr/lib/check_mk_agent/local
 %dir /usr/lib/check_mk_agent/plugins
 %dir /var/lib/check_mk_agent
+%dir %attr(1777,-,-)/var/lib/check_mk_agent/job
 
 %files caching-agent
 %config(noreplace) /etc/xinetd.d/check_mk_caching
@@ -210,6 +222,7 @@ rm -rf $RPM_BUILD_ROOT
 %dir /usr/lib/check_mk_agent/plugins
 %dir /etc/check_mk
 %dir /var/lib/check_mk_agent
+%dir %attr(1777,-,-)/var/lib/check_mk_agent/job
 
 %files agent-logwatch
 /usr/lib/check_mk_agent/plugins/mk_logwatch
@@ -235,6 +248,7 @@ fi
 %define reload_xinetd if [ -x /etc/init.d/xinetd ] ; then if pgrep -x xinetd >/dev/null ; then echo "Reloading xinetd..." ; /etc/init.d/xinetd reload ; else echo "Starting xinetd..." ; /etc/init.d/xinetd start ; fi ; fi
 
 %define activate_xinetd if which chkconfig >/dev/null 2>&1 ; then echo "Activating startscript of xinetd" ; chkconfig xinetd on ; fi
+%define cleanup_rpmnew if [ -f /etc/xinetd.d/check_mk.rpmnew ] ; then rm /etc/xinetd.d/check_mk.rpmnew ; fi
 
 %pre agent
 if [ ! -x /etc/init.d/xinetd ] ; then
@@ -254,6 +268,7 @@ if [ ! -x /etc/init.d/xinetd ] ; then
 fi
 
 %post agent
+%cleanup_rpmnew
 %activate_xinetd
 %reload_xinetd
 
@@ -281,6 +296,7 @@ if [ ! -x /etc/init.d/xinetd ] ; then
 fi
 
 %post caching-agent
+%cleanup_rpmnew
 %activate_xinetd
 %reload_xinetd
 

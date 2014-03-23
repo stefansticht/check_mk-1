@@ -72,9 +72,10 @@ except:
 
 # Global table of available permissions. Plugins may add their own
 # permissions by calling declare_permission()
-permissions_by_name  = {}
-permissions_by_order = []
-permission_sections  = {}
+permissions_by_name              = {}
+permissions_by_order             = []
+permission_sections              = {}
+permission_declaration_functions = []
 
 # Constants for BI
 ALL_HOSTS = '(.*)'
@@ -86,6 +87,7 @@ class FOREACH_PARENT: pass
 class FOREACH_SERVICE: pass
 class REMAINING: pass
 class DISABLED: pass
+class HARD_STATES: pass
 
 # Has to be declared here once since the functions can be assigned in
 # bi.py and also in multisite.mk. "Double" declarations are no problem
@@ -94,6 +96,7 @@ class DISABLED: pass
 aggregation_functions = {}
 
 
+#.
 #   .----------------------------------------------------------------------.
 #   |             _____                 _   _                              |
 #   |            |  ___|   _ _ __   ___| |_(_) ___  _ __  ___              |
@@ -148,6 +151,7 @@ def load_config():
         include(p)
 
 
+#.
 # -------------------------------------------------------------------
 #    ____                     _         _
 #   |  _ \ ___ _ __ _ __ ___ (_)___ ___(_) ___  _ __  ___
@@ -176,10 +180,25 @@ def declare_permission(name, title, description, defaults):
 
     permissions_by_name[name] = perm
 
-def declare_permission_section(name, title, prio = 0):
+def declare_permission_section(name, title, prio = 0, do_sort = False):
     # Prio can be a number which is used for sorting. Higher numbers will
     # be listed first, e.g. in the edit dialogs
-    permission_sections[name] = (prio, title)
+    permission_sections[name] = (prio, title, do_sort)
+
+# Some module have a non-fixed list of permissions. For example for
+# each user defined view there is also a permission. This list is
+# not known at the time of the loading of the module - though. For
+# that purpose module can register functions. These functions should
+# just call declare_permission(). They are being called in the correct
+# situations.
+def declare_dynamic_permissions(func):
+    permission_declaration_functions.append(func)
+
+# This function needs to be called by all code that needs access
+# to possible dynamic permissions
+def load_dynamic_permissions():
+    for func in permission_declaration_functions:
+        func()
 
 # Compute permissions for HTTP user and set in
 # global variables. Also store user.
@@ -385,7 +404,8 @@ def sitenames():
 def allsites():
     return dict( [(name, site(name))
                   for name in sitenames()
-                  if not site(name).get("disabled", False)] )
+                  if not site(name).get("disabled", False)
+                     and site(name)['socket'] != 'disabled' ] )
 
 def site(name):
     s = sites.get(name, {})
@@ -405,6 +425,8 @@ def site_is_local(name):
     sock = s.get("socket")
     return not sock or sock == "unix:" + defaults.livestatus_unix_socket
 
+# FIXME: Should this return True even if all sites but one are disabled?
+# -> should we use allsites() instead of "sites" directly?
 def is_multisite():
     if len(sites) > 1:
         return True

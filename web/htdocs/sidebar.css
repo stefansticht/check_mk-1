@@ -61,10 +61,25 @@ body.side {
 
 #side_header a {
     display: block;
-    width: 100%;
+    width: 255px;
     height: 55px;
     text-decoration: none;
+    margin-left: 10px; /* space for sidebar folding */
 }
+
+#side_fold {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    width: 10px;
+    height: 55px;
+}
+#side_fold:hover {
+    background-repeat: no-repeat;
+    background-position: -3px 7px;
+    background-image: url("images/side_fold.png");
+}
+
 
 #side_version {
     position: absolute;
@@ -135,6 +150,10 @@ div.snapin {
     margin: 0 0 0 5px;
     padding: 0;
     overflow: hidden;
+}
+
+div.snapin:last-child {
+    margin-bottom: 10px;
 }
 
 /* Header of the snapin */
@@ -342,14 +361,16 @@ div.statebullet {
 }
 
 div#snapinDragIndicator {
-  height:            2px;
+  height:            1.5px;
   line-height:       1px;
   font-size:         1px;
-  width:             249px;
+  width:             247px;
   background-color:  #fff;
-  margin:            0px 0px 0px 10px;
+  margin:            0px 0px 0px 11px;
   border-radius:     3px;
-  box-shadow:        0px 0px 5px #ffffff;
+  box-shadow:        0px 0px 3px #fff;
+  position:          relative;
+  top:               2px;
 }
 
 
@@ -410,4 +431,38 @@ div.add_snapin div.snapin_preview {
     left: 0px;
 }
 
+/*-Popup Msg-----------------------------------------------------------.
+|           ____                           __  __                      |
+|          |  _ \ ___  _ __  _   _ _ __   |  \/  |___  __ _            |
+|          | |_) / _ \| '_ \| | | | '_ \  | |\/| / __|/ _` |           |
+|          |  __/ (_) | |_) | |_| | |_) | | |  | \__ \ (_| |           |
+|          |_|   \___/| .__/ \__,_| .__/  |_|  |_|___/\__, |           |
+|                     |_|         |_|                 |___/            |
++----------------------------------------------------------------------+
+| Popup message rendering                                              |
+'---------------------------------------------------------------------*/
 
+div.popup_msg {
+    position:absolute;
+    bottom: 35px;
+    left: 20px;
+    width: 200px;
+    padding: 3px;
+
+    background-color: #244452;
+}
+
+div.popup_msg .close {
+    display: block;
+    float: right;
+}
+
+span#msg_label {
+    z-index: 15;
+
+    background-color: #fff;
+    color: #ff0000;
+    padding: 1px;
+    position: relative;
+    border-radius: 5px;
+}

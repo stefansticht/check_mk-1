@@ -44,7 +44,7 @@ def esx_vsphere_datastores_parse(info):
         else:
             key, value = line
             if key == "accessible":
-                value = value == "True"
+                value = value.lower() == "true"
             elif key in [ "capacity", "freeSpace", "uncommitted" ]:
                 value = int(value)
             store[key] = value
@@ -65,13 +65,16 @@ def check_esx_vsphere_datastores(item, params, info):
     avail_mb = store["freeSpace"] / 1024.0 / 1024.0
 
     state, infotext, perfdata = df_check_filesystem_single(
-        g_hostname, item, size_mb, avail_mb, params)
+        g_hostname, item, size_mb, avail_mb, None, None, params)
 
     if 'uncommitted' in store:
         uncommitted_mb = store["uncommitted"] / 1024.0 / 1024.0
         used_mb = size_mb - avail_mb
         overprov_mb = used_mb + uncommitted_mb
-        overprov_percent = (overprov_mb / size_mb) * 100
+        if size_mb == 0:
+            overprov_percent = 0
+        else:
+            overprov_percent = (overprov_mb / size_mb) * 100
 
         overprov_txt = ''
         overprov_warn_mb = None
@@ -97,7 +100,7 @@ def check_esx_vsphere_datastores(item, params, info):
 
     if not store["accessible"]:
         state = 2
-        infotext += " unaccessible(!!), " + infotext
+        infotext = "unaccessible(!!), " + infotext
 
     return state, infotext, perfdata
 

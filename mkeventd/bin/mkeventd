@@ -6,7 +6,7 @@ import socket, os, time, sys, getopt, signal, thread, pprint, re, \
 from pwd import getpwnam
 from grp import getgrnam
 
-VERSION="1.2.3i1"
+VERSION="1.2.5i1"
 
 #   .--Declarations--------------------------------------------------------.
 #   |       ____            _                 _   _                        |
@@ -30,24 +30,25 @@ syslog_facilities = [ "kern", "user", "mail", "daemon", "auth", "syslog", "lpr",
                       None, None, None, None, None, None, None, "snmptrap" ]
 
 event_columns = [
-    ( "event_id",            1 ),
-    ( "event_count",         1 ),
-    ( "event_text",         "" ),
-    ( "event_first",       0.0 ),
-    ( "event_last",        0.0 ),
-    ( "event_comment",      "" ),
-    ( "event_sl",            0 ), # filter fehlt
-    ( "event_host",         "" ),
-    ( "event_contact",      "" ),
-    ( "event_application",  "" ),
-    ( "event_pid",           0 ),
-    ( "event_priority",      5 ),
-    ( "event_facility",      1 ),
-    ( "event_rule_id",      "" ),
-    ( "event_state",         0 ),
-    ( "event_phase",        "" ),
-    ( "event_owner",        "" ),
-    ( "event_match_groups", "" ),
+    ( "event_id",              1 ),
+    ( "event_count",           1 ),
+    ( "event_text",           "" ),
+    ( "event_first",         0.0 ),
+    ( "event_last",          0.0 ),
+    ( "event_comment",        "" ),
+    ( "event_sl",              0 ), # filter fehlt
+    ( "event_host",           "" ),
+    ( "event_contact",        "" ),
+    ( "event_application",    "" ),
+    ( "event_pid",             0 ),
+    ( "event_priority",        5 ),
+    ( "event_facility",        1 ),
+    ( "event_rule_id",        "" ),
+    ( "event_state",           0 ),
+    ( "event_phase",          "" ),
+    ( "event_owner",          "" ),
+    ( "event_match_groups",   "" ),
+    ( "event_contact_groups", "" ),
 ]
 
 history_columns = [
@@ -61,6 +62,9 @@ history_columns = [
 def unsplit(s):
     if type(s) != str:
         return s
+
+    elif s.startswith('\2'):
+        return None # \2 is the designator for None
 
     elif s.startswith('\1'):
         if len(s) == 1:
@@ -83,7 +87,11 @@ def convert_history_line(values):
     values[15] = int(values[15])
     values[16] = int(values[16])
     values[18] = int(values[18])
-    values[21] = unsplit(values[21])
+    values[21] = unsplit(values[21]) # match groups
+    if len(values) >= 23:
+        values[22] = unsplit(values[22]) # contact groups
+    else:
+        values.append(None)
 
 
 
@@ -412,6 +420,8 @@ def quote_tab(col):
         return str(col)
     elif type(col) in [ tuple, list ]:
         col = "\1" + "\1".join(col)
+    elif col == None:
+        col = "\2"
 
     return col.replace("\t", " ")
 
@@ -521,6 +531,15 @@ def get_event_history(filters, limit):
     timestamps = [ int(fn[:-4]) for fn in os.listdir(log_dir)
                    if fn.endswith(".log") ]
     timestamps.sort()
+    # Use the later logfiles first, to get the newer log entries
+    # first. When a limit is reached, the newer entries should
+    # be processed in most cases. We assume that now.
+    # To keep a consistent order of log entries, we should care
+    # about sorting the log lines in reverse, but that seems to
+    # already be done by the GUI, so we don't do that twice. Skipping
+    # this # will lead into some lines of a single file to be limited in
+    # wrong order. But this should be better than before.
+    timestamps.reverse()
     for ts in timestamps:
         if limit != None and limit <= 0:
             break
@@ -554,12 +573,12 @@ def parse_history_file(path, headers, filters, greptexts, limit):
     line_no = 0
     # If we have greptexts we pre-filter the file using the extremely
     # fast GNU Grep
+    # Revert lines from the log file to have the newer lines processed first
+    cmd = 'tac "%s"' % path
     if greptexts:
-        args = [ 'grep', '-i', '-e' , ".*".join(greptexts), path ]
-        grep = subprocess.Popen(args, close_fds=True, stdout=subprocess.PIPE)
-        logfile = grep.stdout
-    else:
-        logfile = file(path)
+        cmd += ' | grep -i -e %s' % ".*".join(greptexts)
+    grep = subprocess.Popen(cmd, shell = True, close_fds=True, stdout=subprocess.PIPE)
+    logfile = grep.stdout
 
     for line in logfile:
         line_no += 1
@@ -570,19 +589,12 @@ def parse_history_file(path, headers, filters, greptexts, limit):
 
         try:
             parts = line.rstrip('\n').split('\t')
-            if False:
-                values = [line_no] + parts
-            elif True:
-                convert_history_line(parts)
-                values = [line_no] + parts
-            else:
-                pairs = zip(history_columns[1:], parts)
-                values = [line_no] + map(lambda p: unsplit(type(p[0][1])(p[1])), pairs)
-                # Handle \1 separated lists/tuples (e.g. match_groups)
+            convert_history_line(parts)
+            values = [line_no] + parts
             if g_status_server.filter_row(headers, filters, values):
                 entries.append(values)
         except Exception, e:
-            log("Invalid line %d in history file %s: %s" % (line_no, path, e))
+            log("Invalid line '%s' in history file %s: %s" % (line, path, e))
 
     return entries
 
@@ -948,13 +960,19 @@ class EventServer:
                 return # dropping unhandled snmp version
 
         # once we got here we have a real parsed trap which we convert to an event now
+        text = ', '.join([ '%s: %s' % (item[0], str(item[1]).replace('\n', '')) for item in trap ])
+        # Convert to Unicode, first assume UTF-8, then latin-1
+        try:
+            text = text.decode("utf-8")
+        except:
+            text = text.decode("latin-1")
         event = {
             'time'        : time.time(),
-            'host'        : host,
+            'host'        : host.replace('\n', ''),
             'priority'    : 5,  # notice
             'facility'    : 31, # not used by syslog -> we use this for all traps
-            'application' : application,
-            'text'        : ', '.join([ '%s: %s' % item for item in trap ])
+            'application' : application.replace('\n', ''),
+            'text'        : text
         }
         self.process_event(event)
 
@@ -991,22 +1009,23 @@ class EventServer:
 
             # Accept new connection on event unix socket
             if self._eventsocket in readable:
-                client_socket, addr_info = self._eventsocket.accept()
-                client_sockets[client_socket.fileno()] = (client_socket, "")
+                client_socket, address = self._eventsocket.accept()
+                client_sockets[client_socket.fileno()] = (client_socket, address, "")
 
             # Same for the TCP syslog socket
             if self._syslog_tcp and self._syslog_tcp in readable:
-                client_socket, addr_info = self._syslog_tcp.accept()
-                client_sockets[client_socket.fileno()] = (client_socket, "")
+                client_socket, address = self._syslog_tcp.accept()
+                client_sockets[client_socket.fileno()] = (client_socket, address, "")
 
             # Read data from existing event unix socket connections
-            for fd, (cs, previous_data) in client_sockets.items():
+            for fd, (cs, address, previous_data) in client_sockets.items():
                 if fd in readable:
                     # Receive next part of data
                     try:
                         new_data = cs.recv(4096)
                     except:
                         new_data = ""
+                        address  = None
 
                     # Put together with incomplete messages from last time
                     data = previous_data + new_data
@@ -1018,19 +1037,19 @@ class EventServer:
                         # Do we have any complete messages?
                         if '\n' in data:
                             complete, rest = data.rsplit("\n", 1)
-                            self.process_raw_lines(complete + "\n")
+                            self.process_raw_lines(complete + "\n", address)
                         else:
                             rest = data # keep for next time
 
                     # Only complete messages
                     else:
                         if data:
-                            self.process_raw_lines(data)
+                            self.process_raw_lines(data, address)
                         rest = ""
 
                     # Connection still open?
                     if new_data:
-                        client_sockets[fd] = (cs, rest)
+                        client_sockets[fd] = (cs, address, rest)
                     else:
                         cs.close()
                         del client_sockets[fd]
@@ -1068,7 +1087,7 @@ class EventServer:
 
             # Read events from builtin syslog server
             if self._syslog != None and self._syslog.fileno() in readable:
-                self.process_raw_lines(self._syslog.recv(4096))
+                self.process_raw_lines(*self._syslog.recvfrom(4096))
 
             # Read events from builtin snmptrap server
             if self._snmptrap != None and self._snmptrap.fileno() in readable:
@@ -1108,10 +1127,10 @@ class EventServer:
         g_perfcounters.count_time("processing", elapsed)
 
     # Takes several lines of messages, handles encoding and processes them separated
-    def process_raw_lines(self, data):
+    def process_raw_lines(self, data, address = None):
         lines = data.splitlines()
         for line in lines:
-            line = line.rstrip()
+            line = line.rstrip().replace('\0', '')
             # Convert to Unicode, first assume UTF-8, then latin-1
             try:
                 line = line.decode("utf-8")
@@ -1119,7 +1138,7 @@ class EventServer:
                 line = line.decode("latin-1")
 
             if line:
-                self.process_raw_data(self.process_line, line)
+                self.process_raw_data(self.process_line, (line, address))
 
     def do_housekeeping(self):
         with lock_eventstatus:
@@ -1177,11 +1196,14 @@ class EventServer:
                             if event["count"] == 0:
                                 log("Rule %s, event %d: again without allowed rate, dropping event" %
                                     (rule["id"], event["id"]))
+                                log_event_history(event, "COUNTFAILED")
                                 events_to_delete.append(nr)
+
                     else: # algorithm 'interval'
                         if event["first"] + count["period"] <= now: # End of period reached
                             log("Rule %s: reached only %d out of %d events within %d seconds. "
                                 "Resetting to zero." % (rule["id"], event["count"], count["count"], count["period"]))
+                            log_event_history(event, "COUNTFAILED")
                             events_to_delete.append(nr)
 
             # Handle delayed actions
@@ -1311,20 +1333,21 @@ class EventServer:
             # Create artifical event from scratch. Make sure that all important
             # fields are defined.
             event = {
-                "rule_id"      : rule["id"],
-                "text"         : text,
-                "phase"        : "open",
-                "count"        : 1,
-                "time"         : now,
-                "first"        : now,
-                "last"         : now,
-                "comment"      : "",
-                "host"         : "",
-                "application"  : "",
-                "pid"          : 0,
-                "priority"     : 3,
-                "facility"     : 1, # user
-                "match_groups" : (),
+                "rule_id"        : rule["id"],
+                "text"           : text,
+                "phase"          : "open",
+                "count"          : 1,
+                "time"           : now,
+                "first"          : now,
+                "last"           : now,
+                "comment"        : "",
+                "host"           : "",
+                "application"    : "",
+                "pid"            : 0,
+                "priority"       : 3,
+                "facility"       : 1, # user
+                "match_groups"   : (),
+                "contact_groups" : rule.get("contact_groups"),
             }
             self.rewrite_event(rule, event, ())
             g_event_status.new_event(event)
@@ -1450,11 +1473,14 @@ class EventServer:
                 syslog_facilities[facility], syslog_priorities[priority], count,
                     (100.0 * count / float(total_count))))
 
-    def process_line(self, line):
+    def process_line(self, (line, address)):
         line = line.rstrip()
         if g_config["debug_rules"]:
-            log(u"Processing message '%s'" % line)
-        self.process_event(self.parse_event(line))
+            if address:
+                log(u"Processing message from %r: '%s'" % (address, line))
+            else:
+                log(u"Processing message '%s'" % line)
+        self.process_event(self.parse_event(line, address))
 
     def process_event(self, event):
         # Rule optimizer
@@ -1491,7 +1517,12 @@ class EventServer:
                     return
 
                 else:
+                    # Remember the rule id that this event originated from
                     event["rule_id"] = rule["id"]
+
+                    # Attach optional contact group information for visibility
+                    event["contact_groups"] = rule.get("contact_groups")
+
                     # Store groups from matching this event. In order to make
                     # persistence easier, we do not safe them as list but join
                     # them on ASCII-1.
@@ -1685,7 +1716,6 @@ class EventServer:
         event = {}
         # line starts with '@'
         if line[11] == ';':
-            log(line)
             timestamp_str, sl, contact, rest = line[1:].split(';', 3)
             host, rest = rest.split(None, 1)
             if len(sl):
@@ -1749,7 +1779,7 @@ class EventServer:
         return backedhost
 
 
-    def parse_event(self, line):
+    def parse_event(self, line, address):
         event = {}
         try:
             # Variant 1: plain syslog message without priority/facility:
@@ -1771,7 +1801,15 @@ class EventServer:
             #  - Leap seconds MUST NOT be used.
             # <166>2013-04-05T13:49:31.685Z esx Vpxa: message....
 
-            # Variant 2,3,4,5
+            # Variant 6: syslog message without date / host:
+            # <5>SYSTEM_INFO: [WLAN-1] Triggering Background Scan
+
+            # FIXME: Would be better to parse the syslog messages in another way:
+            # Split the message by the first ":", then split the syslog header part
+            # and detect which information are present. Take a look at the syslog RFCs
+            # for details.
+
+            # Variant 2,3,4,5,6
             if line.startswith('<'):
                 i = line.find('>')
                 prio = int(line[1:i])
@@ -1796,6 +1834,15 @@ class EventServer:
                 rfc3339_part, event['host'], line = line.split(' ', 2)
                 event['time'] = time.mktime(time.strptime(rfc3339_part[:19], '%Y-%m-%dT%H:%M:%S'))
                 event.update(self.parse_syslog_info(line))
+
+            # Variant 6
+            elif len(line.split(': ', 1)[0].split(' ')) == 1:
+                event.update(self.parse_syslog_info(line))
+                # There is no datetime information in the message, use current time
+                event['time'] = time.time()
+                # There is no host information, use the provided address
+                if address and type(address) == tuple:
+                    event["host"] = address[0]
 
             # Variant 1,2,4
             else:
@@ -1826,8 +1873,6 @@ class EventServer:
                     # A further problem here: we do not now wether the message is in DST or not
                     event["time"] = time.mktime((year, month, day, hours, minutes, seconds, 0, 0, lt.tm_isdst))
 
-
-
         except Exception, e:
             if g_config["debug_rules"]:
                 log('Got non-syslog message "%s" (%s)' % (line, e) )
@@ -1841,7 +1886,12 @@ class EventServer:
                 "time"        : time.time(),
             }
 
-        event["host"] = self.translate_hostname(event["host"])
+        try:
+            event["host"] = self.translate_hostname(event["host"])
+        except Exception, e:
+            if g_config["debug_rules"]:
+                log('Unable to parse host "%s" (%s)' % (event.get("host"), e))
+            event["host"] = ""
 
         if g_config["debug_rules"]:
             log('Parsed message:\n' +
@@ -2001,9 +2051,11 @@ class StatusServer:
 
         method, table = parts
 
+        output_format     = "python"
+
         with lock_eventstatus:
             if method == "GET":
-                response = self.handle_get_request(table, query[1:])
+                response, output_format = self.handle_get_request(table, query[1:])
 
             elif method == "REPLICATE":
                 response = self.handle_replicate(table, client_ip)
@@ -2017,8 +2069,19 @@ class StatusServer:
             else:
                 raise MKClientError("Invalid method %s (allowed are GET, COMMAND and REPLICATE)" % method)
 
-        socket.send(repr(response))
-        socket.send("\n")
+        if output_format == "plain":
+            def format_column(value):
+                try:
+                    return value.encode("utf-8")
+                except Exception, e:
+                    return repr(value)
+            for line in response:
+                socket.send("\x02".join(map(lambda x: format_column(x), line)))
+                socket.send("\n")
+        else:
+            socket.send(repr(response))
+            socket.send("\n")
+
         socket.close()
 
     def handle_command_request(self, commandline):
@@ -2125,7 +2188,7 @@ class StatusServer:
             event = g_event_status.event(int(event_id))
             if action_id not in g_config["action"]:
                 raise MKClientError("The action '%s' is not defined. After adding new commands please "
-                   "make sure that you activate the changes in the Event Console.") % action_id
+                   "make sure that you activate the changes in the Event Console." % action_id)
             action = g_config["action"][action_id]
         do_rule_action(action, event, user)
 
@@ -2166,6 +2229,7 @@ class StatusServer:
         filters = []
         only_host = None
         limit = None
+        output_format = "python"
         for line in headerlines:
             try:
                 header, argument = line.rstrip().split(":", 1)
@@ -2176,6 +2240,8 @@ class StatusServer:
                     if name == "event_host" and opfunc == filter_operators['=']:
                         only_host = argument
                     filters.append((name, opfunc, argument))
+                elif header == "OutputFormat":
+                    output_format = argument
                 elif header == "Limit":
                     limit = int(argument)
                 else:
@@ -2203,7 +2269,7 @@ class StatusServer:
         else:
             rows += list_rows
 
-        return rows
+        return rows, output_format
 
     def filter_row(self, headers, filters, list_row):
         row = dict(zip(headers, list_row))
@@ -2316,7 +2382,6 @@ def run_eventd():
             if opt_debug:
                 raise
             time.sleep(1)
-
 
 
 #.
@@ -2672,8 +2737,15 @@ def do_rule_action(action, event, user=""):
         log("Error during execution of action %s: %s" % (action["id"], format_exception()))
 
 def substitute_event_tags(text, event):
-    groups = [("match_group_%d" % (nr+1), g) for (nr, g) in enumerate(event.get("match_groups", ()))]
-    for key, value in event.items() + groups:
+    substs = [("match_group_%d" % (nr+1), g)
+               for (nr, g)
+                in enumerate(event.get("match_groups", ()))]
+
+    for key, defaultvalue in event_columns:
+        varname = key[6:]
+        substs.append((varname, event.get(varname, defaultvalue)))
+
+    for key, value in substs:
         if type(value) == tuple:
             value = " ".join(value)
         elif type(value) not in [ str, unicode ]:
@@ -3210,6 +3282,13 @@ try:
         os.remove(g_eventsocket_path)
 
     g_event_server.output_hash_stats()
+
+    # Closing fds which might be still open
+    for fd in [ opt_syslog_fd, opt_syslog_tcp_fd, opt_snmptrap_fd ]:
+        try:
+            os.close(fd)
+        except:
+            pass
 
     log("Successfully shut down.")
     os.remove(g_pid_file)

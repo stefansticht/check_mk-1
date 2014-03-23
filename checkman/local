@@ -1,6 +1,6 @@
-title: Integrate custom checks
+title: local: Integrate custom checks via arbitrary scripts on the agent
 agents: linux, windows, aix, solaris, freebsd, netbsd, openbsd
-catalog: generic 
+catalog: generic
 license: GPL
 distribution: check_mk
 description:

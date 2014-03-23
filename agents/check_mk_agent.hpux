@@ -48,7 +48,7 @@ fi
 
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.3i1
+echo Version: 1.2.5i1
 echo AgentOS: hpux
 echo PluginsDirectory: $PLUGINSDIR
 echo LocalDirectory: $LOCALDIR
@@ -93,7 +93,7 @@ done
 
 # Logical Volume Manager
 echo '<<<hpux_lvm:sep(58)>>>'
-vgdisplay -v -F
+/sbin/vgdisplay -v -F
 
 # Multipathing
 echo '<<<hpux_multipath>>>'
@@ -107,7 +107,11 @@ fi
 
 echo '<<<ntp>>>'
 # remove heading, make first column space separated
+<<<<<<< HEAD
 ntpq -pn | sed -e 1,2d -e 's/^\(.\)/\1 /' -e 's/^ /%/'
+=======
+ntpq -np | sed -e 1,2d -e 's/^\(.\)/\1 /' -e 's/^ /%/'
+>>>>>>> master
 
 
 # Kernel tunnables

@@ -58,113 +58,9 @@ if defaults.omd_root:
                 execfile(local_pagehandlers_dir + "/" + fn)
 
 
-def connect_to_livestatus(html):
-    html.site_status = {}
-    # site_status keeps a dictionary for each site with the following
-    # keys:
-    # "state"              --> "online", "disabled", "down", "unreach", "dead" or "waiting"
-    # "exception"          --> An error exception in case of down, unreach, dead or waiting
-    # "status_host_state"  --> host state of status host (0, 1, 2 or None)
-    # "livestatus_version" --> Version of sites livestatus if "online"
-    # "program_version"    --> Version of Nagios if "online"
-
-    # If there is only one site (non-multisite), than
-    # user cannot enable/disable.
-    if config.is_multisite():
-        # do not contact those sites the user has disabled.
-        # Also honor HTML-variables for switching off sites
-        # right now. This is generally done by the variable
-        # _site_switch=sitename1:on,sitename2:off,...
-        switch_var = html.var("_site_switch")
-        if switch_var:
-            for info in switch_var.split(","):
-                sitename, onoff = info.split(":")
-                d = config.user_siteconf.get(sitename, {})
-                if onoff == "on":
-                    d["disabled"] = False
-                else:
-                    d["disabled"] = True
-                config.user_siteconf[sitename] = d
-            config.save_site_config()
-
-        # Make lists of enabled and disabled sites
-        enabled_sites = {}
-        disabled_sites = {}
-
-        for sitename, site in config.allsites().items():
-            siteconf = config.user_siteconf.get(sitename, {})
-            # Convert livestatus-proxy links into UNIX socket
-            s = site["socket"]
-            if type(s) == tuple and s[0] == "proxy":
-                site["socket"] = "unix:" + defaults.livestatus_unix_socket + "proxy/" + sitename
-
-            if siteconf.get("disabled", False):
-                html.site_status[sitename] = { "state" : "disabled", "site" : site }
-                disabled_sites[sitename] = site
-            else:
-                html.site_status[sitename] = { "state" : "dead", "site" : site }
-                enabled_sites[sitename] = site
-
-        html.live = livestatus.MultiSiteConnection(enabled_sites, disabled_sites)
-
-        # Fetch status of sites by querying the version of Nagios and livestatus
-        html.live.set_prepend_site(True)
-        for sitename, v1, v2, ps, num_hosts, num_services in html.live.query(
-              "GET status\n"
-              "Columns: livestatus_version program_version program_start num_hosts num_services"):
-            html.site_status[sitename].update({
-                "state" : "online",
-                "livestatus_version": v1,
-                "program_version" : v2,
-                "program_start" : ps,
-                "num_hosts" : num_hosts,
-                "num_services" : num_services,
-            })
-        html.live.set_prepend_site(False)
-
-        # Get exceptions in case of dead sites
-        for sitename, deadinfo in html.live.dead_sites().items():
-            html.site_status[sitename]["exception"] = deadinfo["exception"]
-            shs = deadinfo.get("status_host_state")
-            html.site_status[sitename]["status_host_state"] = shs
-            if shs == None:
-                statename = "dead"
-            else:
-                statename = { 1:"down", 2:"unreach", 3:"waiting", }.get(shs, "unknown")
-            html.site_status[sitename]["state"] = statename
-
-    else:
-        html.live = livestatus.SingleSiteConnection("unix:" + defaults.livestatus_unix_socket)
-        html.live.set_timeout(10) # default timeout is 10 seconds
-        html.site_status = { '': { "state" : "dead", "site" : config.site('') } }
-        v1, v2, ps = html.live.query_row("GET status\nColumns: livestatus_version program_version program_start")
-        html.site_status[''].update({ "state" : "online", "livestatus_version": v1, "program_version" : v2, "program_start" : ps })
-
-    # If Multisite is retricted to data user is a nagios contact for,
-    # we need to set an AuthUser: header for livestatus
-    use_livestatus_auth = True
-    if html.output_format == 'html':
-        if config.may("general.see_all") and not config.user.get("force_authuser"):
-            use_livestatus_auth = False
-    else:
-        if config.may("general.see_all") and not config.user.get("force_authuser_webservice"):
-            use_livestatus_auth = False
-
-    if use_livestatus_auth == True:
-        html.live.set_auth_user('read',   config.user_id)
-        html.live.set_auth_user('action', config.user_id)
-
-
-    # May the user see all objects in BI aggregations or only some?
-    if not config.may("bi.see_all"):
-        html.live.set_auth_user('bi', config.user_id)
-
-    # Default auth domain is read. Please set to None to switch off authorization
-    html.live.set_auth_domain('read')
-
 # Call the load_plugins() function in all modules
 def load_all_plugins():
-    for module in [ hooks, userdb, views, sidebar, dashboard, wato, bi, mobile ]:
+    for module in [ hooks, userdb, views, sidebar, dashboard, wato, bi, mobile, notify ]:
         try:
             module.load_plugins # just check if this function exists
             module.load_plugins()
@@ -175,16 +71,14 @@ def load_all_plugins():
 __builtin__.load_all_plugins = load_all_plugins
 
 # Main entry point for all HTTP-requests (called directly by mod_apache)
-def handler(req, profiling = True):
+def handler(req, fields = None, profiling = True):
     req.content_type = "text/html; charset=UTF-8"
     req.header_sent = False
-
 
     # Create an object that contains all data about the request and
     # helper functions for creating valid HTML. Parse URI and
     # store results in the request object for later usage.
-    html = html_mod_python(req)
-
+    html = html_mod_python(req, fields)
     html.enable_debug = config.debug
     html.id = {} # create unique ID for this request
     __builtin__.html = html
@@ -208,13 +102,19 @@ def handler(req, profiling = True):
         # profiling can be enabled in multisite.mk
         if profiling and config.profile:
             import cProfile # , pstats, sys, StringIO, tempfile
-            # the profiler looses the memory about all modules. We need to park
-            # the request object in the apache module. This seems to be persistent.
+            # the profiler looses the memory about all modules. We need to hand over
+            # the request object in the apache module.
             # Ubuntu: install python-profiler when using this feature
-            apache._profiling_req = req
             profilefile = defaults.var_dir + "/web/multisite.profile"
-            retcode = cProfile.run("import index; from mod_python import apache; index.handler(apache._profiling_req, False)", profilefile)
-            file(profilefile + ".py", "w").write("#!/usr/bin/python\nimport pstats\nstats = pstats.Stats(%r)\nstats.sort_stats('time').print_stats()\n" % profilefile)
+            retcode = cProfile.runctx(
+                "import index; "
+                "index.handler(profile_req, profile_fields, False)",
+                {'profile_req': req, 'profile_fields': html.fields}, {}, profilefile)
+            file(profilefile + ".py", "w").write(
+                "#!/usr/bin/python\n"
+                "import pstats\n"
+                "stats = pstats.Stats(%r)\n"
+                "stats.sort_stats('time').print_stats()\n" % profilefile)
             os.chmod(profilefile + ".py", 0755)
             release_all_locks()
             return apache.OK
@@ -236,7 +136,7 @@ def handler(req, profiling = True):
         if html.myfile == "index" and html.mobile:
             html.myfile = "mobile"
 
-        # Get page handler
+        # Get page handler.
         handler = pagehandlers.get(html.myfile, page_not_found)
 
         # First initialization of the default permissions. Needs to be done before the auth_file
@@ -295,6 +195,7 @@ def handler(req, profiling = True):
 
         # Set all permissions, read site config, and similar stuff
         config.login(html.user)
+        html.load_help_visible()
 
         # Initialize the multiste i18n. This will be replaced by
         # language settings stored in the user profile after the user
@@ -323,9 +224,6 @@ def handler(req, profiling = True):
                 login.del_auth_cookie()
 
             raise MKAuthException(reason)
-
-        # General access allowed. Now connect to livestatus
-        connect_to_livestatus(html)
 
         handler()
 
@@ -401,17 +299,17 @@ def handler(req, profiling = True):
 
     except Exception, e:
         html.unplug()
+        apache.log_error("%s %s %s" % (req.uri, _('Internal error') + ':', e), apache.APLOG_ERR) # log in all cases
         if plain_error:
             html.write(_("Internal error") + ": %s\n" % e)
         elif not fail_silently:
             html.header(_("Internal error"))
             if config.debug:
                 html.show_error("%s: %s<pre>%s</pre>" %
-                    (_('Internal error') + ':', e, format_exception()))
+                    (_('Internal error'), e, format_exception()))
             else:
                 url = html.makeuri([("debug", "1")])
                 html.show_error("%s: %s (<a href=\"%s\">%s</a>)" % (_('Internal error') + ':', e, url, _('Retry with debug mode')))
-                apache.log_error("%s %s" % (_('Internal error') + ':', e), apache.APLOG_ERR)
             html.footer()
         response_code = apache.OK
 

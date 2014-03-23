@@ -111,6 +111,15 @@ div.floatfilter .content > select#optservicegroup {
     width: 240px;
 }
 
+div.floatfilter .content .multigroup table {
+    margin-top: -6px;
+}
+
+div.floatfilter .content .multigroup select {
+    width: 148px;
+    height: 66px;
+}
+
 div.floatfilter .content .filtertime select {
     width: 136px;
 }
@@ -473,7 +482,7 @@ table.views td.buttons {
 
 /* Availability */
 table.data.availability {
-    width: auto;
+    width: 100%;
 }
 
 table.data.availability td.number {
@@ -496,22 +505,27 @@ table.data.availability tr.summary td {
     padding-top: 1px;
 }
 
-table.data td.flapping, table.timeline td.flapping {
+table.data td.flapping, table.timeline td.flapping, div.avlegend.timeline div.state.flapping {
     /* background-image: url("images/bg_flapping.png");
     background-repeat: repeat; */
     background-color: #f0f;
 }
 
-table.data td.downtime, table.timeline td.downtime {
+table.data td.downtime, table.timeline td.downtime, div.avlegend.timeline div.state.downtime {
     background-color: #0af;
 }
-table.data td.hostdown, table.timeline td.hostdown {
+table.data td.hostdown, table.timeline td.hostdown, div.avlegend.timeline div.state.hostdown {
     background-color: #048;
     color: white;
 }
-table.data td.unmonitored, table.timeline td.unmonitored {
-    background-color: #ddd;
+table.data td.unmonitored, table.timeline td.unmonitored, div.avlegend.timeline div.state.unmonitored  {
+    background-color: #cacaca;
     color: #888;
+}
+table.timeline td.ooservice, div.avlegend.timeline div.state.ooservice {
+    background-color: #cacaca;
+    background-image: url("images/ooservice.png");
+    background-repeat: repeat;
 }
 table.data.availability tr.odd0 td.number {
     background-image: url("images/white_30percent.png");
@@ -540,19 +554,57 @@ div#avoptions_on {
     margin-right: 3px;
 }
 
+table.data tr.data > td.timeline {
+    width: 500px;
+    padding: 0px;
+}
 
 table.timeline {
-    width: 800px;
-    margin-bottom: 20px;
-    box-shadow: 0px 0px 1px #ccf;
     height: 30px;
     border-spacing: 0px;
     border-collapse: collapse;
 }
 
+table.timeline.standalone {
+    box-shadow: 0px 0px 1px #ccf;
+    margin-bottom: 20px;
+    width: 800px;
+}
+
+table.timeline.inline {
+    border-style: none;
+    width: 500px;
+}
+table.timeline.inline {
+    border-style: none;
+    width: 500px;
+    box-shadow: 0px 0px 1px #555 inset;
+}
+
 table.timeline td {
     padding: 0px;
+    border-style: none;
+}
+
+table.timeline.standalone td {
     border: 1px solid #444;
+}
+
+div.timelinerange {
+    position: relative;
+}
+
+/* We render the small vertical lines in a way that only
+   the left border is visible but the thing is thick 5 pixels.
+   That makes hovering over it more easy. */
+div.timelinerange div.timelinechoord {
+    position: absolute;
+    top: 0px;
+    width: 5px;
+    height: 30px;
+    border-style: none none none solid;
+    border-width: 0px 0px 0px 1px;
+    border-color: #666;
 }
 
 table.timelineevents {
@@ -566,6 +618,9 @@ div.timelinerange {
     width: 800px;
     float: none;
 }
+div.timelinerange.inline {
+    width: 500px;
+}
 div.timelinerange div {
     width: 300px;
     float: left;
@@ -578,4 +633,92 @@ div.timelinerange div.until {
 table.data.timewarp {
     width: 800px;
     margin-bottom: 20px;
+}
+
+div.avlegend {
+    background-image: url("images/white_20percent.png");
+    background-repeat: repeat;
+    padding: 5px 15px;
+    border-radius: 5px;
+    margin-top: 10px;
+    text-align: right;
+}
+div.avlegend h3 {
+    margin-top: 0px;
+    font-size: 13px;
+    color: black;
+}
+div.avlegend div {
+    display: inline-block;
+    width: 50px;
+    white-space: nowrap;
+    margin-right: 5px;
+}
+div.avlegend div.state {
+    text-align: center;
+    padding: 2px 0px;
+    font-size: 12px;
+}
+div.avlegend div:last-child {
+    margin-right: 0px;
+}
+div.avlegend.levels div.level {
+    margin-right: 15px;
+    color: black;
+}
+
+div.avlegend.timeline div.state {
+    width: 75px;
+}
+div.avlegend.timeline div.state.ooservice {
+    color: black;
+}
+
+
+/*--Inventory--------------------------------------------------------------.
+|            ___                      _                                    |
+|           |_ _|_ ____   _____ _ __ | |_ ___  _ __ _   _                  |
+|            | || '_ \ \ / / _ \ '_ \| __/ _ \| '__| | | |                 |
+|            | || | | \ V /  __/ | | | || (_) | |  | |_| |                 |
+|           |___|_| |_|\_/ \___|_| |_|\__\___/|_|   \__, |                 |
+|                                                   |___/                  |
++--------------------------------------------------------------------------+
+| Styles for displaying HW/SW-Inventory data                               |
+'-------------------------------------------------------------------------*/
+
+td.invtree {
+    width: 100%;
+}
+
+td.invtree b.treeangle.title {
+    color: black;
+    font-weight: normal;
+}
+
+td.invtree ul.treeangle {
+    margin: 0px;
+    margin-bottom: 3px;
+}
+
+td.invtree table {
+   border-collapse: collapse;
+   border: 0.5px solid black;
+   box-shadow: 0.5px 0.5px 1px #ccc;
+   margin-top: 3px;
+}
+
+td.invtree table td,
+td.invtree table th,
+table.data.single tr.data td.invtree table td,
+table.data.single tr.data td.invtree table th
+{
+    border: 1px solid #888;
+    padding: 1px 5px;
+    height: 14px;
+}
+td.invtree table th {
+    text-align: left;
+}
+td.invtree table td {
+    background-color: #fff;
 }

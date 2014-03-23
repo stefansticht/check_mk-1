@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+SITE=${SITE:-$(cat ../.site 2>/dev/null || true)}
+SITE=${SITE:-$(omd sites --bare | head -n 1)}
+
 set -e
 if [ ! -f configure ]; then
     aclocal && autoheader && automake -a && autoconf
@@ -11,11 +14,7 @@ fi
 make CFLAGS=-g -j 8
 
 
-SITE=${SITE:-$(omd sites --bare | head -n 1)}
-sudo install src/livestatus.o /omd/versions/default/lib/mk-livestatus/livestatus.o
-sudo install -m 755 src/livecheck /omd/versions/default/lib/mk-livestatus
-sudo rm -f /omd/versions/default/lib/livecheck
-sudo chmod 4755 /omd/versions/default/lib/mk-livestatus/livecheck
+sudo install src/livestatus.o /omd/sites/$SITE/lib/mk-livestatus/livestatus.o
 echo "$C files copied"
 echo "Restarting site $SITE"
 sudo omd restart $SITE nagios

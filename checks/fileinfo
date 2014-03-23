@@ -45,11 +45,13 @@ fileinfo_groups = []
 def inventory_fileinfo(info, case):
     inventory = []
     added_groups = []
+    if info:
+        reftime = int(info[0][0])
     for line in info:
         if len(line) >= 3:
             if line[1] == "missing":
                 continue
-            groups = fileinfo_groups_of_file(line[0])
+            groups = fileinfo_groups_of_file(line[0], reftime)
             if case == 'single' and not groups:
                 inventory.append((line[0], {}));
 
@@ -60,12 +62,26 @@ def inventory_fileinfo(info, case):
                         inventory.append((group, {}))
     return inventory
 
-def fileinfo_groups_of_file(check_filename):
+def fileinfo_process_date(pattern,reftime):
+    disect = re.match('(/.*/)\$DATE:((?:%\w.?){1,})\$(.*)',pattern)
+    if disect:
+        prefix = disect.group(1)
+        datepattern =  time.strftime(disect.group(2),time.localtime(reftime))
+        postfix = disect.group(3)
+        pattern = prefix+datepattern+postfix
+    return pattern
+
+def fileinfo_groups_of_file(check_filename,reftime):
     import fnmatch
     groups = []
     for line in host_extra_conf(g_hostname, fileinfo_groups):
         for group_name, pattern in line:
-            if fnmatch.fnmatch(check_filename, pattern):
+            if type(pattern) == str: # support old format
+                pattern = ( pattern, '' )
+            inclusion, exclusion = pattern
+            inclusion = fileinfo_process_date(inclusion,reftime)
+            if fnmatch.fnmatch(check_filename, inclusion) \
+                    and not fnmatch.fnmatch(check_filename, exclusion):
                 groups.append(group_name)
     return groups
 
@@ -94,14 +110,13 @@ def check_fileinfo(item, params, info):
 # Constructs simple list of patterns and makes them available for the check
 def fileinfo_groups_precompile(hostname, item, params):
     patterns = []
-
     for line in host_extra_conf(hostname, fileinfo_groups):
         for group_name, pattern in line:
             if group_name == item:
+                if type(pattern) == str: # support old format
+                    pattern = ( pattern, '' )
                 patterns.append(pattern)
-
     params['precompiled_patterns'] = patterns
-
     return params
 
 def check_fileinfo_groups(item, params, info):
@@ -121,11 +136,27 @@ def check_fileinfo_groups(item, params, info):
     age_oldest = None
     age_newest = 0
     size_all = 0
-    # Start counting all values
+    size_smallest = None
+    size_largest  = 0
+    date_inclusion = ""
+    # Start counting values on all files
     for line in info[1:]:
         for pattern in params['precompiled_patterns']:
-            if fnmatch.fnmatch(line[0], pattern) and str(line[1]) != 'missing':
-                size_all += int(line[1])
+            inclusion, exclusion = pattern
+            inclusion_tmp = fileinfo_process_date(inclusion,reftime)
+            if inclusion != inclusion_tmp:
+                inclusion = inclusion_tmp
+                date_inclusion = inclusion_tmp
+            if fnmatch.fnmatch(line[0], inclusion) and str(line[1]) != 'missing' \
+                        and not fnmatch.fnmatch(line[0], exclusion):
+                size = int(line[1])
+                size_all += size
+                if size_smallest == None:
+                    size_smallest = size
+                else:
+                    size_smallest = min(size_smallest, size)
+                size_largest = max(size_largest, size)
+
                 age = reftime - int(line[2])
                 if age_oldest == None: # very first match
                     age_oldest = age
@@ -140,32 +171,41 @@ def check_fileinfo_groups(item, params, info):
 
     # Start Checking
     check_definition = [
-        ("age_oldest", age_oldest, get_age_human_readable),
-        ("age_newest",  age_newest,  get_age_human_readable),
-        ("count", count_all, saveint),
-        ("size", size_all, get_filesize_human_readable)]
+        ("age_oldest",    age_oldest,    get_age_human_readable),
+        ("age_newest",    age_newest,    get_age_human_readable),
+        ("count",         count_all,     saveint),
+        ("size",          size_all,      get_filesize_human_readable),
+    ]
+
+    if size_smallest is not None:
+        check_definition.append(("size_smallest", size_smallest, get_filesize_human_readable))
+    if size_largest != 0:
+        check_definition.append(("size_largest",  size_largest,  get_filesize_human_readable))
+    if date_inclusion:
+        check_definition.append(("date pattern",  date_inclusion, str ))
 
     return fileinfo_check_function(check_definition, params)
 
 def fileinfo_check_function(check_definition, params):
+    import operator
     state = 0
     infos = []
     perfdata = []
     for what, val, verbfunc in check_definition:
         infos.append("%s is %s" % (what, verbfunc(val)))
-        warn, crit = "", ""
-        for how, comp in [ ("min", "<" ), ("max", ">") ]:
-            p = params.get(how + what)
-            if p:
-                warn, crit = p
-                cfunc = eval("lambda a,b: a %s b" % comp)
-                if cfunc(val, crit):
-                    state = 2
-                    infos[-1] += " (%s %s)(!!)" % (comp, verbfunc(crit))
-                elif cfunc(val, warn):
-                    state = max(state, 1)
-                    infos[-1] += " (%s %s)(!)" % (comp, verbfunc(warn))
-        perfdata.append((what, val, warn, crit))
+        if type(val) == int: # because strings go into infos but not into perfdata
+            warn, crit = "", ""
+            for how, comp, cfunc in [ ("min", "<", operator.lt), ("max", ">", operator.gt) ]:
+                p = params.get(how + what)
+                if p:
+                    warn, crit = p
+                    if cfunc(val, crit):
+                        state = 2
+                        infos[-1] += " (%s %s)(!!)" % (comp, verbfunc(crit))
+                    elif cfunc(val, warn):
+                        state = max(state, 1)
+                        infos[-1] += " (%s %s)(!)" % (comp, verbfunc(warn))
+            perfdata.append((what, val, warn, crit))
     infotext = ", ".join(infos)
     return (state, infotext, perfdata)
 

@@ -37,6 +37,10 @@
 #   | used for unixoide operating systems.                                 |
 #   +----------------------------------------------------------------------+
 
+# The following variable is obsolete. It is kept here so that Check_MK
+# won't fail if it's found in main.mk
+mem_extended_perfdata = None
+
 def parse_proc_meminfo(info):
     return dict([ (i[0][:-1], int(i[1])) for i in info ])
 
@@ -44,20 +48,20 @@ def inventory_mem_used(info):
     meminfo = parse_proc_meminfo(info)
     if "MemTotal" in meminfo and \
         "PageTotal" not in meminfo: # This case is handled by mem.win
-        return [(None, "memused_default_levels")]
+        return [(None, {})]
 
 def check_mem_used(_no_item, params, info):
     meminfo = parse_proc_meminfo(info)
     return check_memory(params, meminfo)
 
 check_info['mem.used'] = {
-    "check_function"         : check_mem_used,
-    "inventory_function"     : inventory_mem_used,
-    "service_description"    : "Memory used",
-    "has_perfdata"           : True,
-    "group"                  : "memory",
-    "check_config_variables" : [ "mem_extended_perfdata" ],
-    "includes"               : [ "mem.include" ],
+    "check_function"          : check_mem_used,
+    "inventory_function"      : inventory_mem_used,
+    "service_description"     : "Memory used",
+    "has_perfdata"            : True,
+    "group"                   : "memory",
+    "default_levels_variable" : "memory_default_levels",
+    "includes"                : [ "mem.include" ],
 }
 
 
@@ -77,6 +81,7 @@ check_info['mem.used'] = {
 factory_settings["memory_win_default_levels"] = {
     "memory"   : ( 80.0, 90.0 ),
     "pagefile" : ( 50.0, 70.0 ),
+    "swap"     : ( 70.0, 80.0 ),
 }
 
 def inventory_mem_win(info):
@@ -86,13 +91,19 @@ def inventory_mem_win(info):
 
 def check_mem_windows(item, params, info):
     meminfo = parse_proc_meminfo(info)
+    if "MemTotal" not in meminfo or \
+        "PageTotal" not in meminfo:
+        return 3, "Got no information from agent"
     perfdata = []
     infotxts = []
     MB = 1024.0 * 1024
     worststate = 0
+    now = time.time()
+
     for title, what, paramname in [
         ( "Memory",    "Mem",  "memory" ),
-        ( "Page file", "Page", "pagefile" )]:
+        ( "Page file", "Page", "pagefile" ),
+        ( "Swap",      "Swap", "swap" )]:
         total_kb = meminfo[what + "Total"]
         free_kb  = meminfo[what + "Free"]
         used_kb  = total_kb - free_kb
@@ -100,8 +111,36 @@ def check_mem_windows(item, params, info):
         free_mb  = free_kb / 1024.0
         perc     = 100.0 * used_kb / total_kb
 
-        # Now check the levels
+        infotxts.append("%s usage: %.1f%% (%.1f/%.1f GB)" %
+                (title, perc, used_kb / MB, total_kb / MB))
+
         warn, crit = params[paramname]
+
+        # In perfdata show warn/crit as absolute values
+        if type(warn) == float:
+            warn_kb = total_kb * warn / 100 / 1024
+        else:
+            warn_kb = warn * 1024
+
+        if type(crit) == float:
+            crit_kb = total_kb * crit / 100 / 1024
+        else:
+            crit_kb = crit * 1024
+
+        perfdata.append((paramname, used_kb / 1024.0, warn_kb, crit_kb, 0, total_kb / 1024.0))
+
+        # Do averaging, if configured, just for matching the levels
+        if "average" in params:
+            average_min = params["average"]
+            timedif, used_kb = get_average("mem.win.%s" % paramname,
+                                           now, used_kb, average_min, initialize_zero = False)
+            used_mb  = used_kb / 1024.0
+            free_mb  = (total_kb / 1024.0) - used_mb
+            perc     = 100.0 * used_kb / total_kb
+            infotxts[-1] += ", %d min average: %.1f%% (%.1f GB)" % (average_min, perc, used_kb / MB)
+            perfdata.append((paramname + "_avg", used_kb / 1024.0))
+
+        # Now check the levels
         if (type(crit) == int and free_mb <= crit) or \
             (type(crit) == float and perc >= crit):
             worststate = 2
@@ -113,15 +152,8 @@ def check_mem_windows(item, params, info):
         else:
             state_code = ""
 
-        # Convert levels to absolute values (for perfdata)
-        if type(warn) == float:
-            warn = total_kb * warn / 100 / 1024
-        if type(crit) == float:
-            crit = total_kb * crit / 100 / 1024
+        infotxts[-1] += state_code
 
-        infotxts.append("%s usage: %.1f%% (%.1f/%.1f GB)%s" %
-                (title, perc, used_kb / MB, total_kb / MB, state_code))
-        perfdata.append((paramname, used_kb / 1024.0, warn, crit, 0, total_kb / 1024.0))
 
     return (worststate, ", ".join(infotxts), perfdata)
 

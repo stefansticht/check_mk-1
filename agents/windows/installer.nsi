@@ -4,11 +4,11 @@
 ; Useful sources:
 ; http://nsis.sourceforge.net/Reusable_installer_script
 
-!define CHECK_MK_VERSION "1.2.3i1"
+!define CHECK_MK_VERSION "1.2.5i1"
 !define NAME "Check_MK Agent ${CHECK_MK_VERSION}"
 
 XPStyle on
-Icon "installer.ico"
+Icon "check_mk_agent.ico"
 
 ; The name of the installer
 Name "${NAME}"

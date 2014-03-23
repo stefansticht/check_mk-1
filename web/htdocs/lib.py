@@ -24,7 +24,7 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import grp, pprint, os, errno, gettext, marshal, fcntl, __builtin__
+import grp, pprint, os, errno, gettext, marshal, re, fcntl, __builtin__
 
 #Workarround when the file is included outsite multisite
 try:
@@ -33,9 +33,9 @@ except:
     pass
 
 
-nagios_state_names = { -1: "NODATA", 0: "OK", 1: "WARNING", 2: "CRITICAL", 3: "UNKNOWN", 4: "DEPENDENT" }
-nagios_short_state_names = { -1: "PEND", 0: "OK", 1: "WARN", 2: "CRIT", 3: "UNKN", 4: "DEP" }
-nagios_short_host_state_names = { 0: "UP", 1: "DOWN", 2: "UNREACH" }
+nagios_state_names = { -1: _("NODATA"), 0: _("OK"), 1: _("WARNING"), 2: _("CRITICAL"), 3: _("UNKNOWN")}
+nagios_short_state_names = { -1: _("PEND"), 0: _("OK"), 1: _("WARN"), 2: _("CRIT"), 3: _("UNKN") }
+nagios_short_host_state_names = { 0: _("UP"), 1: _("DOWN"), 2: _("UNREACH") }
 
 class MKGeneralException(Exception):
     def __init__(self, reason):
@@ -124,7 +124,25 @@ def savefloat(f):
     except:
         return 0.0
 
+# sorted() is not available in all Python versions
+try:
+    sorted
+except:
+    def sorted(l):
+        a = l[:]
+        a.sort()
+        return a
 
+# Generates a unique id
+def gen_id():
+    try:
+        return file('/proc/sys/kernel/random/uuid').read().strip()
+    except IOError:
+        # On platforms where the above file does not exist we try to
+        # use the python uuid module which seems to be a good fallback
+        # for those systems. Well, if got python < 2.5 you are lost for now.
+        import uuid
+        return str(uuid.uuid4())
 
 # Load all files below share/check_mk/web/plugins/WHAT into a
 # specified context (global variables). Also honors the
@@ -178,18 +196,18 @@ def get_languages():
     # Add the hard coded english language to the language list
     # It must be choosable even if the administrator changed the default
     # language to a custom value
-    languages = [ (None, _('English')) ]
+    languages = set([ (None, _('English')) ])
 
     for lang_dir in get_language_dirs():
         try:
-            languages += [ (val, get_language_alias(val))
-                for val in os.listdir(lang_dir) if not '.' in val ]
+            languages.update([ (val, get_language_alias(val))
+                for val in os.listdir(lang_dir) if not '.' in val ])
         except OSError:
             # Catch "OSError: [Errno 2] No such file or
             # directory:" when directory not exists
             pass
 
-    return languages
+    return list(languages)
 
 def load_language(lang):
     # Make current language globally known to all of our modules
@@ -217,6 +235,17 @@ def load_language(lang):
         # Replace the _() function to disable i18n again
         __builtin__._ = lambda x: x
 
+# Localization of user supplied texts
+def _u(text):
+    import config
+    ldict = config.user_localizations.get(text)
+    if ldict:
+        return ldict.get(current_language, text)
+    else:
+        return text
+
+__builtin__._u = _u
+
 def pnp_cleanup(s):
     return s \
         .replace(' ', '_') \
@@ -224,6 +253,7 @@ def pnp_cleanup(s):
         .replace('/', '_') \
         .replace('\\', '_')
 
+ok_marker      = '<b class="stmark state0">OK</b>'
 warn_marker    = '<b class="stmark state1">WARN</b>'
 crit_marker    = '<b class="stmark state2">CRIT</b>'
 unknown_marker = '<b class="stmark state3">UNKN</b>'
@@ -243,15 +273,26 @@ def paint_host_list(site, hosts):
     return "", h
 
 def format_plugin_output(output, row = None):
-    output =  output.replace("(!)", warn_marker) \
+    import config
+    if config.escape_plugin_output:
+        output = html.attrencode(output)
+
+    output = output.replace("(!)", warn_marker) \
               .replace("(!!)", crit_marker) \
-              .replace("(?)", unknown_marker)
+              .replace("(?)", unknown_marker) \
+              .replace("(.)", ok_marker)
+
     if row and "[running on" in output:
         a = output.index("[running on")
         e = output.index("]", a)
         hosts = output[a+12:e].replace(" ","").split(",")
         css, h = paint_host_list(row["site"], hosts)
         output = output[:a] + "running on " + h + output[e+1:]
+
+    if config.escape_plugin_output:
+        output = re.sub("http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+",
+                         lambda p: '<a href="%s"><img class=pluginurl align=absmiddle title="%s" src="images/pluginurl.png"></a>' %
+                            (p.group(0), p.group(0)), output)
 
     return output
 
@@ -267,6 +308,12 @@ def saveint(x):
         return int(x)
     except:
         return 0
+
+def tryint(x):
+    try:
+        return int(x)
+    except:
+        return x
 
 def set_is_disjoint(a, b):
     for elem in a:
@@ -303,4 +350,40 @@ def release_all_locks():
         os.close(fd)
     g_aquired_locks = []
     g_locked_paths = []
+
+
+regex_cache = {}
+def regex(r):
+    rx = regex_cache.get(r)
+    if rx:
+        return rx
+    try:
+        rx = re.compile(r)
+    except Exception, e:
+        raise MKConfigError(_("Invalid regular expression '%s': %s") % (r, e))
+    regex_cache[r] = rx
+    return rx
+
+
+
+
+__builtin__.default_user_localizations = {
+     u'Agent type':                          { "de": u"Art des Agenten", },
+     u'Business critical':                   { "de": u"Geschäftskritisch", },
+     u'Check_MK Agent (Server)':             { "de": u"Check_MK Agent (Server)", },
+     u'Criticality':                         { "de": u"Kritikalität", },
+     u'DMZ (low latency, secure access)':    { "de": u"DMZ (geringe Latenz, hohe Sicherheit", },
+     u'Do not monitor this host':            { "de": u"Diesen Host nicht überwachen", },
+     u'Dual: Check_MK Agent + SNMP':         { "de": u"Dual: Check_MK Agent + SNMP", },
+     u'Legacy SNMP device (using V1)':       { "de": u"Alte SNMP-Geräte (mit Version 1)", },
+     u'Local network (low latency)':         { "de": u"Lokales Netzwerk (geringe Latenz)", },
+     u'Networking Segment':                  { "de": u"Netzwerksegment", },
+     u'No Agent':                            { "de": u"Kein Agent", },
+     u'Productive system':                   { "de": u"Produktivsystem", },
+     u'Test system':                         { "de": u"Testsystem", },
+     u'WAN (high latency)':                  { "de": u"WAN (hohe Latenz)", },
+     u'monitor via Check_MK Agent':          { "de": u"Überwachung via Check_MK Agent", },
+     u'monitor via SNMP':                    { "de": u"Überwachung via SNMP", },
+     u'SNMP (Networking device, Appliance)': { "de": u"SNMP (Netzwerkgerät, Appliance)", },
+}
 

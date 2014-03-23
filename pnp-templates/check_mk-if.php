@@ -42,7 +42,7 @@ setlocale(LC_ALL, 'C');
 
 # Determine if Bit or Byte.
 # Change multiplier and labels
-$unit = "B"; 
+$unit = "B";
 $unit_multiplier = 1;
 $vertical_label_name = "MByte/sec";
 if (strcmp($MIN[11], "0.0") == 0) {
@@ -91,9 +91,9 @@ if ($bandwidth > 0){
 }
 $ds_name[1] = 'Used bandwidth';
 $opt[1] = "--vertical-label \"$vertical_label_name\" -l -$range -u $range -X0 -b 1024 --title \"Used bandwidth $hostname / $servicedesc $bandwidthInfo\" ";
-$def[1] = 
+$def[1] =
   "HRULE:0#c0c0c0 ";
-  if ($mBandwidthH) 
+  if ($mBandwidthH)
       $def[1] .= "HRULE:$mBandwidthH#808080:\"Port speed\:  " . sprintf("%.1f", $bandwidth) . " ".$bwuom."$unit/s\\n\" ".
                  "HRULE:-$mBandwidthH#808080: ";
    if ($warn)
@@ -103,24 +103,39 @@ $def[1] =
       $def[1] .= "HRULE:$mCritH#ff0000:\"Critical\:               " . sprintf("%6.1f", $crit) . " ".$bwuom."$unit/s\\n\" ".
                  "HRULE:-$mCritH#ff0000: ";
 
-  $def[1] .= "DEF:inbytes=$RRDFILE[1]:$DS[1]:MAX ".
-  "DEF:outbytes=$RRDFILE[6]:$DS[6]:MAX ".
+  $def[1] .= "".
+  # incoming
+  "DEF:inbytes=$RRDFILE[1]:$DS[1]:MAX ".
   "CDEF:intraffic=inbytes,$unit_multiplier,* ".
-  "CDEF:outtraffic=outbytes,$unit_multiplier,* ".
   "CDEF:inmb=intraffic,1048576,/ ".
+  "AREA:inmb#00e060:\"in            \" ".
+  "GPRINT:intraffic:LAST:\"%7.1lf %s$unit/s last\" ".
+  "GPRINT:intraffic:AVERAGE:\"%7.1lf %s$unit/s avg\" ".
+  "GPRINT:intraffic:MAX:\"%7.1lf %s$unit/s max\\n\" ".
+  "VDEF:inperc=intraffic,95,PERCENTNAN ".
+  "VDEF:inpercmb=inmb,95,PERCENTNAN ".
+  "LINE:inpercmb#008f00:\"95% percentile\" ".
+  "GPRINT:inperc:\"%7.1lf %s$unit/s\\n\" ".
+
+  # outgoing
+  "DEF:outbytes=$RRDFILE[6]:$DS[6]:MAX ".
+  "CDEF:outtraffic=outbytes,$unit_multiplier,* ".
+  "CDEF:minusouttraffic=outtraffic,-1,* ".
   "CDEF:outmb=outtraffic,1048576,/ ".
   "CDEF:minusoutmb=0,outmb,- ".
-  "AREA:inmb#00e060:\"in                    \" ".
-  "GPRINT:intraffic:LAST:\"%6.1lf %s$unit/s last\" ".
-  "GPRINT:intraffic:AVERAGE:\"%6.1lf %s$unit/s avg\" ".
-  "GPRINT:intraffic:MAX:\"%6.1lf %s$unit/s max\\n\" ".
-  "AREA:minusoutmb#0080e0:\"out                   \" ".
-  "GPRINT:outtraffic:LAST:\"%6.1lf %s$unit/s last\" ".
-  "GPRINT:outtraffic:AVERAGE:\"%6.1lf %s$unit/s avg\" ".
-  "GPRINT:outtraffic:MAX:\"%6.1lf %s$unit/s max\\n\" ";
+  "AREA:minusoutmb#0080e0:\"out           \" ".
+  "GPRINT:outtraffic:LAST:\"%7.1lf %s$unit/s last\" ".
+  "GPRINT:outtraffic:AVERAGE:\"%7.1lf %s$unit/s avg\" ".
+  "GPRINT:outtraffic:MAX:\"%7.1lf %s$unit/s max\\n\" ".
+  "VDEF:outperc=minusouttraffic,5,PERCENTNAN ".
+  "VDEF:outpercmb=minusoutmb,5,PERCENTNAN ".
+  "LINE:outpercmb#00008f:\"95% percentile\" ".
+  "GPRINT:outperc:\"%7.1lf %s$unit/s\\n\" ".
+
+  "";
 
 if (isset($DS[12])) {
-  $def[1] .= 
+  $def[1] .=
   "DEF:inbytesa=$RRDFILE[12]:$DS[12]:MAX ".
   "DEF:outbytesa=$RRDFILE[13]:$DS[13]:MAX ".
   "CDEF:intraffica=inbytesa,$unit_multiplier,* ".
@@ -142,29 +157,41 @@ if (isset($DS[12])) {
 $ds_name[2] = 'Packets';
 $opt[2] = "--vertical-label \"packets/sec\" --title \"Packets $hostname / $servicedesc\" ";
 $def[2] =
+  # ingoing
   "HRULE:0#c0c0c0 ".
   "DEF:inu=$RRDFILE[2]:$DS[2]:MAX ".
   "DEF:innu=$RRDFILE[3]:$DS[3]:MAX ".
-  "AREA:inu#00ffc0:\"in unicast              \" ".
-  "GPRINT:inu:LAST:\"%7.2lf/s last  \" ".
-  "GPRINT:inu:AVERAGE:\"%7.2lf/s avg  \" ".
-  "GPRINT:inu:MAX:\"%7.2lf/s max\\n\" ".
-  "AREA:innu#00c080:\"in broadcast/multicast  \":STACK ".
-  "GPRINT:innu:LAST:\"%7.2lf/s last  \" ".
-  "GPRINT:innu:AVERAGE:\"%7.2lf/s avg  \" ".
-  "GPRINT:innu:MAX:\"%7.2lf/s max\\n\" ".
+  "CDEF:in=inu,innu,+ ".
+  "AREA:inu#00ffc0:\"in unicast             \" ".
+  "GPRINT:inu:LAST:\"%9.1lf/s last \" ".
+  "GPRINT:inu:AVERAGE:\"%9.1lf/s avg \" ".
+  "GPRINT:inu:MAX:\"%9.1lf/s max\\n\" ".
+  "AREA:innu#00c080:\"in broadcast/multicast \":STACK ".
+  "GPRINT:innu:LAST:\"%9.1lf/s last \" ".
+  "GPRINT:innu:AVERAGE:\"%9.1lf/s avg \" ".
+  "GPRINT:innu:MAX:\"%9.1lf/s max\\n\" ".
+  "VDEF:inperc=in,95,PERCENTNAN ".
+  "LINE:inperc#00cf00:\"in 95% percentile      \" ".
+  "GPRINT:inperc:\"%9.1lf/s\\n\" ".
+
+  # outgoing
   "DEF:outu=$RRDFILE[7]:$DS[7]:MAX ".
   "DEF:outnu=$RRDFILE[8]:$DS[8]:MAX ".
   "CDEF:minusoutu=0,outu,- ".
   "CDEF:minusoutnu=0,outnu,- ".
-  "AREA:minusoutu#00c0ff:\"out unicast             \" ".
-  "GPRINT:outu:LAST:\"%7.2lf/s last  \" ".
-  "GPRINT:outu:AVERAGE:\"%7.2lf/s avg  \" ".
-  "GPRINT:outu:MAX:\"%7.2lf/s max\\n\" ".
-  "AREA:minusoutnu#0080c0:\"out broadcast/multicast \":STACK ".
-  "GPRINT:outnu:LAST:\"%7.2lf/s last  \" ".
-  "GPRINT:outnu:AVERAGE:\"%7.2lf/s avg  \"  ".
-  "GPRINT:outnu:MAX:\"%7.2lf/s max\\n\" ";
+  "CDEF:minusout=minusoutu,minusoutnu,+ ".
+  "AREA:minusoutu#00c0ff:\"out unicast            \" ".
+  "GPRINT:outu:LAST:\"%9.1lf/s last \" ".
+  "GPRINT:outu:AVERAGE:\"%9.1lf/s avg \" ".
+  "GPRINT:outu:MAX:\"%9.1lf/s max\\n\" ".
+  "AREA:minusoutnu#0080c0:\"out broadcast/multicast\":STACK ".
+  "GPRINT:outnu:LAST:\"%9.1lf/s last \" ".
+  "GPRINT:outnu:AVERAGE:\"%9.1lf/s avg \"  ".
+  "GPRINT:outnu:MAX:\"%9.1lf/s max\\n\" ".
+  "VDEF:outperc=minusout,5,PERCENTNAN ".
+  "LINE:outperc#0000cf:\"out 95% percentile     \" ".
+  "GPRINT:outperc:\"%9.1lf/s\\n\" ".
+  "";
 
 # Graph 3: errors and discards
 $ds_name[3] = 'Errors and discards';

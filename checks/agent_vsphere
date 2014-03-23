@@ -25,7 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 # {
-#     'tcp_port': 4711,
+#     'tcp_port': 443,
 #     'secret': 'wef',
 #     'infos': ['hostsystem', 'virtualmachine'],
 #     'user': 'wefwef'
@@ -47,9 +47,17 @@ def agent_vsphere_arguments(params, hostname, ipaddress):
     elif direct:
         args += ' --direct --hostname ' + quote_shell_string(hostname)
 
+    if params.get("skip_placeholder_vms", True):
+        args += " -P"
+
+    if "spaces" in params:
+        args += ' --spaces %s' % params["spaces"]
+
     if "timeout" in params:
         args += ' --timeout %d' % params["timeout"]
 
+    if params.get("use_pysphere"):
+        args += ' --pysphere'
 
     args += " " + quote_shell_string(ipaddress)
     return args

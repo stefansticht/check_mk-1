@@ -39,6 +39,7 @@ import login
 import help
 import bi
 import userdb
+import notify
 
 # map URLs to page rendering functions
 
@@ -61,9 +62,14 @@ pagehandlers.update({
    "side"                     : sidebar.page_side,
    "sidebar_add_snapin"       : sidebar.page_add_snapin,
    "sidebar_snapin"           : sidebar.ajax_snapin,
+   "sidebar_fold"             : sidebar.ajax_fold,
    "sidebar_openclose"        : sidebar.ajax_openclose,
    "sidebar_move_snapin"      : sidebar.move_snapin,
    "sidebar_ajax_speedometer" : sidebar.ajax_speedometer,
+   "sidebar_get_messages"     : sidebar.ajax_get_messages,
+   "sidebar_message_read"     : sidebar.ajax_message_read,
+   "ajax_search"              : sidebar.ajax_search,
+   "search_open"              : sidebar.search_open,
    "switch_master_state"      : sidebar.ajax_switch_masterstate,
    "add_bookmark"             : sidebar.ajax_add_bookmark,
    "del_bookmark"             : sidebar.ajax_del_bookmark,
@@ -80,5 +86,7 @@ pagehandlers.update({
    "dashlet_nodata"           : dashboard.dashlet_nodata,
    "bi_availability"          : bi.page_availability,
    "ajax_userdb_sync"         : userdb.ajax_sync,
+   "notify"                   : notify.page_notify,
+   "ajax_inv_render_tree"     : views.ajax_inv_render_tree,
 })
 

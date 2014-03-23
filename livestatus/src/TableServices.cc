@@ -31,6 +31,8 @@
 #include "OffsetTimeColumn.h"
 #include "OffsetDoubleColumn.h"
 #include "OffsetTimeperiodColumn.h"
+#include "CustomTimeperiodColumn.h"
+#include "CustomVarsExplicitColumn.h"
 #include "OffsetStringServiceMacroColumn.h"
 #include "ServiceSpecialIntColumn.h"
 #include "ServiceSpecialDoubleColumn.h"
@@ -193,10 +195,17 @@ void TableServices::addColumns(Table *table, string prefix, int indirect_offset,
                 "Description of the service (also used as key)", (char *)(&svc.description) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "display_name",
                 "An optional display name (not used by Nagios standard web pages)", (char *)(&svc.display_name) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetStringColumn(prefix + "check_command",
                 "Nagios command used for active checks", (char *)(&svc.service_check_command) - ref, indirect_offset));
     table->addColumn(new OffsetStringServiceMacroColumn(prefix + "check_command_expanded",
                 "Nagios command used for active checks with the macros expanded", (char *)(&svc.service_check_command) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetStringColumn(prefix + "check_command",
+                "Nagios command used for active checks", (char *)(&svc.check_command) - ref, indirect_offset));
+    table->addColumn(new OffsetStringServiceMacroColumn(prefix + "check_command_expanded",
+                "Nagios command used for active checks with the macros expanded", (char *)(&svc.check_command) - ref, indirect_offset));
+    #endif
     table->addColumn(new OffsetStringColumn(prefix + "event_handler",
                 "Nagios command used as event handler", (char *)(&svc.event_handler) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "plugin_output",
@@ -209,6 +218,8 @@ void TableServices::addColumns(Table *table, string prefix, int indirect_offset,
                 "The name of the notification period of the service. It this is empty, service problems are always notified.", (char *)(&svc.notification_period) - ref, indirect_offset));
     table->addColumn(new OffsetStringColumn(prefix + "check_period",
                 "The name of the check period of the service. It this is empty, the service is always checked.", (char *)(&svc.check_period) - ref, indirect_offset));
+    table->addColumn(new CustomVarsExplicitColumn(prefix + "service_period",
+                "The name of the service period of the service", (char *)(&svc.custom_variables) - ref, indirect_offset, "SERVICE_PERIOD"));
     table->addColumn(new OffsetStringColumn(prefix + "notes",
                 "Optional notes about the service", (char *)(&svc.notes) - ref, indirect_offset));
     table->addColumn(new OffsetStringServiceMacroColumn(prefix + "notes_expanded",
@@ -283,8 +294,13 @@ void TableServices::addColumns(Table *table, string prefix, int indirect_offset,
                 "Whether the service is flapping (0/1)", (char *)(&svc.is_flapping) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "checks_enabled",
                 "Whether active checks are enabled for the service (0/1)", (char *)(&svc.checks_enabled) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "accept_passive_checks",
                 "Whether the service accepts passive checks (0/1)", (char *)(&svc.accept_passive_service_checks) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetIntColumn(prefix + "accept_passive_checks",
+                "Whether the service accepts passive checks (0/1)", (char *)(&svc.accept_passive_checks) - ref, indirect_offset));
+    #endif // NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "event_handler_enabled",
                 "Whether and event handler is activated for the service (0/1)", (char *)(&svc.event_handler_enabled) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "notifications_enabled",
@@ -301,8 +317,13 @@ void TableServices::addColumns(Table *table, string prefix, int indirect_offset,
                 "Whether flap detection is enabled for the service (0/1)", (char *)(&svc.flap_detection_enabled) - ref, indirect_offset));
     table->addColumn(new OffsetIntColumn(prefix + "check_freshness",
                 "Whether freshness checks are activated (0/1)", (char *)(&svc.check_freshness) - ref, indirect_offset));
+    #ifndef NAGIOS4
     table->addColumn(new OffsetIntColumn(prefix + "obsess_over_service",
                 "Whether 'obsess_over_service' is enabled for the service (0/1)", (char *)(&svc.obsess_over_service) - ref, indirect_offset));
+    #else
+    table->addColumn(new OffsetIntColumn(prefix + "obsess_over_service",
+                "Whether 'obsess_over_service' is enabled for the service (0/1)", (char *)(&svc.obsess) - ref, indirect_offset));
+    #endif // NAGIOS4
     table->addColumn(new AttributelistColumn(prefix + "modified_attributes",
                 "A bitmask specifying which attributes have been modified", (char *)(&svc.modified_attributes) - ref, indirect_offset, false));
     table->addColumn(new AttributelistColumn(prefix + "modified_attributes_list",
@@ -335,6 +356,8 @@ void TableServices::addColumns(Table *table, string prefix, int indirect_offset,
 
     table->addColumn(new OffsetTimeperiodColumn(prefix + "in_check_period",
                 "Whether the service is currently in its check period (0/1)", (char *)&svc.check_period_ptr - ref, indirect_offset));
+    table->addColumn(new CustomTimeperiodColumn(prefix + "in_service_period",
+                "Whether this service is currently in its service period (0/1)", (char *)(&svc.custom_variables) - ref, indirect_offset, "SERVICE_PERIOD"));
     table->addColumn(new OffsetTimeperiodColumn(prefix + "in_notification_period",
                 "Whether the service is currently in its notification period (0/1)", (char *)&svc.notification_period_ptr - ref, indirect_offset));
 

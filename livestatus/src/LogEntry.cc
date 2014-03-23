@@ -4,23 +4,24 @@
 // |           | |   | '_ \ / _ \/ __| |/ /   | |\/| | ' /            |
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
+// |                                     |_____|                      |
+// |          __  __ _                   ____                         |
+// |         |  \/  (_) ___ _ __ ___    / ___|___  _ __ ___           |
+// |         | |\/| | |/ __| '__/ _ \  | |   / _ \| '__/ _ \          |
+// |         | |  | | | (__| | | (_) | | |__| (_) | | |  __/          |
+// |         |_|  |_|_|\___|_|  \___/   \____\___/|_|  \___|          |
 // |                                                                  |
 // | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
-// This file is part of Check_MK.
-// The official homepage is at http://mathias-kettner.de/check_mk.
+// This file is part of the Check_MK Micro Core.  Copyright by Mathias
+// Kettner,  Preysingstr. 74,  81667 München, Germany.  All rights are
+// reserved. You may *not* redistribute or modify this software unless
+// you have a  written  permission of the owner.  This file  is  *not*
+// available under GNU GPL. If you do not like this then please use  a
+// different monitoring core.
 //
-// check_mk is free software;  you can redistribute it and/or modify it
-// under the  terms of the  GNU General Public License  as published by
-// the Free Software Foundation in version 2.  check_mk is  distributed
-// in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
-// out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
-// PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
-// License along with GNU Make; see the file  COPYING.  If  not,  write
-// to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
-// Boston, MA 02110-1301 USA.
+// Please note: This software is experimental. Use at your own risk.
 
 #include <string.h>
 #include <time.h>
@@ -41,6 +42,7 @@ LogEntry::LogEntry(unsigned lineno, char *line)
     _msglen = strlen(line);
     while (_msglen > 0 && _msg[_msglen-1] == '\n')
         _msg[--_msglen] = '\0';
+
 
     // keep unsplitted copy of the message (needs lots of memory,
     // maybe we could optimize that one day...)
@@ -71,19 +73,14 @@ LogEntry::LogEntry(unsigned lineno, char *line)
     if (handleStatusEntry() ||
         handleNotificationEntry() ||
         handlePassiveCheckEntry() ||
-        handleExternalCommandEntry())
+        handleExternalCommandEntry()
+        )
     {
-        if (_host_name)
-            _host = find_host(_host_name);
-        if (_svc_desc)
-            _service = find_service(_host_name, _svc_desc);
-        if (_contact_name)
-            _contact = find_contact(_contact_name);
-        if (_command_name)
-            _command = find_command(_command_name);
+        updateReferences();
     }
-    else 
-        handleProgrammEntry();
+    else {
+        handleTextEntry() || handleProgrammEntry(); // Performance killer strstr in handleProgrammEntry!
+    }
     // rest is LOGCLASS_INFO
 }
 
@@ -94,12 +91,34 @@ LogEntry::~LogEntry()
 }
 
 
-bool LogEntry::handleStatusEntry()
+
+
+inline bool LogEntry::handleStatusEntry()
 {
+//// TODO: check if its worth of implementing
+//// Most lines are status entries anyway...
+//    int len_text = strlen(_text);
+//    if (len_text < 12)
+//        return false;
+//
+//    // Quick basic check
+//    // We can skip all other strcmp() calls
+//    // if the first letter does not match
+//    switch (_text[0]) {
+//        case 'I':
+//        case 'C':
+//        case 'S':
+//        case 'T':
+//        case 'H':
+//            break;
+//        default:
+//            return false;
+//    }
+
     // HOST states
     if (!strncmp(_text, "INITIAL HOST STATE: ", 20)
-        || !strncmp(_text, "CURRENT HOST STATE: ", 20)
-        || !strncmp(_text, "HOST ALERT: ", 12))
+     || !strncmp(_text, "CURRENT HOST STATE: ", 20)
+     || !strncmp(_text, "HOST ALERT: ", 12))
     {
         if (_text[0] == 'H'){
             _logclass = LOGCLASS_ALERT;
@@ -154,8 +173,8 @@ bool LogEntry::handleStatusEntry()
 
     // SERVICE states
     else if (!strncmp(_text, "INITIAL SERVICE STATE: ", 23)
-            || !strncmp(_text, "CURRENT SERVICE STATE: ", 23)
-            || !strncmp(_text, "SERVICE ALERT: ", 15))
+          || !strncmp(_text, "CURRENT SERVICE STATE: ", 23)
+          || !strncmp(_text, "SERVICE ALERT: ", 15))
     {
         if (_text[0] == 'S'){
             _logclass = LOGCLASS_ALERT;
@@ -209,24 +228,25 @@ bool LogEntry::handleStatusEntry()
         _comment      = next_token(&scan, ';') + 1;
         return true;
     }
+
+
     else if (!strncmp(_text, "TIMEPERIOD TRANSITION: ", 23))
     {
         _logclass = LOGCLASS_STATE;
         _type     = TIMEPERIOD_TRANSITION;
-        char *scan = _text;
-        _text = next_token(&scan, ':');
-        scan++;
-
-        _command_name  = next_token(&scan, ';');
-        _check_output  = next_token(&scan, ';');
-        _state_type    = next_token(&scan, ';');
         return true;
     }
 
     return false;
 }
 
-bool LogEntry::handleNotificationEntry()
+// Examples of host notifications. Beware CUSTOM and DOWNTIME notifications
+// have a different column order. This can be considered as a bug. But we
+// need to parse that anyway.
+// HOST NOTIFICATION: omdadmin;localhost;check-mk-notify;DOWNTIMESTOPPED (UP);mk
+// HOST NOTIFICATION: omdadmin;localhost;CUSTOM (UP);check-mk-notify;OK - 127.0.0.1: rta 0.055ms, lost 0%;omdadmin;TEST
+// HOST NOTIFICATION: omdadmin;localhost;DOWN;check-mk-notify;Manually set to Down by omdadmin
+inline bool LogEntry::handleNotificationEntry()
 {
     if (!strncmp(_text, "HOST NOTIFICATION: ", 19)
         || !strncmp(_text, "SERVICE NOTIFICATION: ", 22))
@@ -239,17 +259,31 @@ bool LogEntry::handleNotificationEntry()
 
         _contact_name  = next_token(&scan, ';');
         _host_name     = next_token(&scan, ';');
-        if (svc) {
+        if (svc)
             _svc_desc = next_token(&scan, ';');
-            _state_type = save_next_token(&scan, ';');
+
+        _state_type = save_next_token(&scan, ';');
+        _command_name  = next_token(&scan, ';');
+
+        if (svc)
             _state = serviceStateToInt(_state_type);
-        }
-        else {
-            _state_type = save_next_token(&scan, ';');
+        else
             _state = hostStateToInt(_state_type);
+
+        // If that state is not parsable then we assume that the order
+        // is swapped
+        if ((svc && _state == 4) ||
+            (!svc && _state == 3))
+        {
+            char *swap = _state_type;
+            _state_type = _command_name;
+            _command_name = swap;
+            if (svc)
+                _state = serviceStateToInt(_state_type);
+            else
+                _state = hostStateToInt(_state_type);
         }
 
-        _command_name  = next_token(&scan, ';');
         _check_output  = next_token(&scan, ';');
         return true;
     }
@@ -257,7 +291,7 @@ bool LogEntry::handleNotificationEntry()
     return false;
 }
 
-bool LogEntry::handlePassiveCheckEntry()
+inline bool LogEntry::handlePassiveCheckEntry()
 {
     if (!strncmp(_text, "PASSIVE SERVICE CHECK: ", 23)
         || !strncmp(_text, "PASSIVE HOST CHECK: ", 20))
@@ -279,7 +313,7 @@ bool LogEntry::handlePassiveCheckEntry()
     return false;
 }
 
-bool LogEntry::handleExternalCommandEntry()
+inline bool LogEntry::handleExternalCommandEntry()
 {
     if (!strncmp(_text, "EXTERNAL COMMAND:", 17))
     {
@@ -295,16 +329,29 @@ bool LogEntry::handleExternalCommandEntry()
     return false;
 }
 
-bool LogEntry::handleProgrammEntry()
+inline bool LogEntry::handleTextEntry()
+{
+    if (!strncmp(_text, "LOG VERSION: 2.0", 16))
+    {
+        _logclass = LOGCLASS_PROGRAM;
+        _type     = LOG_VERSION;
+        return true;
+    }
+    else if (!strncmp(_text, "logging initial states", 22)
+           || !strncmp(_text, "logging intitial states", 23))
+    {
+        _logclass = LOGCLASS_PROGRAM;
+        _type     = LOG_INITIAL_STATES;
+        return true;
+    }
+    return false;
+}
+
+inline bool LogEntry::handleProgrammEntry()
 {
     if (strstr(_text, "starting... (PID=")){
         _logclass = LOGCLASS_PROGRAM;
         _type     = NAGIOS_STARTING;
-        return true;
-    }
-    else if (strstr(_text, "LOG VERSION: 2.0")){
-        _logclass = LOGCLASS_PROGRAM;
-        _type     = LOG_VERSION;
         return true;
     }
     else if (strstr(_text, "restarting...") ||
@@ -315,17 +362,12 @@ bool LogEntry::handleProgrammEntry()
     {
         _logclass = LOGCLASS_PROGRAM;
         return true;
-    } 
-    else if (strstr(_text, "logging intitial states")){
-        _logclass = LOGCLASS_PROGRAM;
-        _type     = LOG_INITIAL_STATES;
-        return true;
     }
     return false;
 }
 
 
-int LogEntry::serviceStateToInt(char *s)
+inline int LogEntry::serviceStateToInt(char *s)
 {
     char *last = s + strlen(s) - 1;
     if (*last == ')')
@@ -343,10 +385,10 @@ int LogEntry::serviceStateToInt(char *s)
 }
 
 
-int LogEntry::hostStateToInt(char *s)
+inline int LogEntry::hostStateToInt(char *s)
 {
     char *last = s + strlen(s) - 1;
-    if (*last == ')')
+    if (*last == ')') // handle CUSTOM (UP) and DOWNTIMESTOPPED (DOWN)
         last--;
 
     // UP, DOWN, UNREACHABLE, RECOVERY
@@ -359,3 +401,25 @@ int LogEntry::hostStateToInt(char *s)
     }
 }
 
+
+unsigned LogEntry::updateReferences()
+{
+    unsigned updated = 0;
+    if (_host_name) {
+        _host = find_host(_host_name);
+        updated++;
+    }
+    if (_svc_desc) {
+        _service = find_service(_host_name, _svc_desc);
+        updated++;
+    }
+    if (_contact_name) {
+        _contact = find_contact(_contact_name);
+        updated++;
+    }
+    if (_command_name) {
+        _command = find_command(_command_name);
+        updated++;
+    }
+    return updated;
+}

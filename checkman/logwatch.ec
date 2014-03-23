@@ -1,6 +1,6 @@
 title: Forward Logwatch Messages to the Event Console
 agents: linux, windows, aix, solaris
-catalog: os/files 
+catalog: os/files
 license: GPL
 distribution: check_mk
 description:
@@ -22,3 +22,6 @@ parameters (dict): This check works with the following keys:
  be configured to use the spooling mechanism of the event console. To configure this, either
  configure {"socket:"} to detect the spooling directory of the local event console or
  {"socket:/path/to/spool/directory"} to configure the path explicit to the local spool directory.
+
+ {"monitor_logfilelist"}: Set this to {True} if you want to get warned if the list of logfiles
+ has changed since the last inventory if this check.

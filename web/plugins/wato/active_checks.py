@@ -29,15 +29,150 @@ register_rulegroup("activechecks",
     _("Configure active networking checks like HTTP and TCP"))
 group = "activechecks"
 
+# This elements are also used in check_parameters.py
+check_icmp_params = [
+   ( "rta",
+     Tuple(
+         title = _("Round trip average"),
+         elements = [
+             Float(title = _("Warning if above"), unit = "ms", default_value = 200.0),
+             Float(title = _("Critical if above"), unit = "ms", default_value = 500.0),
+         ])),
+   ( "loss",
+     Tuple(
+         title = _("Packet loss"),
+         help = _("When the percentual number of lost packets is equal or greater then "
+                  "the level, then the according state is triggered. The default for critical "
+                  "is 100%. That means that the check is only critical if <b>all</b> packets "
+                  "are lost."),
+         elements = [
+             Percentage(title = _("Warning if above"), default_value = 80.0),
+             Percentage(title = _("Critical if above"), default_value = 100.0),
+         ])),
+
+    ( "packets",
+      Integer(
+          title = _("Number of packets"),
+          help = _("Number ICMP echo request packets to send to the target host on each "
+                   "check execution. All packets are sent directly on check execution. Afterwards "
+                   "the check waits for the incoming packets."),
+          minvalue = 1,
+          maxvalue = 20,
+          default_value = 5,
+       )),
+
+     ( "timeout",
+       Integer(
+           title = _("Total timeout of check"),
+           help = _("After this time (in seconds) the check is aborted, regardless "
+                    "of how many packets have been received yet."),
+           minvalue = 1,
+       )),
+]
+
+
+register_rule(group,
+    "active_checks:icmp",
+    Dictionary(
+        title = _("Check hosts with PING (ICMP Echo Request)"),
+        help = _("This ruleset allows you to configure explicit PING monitoring of hosts. "
+                 "Usually a PING is being used as a host check, so this is not neccessary. "
+                 "There are some situations, however, where this can be useful. One of them "
+                 "is when using the Check_MK Micro Core with SMART Ping and you want to "
+                 "track performance data of the PING to some hosts, nevertheless."),
+        elements = [
+           ( "description",
+             TextUnicode(
+                 title = _("Service Description"),
+                 allow_empty = False,
+                 default_value = "PING",
+           ))
+        ] + check_icmp_params,
+    ),
+    match = "all",
+)
+
+register_rule(group,
+    "active_checks:ftp",
+    Transform(
+        Dictionary(
+            elements = [
+                ( "response_time",
+                  Tuple(
+                      title = _("Expected response time"),
+                      elements = [
+                          Float(
+                              title = _("Warning if above"),
+                              unit = "ms",
+                              default_value = 100.0),
+                          Float(
+                              title = _("Critical if above"),
+                              unit = "ms",
+                              default_value = 200.0),
+                      ])
+                 ),
+                 ( "timeout",
+                   Integer(
+                       title = _("Seconds before connection times out"),
+                       unit = _("sec"),
+                       default_value = 10,
+                   )
+                 ),
+                 ( "refuse_state",
+                   DropdownChoice(
+                       title = _("State for connection refusal"),
+                       choices = [ ('crit', _("CRITICAL")),
+                                   ('warn', _("WARNING")),
+                                   ('ok',   _("OK")),
+                                 ])
+                 ),
+
+                 ( "send_string",
+                   TextAscii(
+                       title = _("String to send"),
+                       size = 30)
+                 ),
+                 ( "expect",
+                   ListOfStrings(
+                       title = _("Strings to expect in response"),
+                       orientation = "horizontal",
+                       valuespec = TextAscii(size = 30),
+                   )
+                 ),
+
+                 ( "ssl",
+                   FixedValue(
+                       value = True,
+                       totext = _("use SSL"),
+                       title = _("Use SSL for the connection."))
+
+                 ),
+                 ( "cert_days",
+                   Integer(
+                       title = _("SSL certificate validation"),
+                       help = _("Minimum number of days a certificate has to be valid"),
+                       unit = _("days"),
+                       default_value = 30)
+                 ),
+            ]),
+            forth = lambda x: type(x) == tuple and x[1] or x,
+            title = _("Check FTP Service"),
+    ),
+    match = "all",
+)
+
+
 register_rule(group,
     "active_checks:dns",
     Tuple(
         title = _("Check DNS service"),
-        help = _("Check the resultion of a hostname into an IP address by a DNS server. "
+        help = _("Check the resolution of a hostname into an IP address by a DNS server. "
                  "This check uses <tt>check_dns</tt> from the standard Nagios plugins."),
         elements = [
-           TextAscii(title = _("Hostname"), allow_empty = False,
-                     help = _('The name or address you want to query')),
+           TextAscii(
+               title = _("Queried Hostname or IP address"),
+               allow_empty = False,
+               help = _('The name or IPv4 address you want to query')),
            Dictionary(
                title = _("Optional parameters"),
                elements = [
@@ -47,29 +182,34 @@ register_rule(group,
                          allow_empty = False,
                          help = _("Optional DNS server you want to use for the lookup"))),
                    ( "expected_address",
-                     TextAscii(
-                         title = _("Expected Address"),
-                         allow_empty = False,
-                         help = _("Optional IP-ADDRESS you expect the DNS server to return. HOST"
-                                  "must end with a dot (.) " )),
+                     Transform(
+                         ListOfStrings(
+                             title = _("Expected answer (IP address or hostname)"),
+                             help = _("List all allowed expected answers here. If query for an "
+                                      "IP address then the answer will be host names, that end "
+                                      "with a dot."),
+                         ),
+                         forth = lambda old: type(old) in (str, unicode) and [old] or old,
+                     ),
                    ),
                    ( "expected_authority",
-                     TextAscii(
-                         title = _("Expected Authority"),
-                         allow_empty = False,
-                         help = _("Optional expect the DNS server to be authoriative"
-                                  "for the lookup ")),
+                     FixedValue(
+                         value  = True,
+                         title  = _("Expect Authoritative DNS Server"),
+                         totext = _("Expect Authoritative"),
+                         help   = _("Optional expect the DNS server to be authoriative"
+                                    "for the lookup ")),
                    ),
                    ( "response_time",
                      Tuple(
                          title = _("Expected response time"),
                          elements = [
                              Float(
-                                 title = _("Warning at"),
+                                 title = _("Warning if above"),
                                  unit = "sec",
                                  default_value = 1),
                              Float(
-                                 title = _("Critical at"),
+                                 title = _("Critical if above"),
                                  unit = "sec",
                                  default_value = 2),
                          ])
@@ -84,19 +224,125 @@ register_rule(group,
                 ]),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
+
+register_rule(group,
+    "active_checks:sql",
+    Dictionary(
+        title = _("Check SQL Database"),
+        help = _("This check connects to the specified database, sends a custom SQL-statement "
+                 "or starts a procedure, and checks that the result has a defined format "
+                 "containing three columns, a number, a text, and performance data. Upper or "
+                 "lower levels may be defined here.  If they are not defined the number is taken "
+                 "as the state of the check.  If a procedure is used, input parameters of the "
+                 "procedures may by given as comma separated list. "
+                 "This check uses the active check <tt>check_sql</tt>."),
+        optional_keys = [ "levels", "levels_low", "perfdata", "port", "procedure" ],
+        elements = [
+            ( "description",
+              TextUnicode(title = _("Service Description"),
+                 help = _("The name of this active service to be displayed."),
+                 allow_empty = False,
+            )),
+            ( "dbms",
+               DropdownChoice(
+                   title = _("Type of Database"),
+                   choices = [
+                      ( "mysql",    _("MySQL") ),
+                      ( "postgres", _("PostgreSQL") ),
+                      ( "mssql", _("MSSQL") ),
+                      ( "oracle",   _("Oracle") ),
+                   ],
+                   default_value = "postgres",
+               ),
+            ),
+            ( "port",
+               Integer(title = _("Database Port"), allow_empty = True,
+                      help = _('The port the DBMS listens to'))
+            ),
+            ( "name",
+               TextAscii(title = _("Database Name"), allow_empty = False,
+                      help = _('The name of the database on the DBMS'))
+            ),
+            ( "user",
+               TextAscii(title = _("Database User"), allow_empty = False,
+                      help = _('The username used to connect to the database'))
+            ),
+            ( "password",
+               Password(title = _("Database Password"), allow_empty = False,
+                      help = _('The password used to connect to the database'))
+            ),
+            ( "sql",
+              TextAscii(title = _("SQL-statement or procedure name"), allow_empty = False,
+                      help = _('The SQL-statement or procedure name which is executed on the DBMS'))
+            ),
+            ( "procedure",
+            Dictionary(
+                optional_keys = [ "input" ],
+                title = _("Use procedure call instead of sql statement"),
+                help = _("If you activate this option, a name of a stored "
+                    "procedure is used instead of an SQL statement. "
+                    "The procedure should return one output variable, "
+                    "which is evaluated in the check. If input parameters "
+                    "are required, they may be specified below."),
+                elements = [
+                        ("useprocs",
+                        FixedValue(
+                            value = True,
+                            totext = _("procedure call is used"),
+                        )),
+                        ("input",
+                        TextAscii(
+                            title = _("Input Parameters"),
+                            allow_empty = True,
+                            help = _("Input parameters, if required by the database procedure. "
+                                     "If several parameters are required, use commas to separate them."),
+                        )),
+                    ]
+                ),
+            ),
+            ( "levels",
+            Tuple(
+                title = _("Upper levels for first output item"),
+                elements = [
+                    Float( title = _("Warning if above")),
+                    Float( title = _("Critical if above"))
+                ])
+            ),
+            ( "levels_low",
+            Tuple(
+                title = _("Lower levels for first output item"),
+                elements = [
+                    Float( title = _("Warning if below")),
+                    Float( title = _("Critical if below"))
+                ])
+            ),
+            ( "perfdata",
+              FixedValue(True, totext=_("Store output value into RRD database"), title = _("Performance Data"), ),
+            )
+        ]
+    ),
+    match = 'all'
+)
 
 register_rule(group,
     "active_checks:tcp",
     Tuple(
         title = _("Check connecting to a TCP port"),
-        help = _("This check test the connection to a TCP port. It uses "
+        help = _("This check tests the connection to a TCP port. It uses "
                  "<tt>check_tcp</tt> from the standard Nagios plugins."),
         elements = [
            Integer(title = _("TCP Port"), minvalue=1, maxvalue=65535),
            Dictionary(
                title = _("Optional parameters"),
                elements = [
+                   ( "svc_description",
+                     TextUnicode(
+                         title = _("Service description"),
+                         allow_empty = False,
+                         help = _("Here you can specify a service description. "
+                                  "If this parameter is not set, the service is named <tt>TCP Port {Portnumber}</tt>"))),
                    ( "hostname",
                      TextAscii(
                          title = _("DNS Hostname"),
@@ -109,11 +355,11 @@ register_rule(group,
                          title = _("Expected response time"),
                          elements = [
                              Float(
-                                 title = _("Warning at"),
+                                 title = _("Warning if above"),
                                  unit = "ms",
                                  default_value = 100.0),
                              Float(
-                                 title = _("Critical at"),
+                                 title = _("Critical if above"),
                                  unit = "ms",
                                  default_value = 200.0),
                          ])
@@ -219,7 +465,8 @@ register_rule(group,
                 ]),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 
 register_rule(group,
@@ -235,7 +482,8 @@ register_rule(group,
         elements = [
             TextUnicode(
                 title = _("Name"),
-                help = _("Will be used in the service description"),
+                help = _("Will be used in the service description. If the name starts with"
+                         "a caret (^) the service description will not be prefixed with HTTP." ),
                 allow_empty = False),
             Alternative(
                 title = _("Mode of the Check"),
@@ -298,11 +546,11 @@ register_rule(group,
                                  title = _("Expected response time"),
                                  elements = [
                                      Float(
-                                         title = _("Warning at"),
+                                         title = _("Warning if above"),
                                          unit = "ms",
                                          default_value = 100.0),
                                      Float(
-                                         title = _("Critical at"),
+                                         title = _("Critical if above"),
                                          unit = "ms",
                                          default_value = 200.0),
                                  ])
@@ -371,6 +619,11 @@ register_rule(group,
                                   ],
                                   default_value = 'follow'),
                             ),
+                            ( "expect_response_header",
+                              TextAscii(
+                                  title = _("String to expect in response headers"),
+                              )
+                            ),
                             ( "expect_response",
                               ListOfStrings(
                                   title = _("Strings to expect in server response"),
@@ -388,15 +641,20 @@ register_rule(group,
                               )
                             ),
                             ( "expect_regex",
-                              Tuple(
-                                  title = _("Regular expression to expect in content"),
-                                  orientation = "vertical",
-                                  show_titles = False,
-                                  elements = [
-                                      RegExp(label = _("Regular expression: ")),
-                                      Checkbox(label = _("Case insensitive")),
-                                      Checkbox(label = _("return CRITICAL if found, OK if not")),
-                                  ])
+                              Transform(
+                                Tuple(
+                                    orientation = "vertical",
+                                    show_titles = False,
+                                    elements = [
+                                        RegExp(label = _("Regular expression: ")),
+                                        Checkbox(label = _("Case insensitive")),
+                                        Checkbox(label = _("return CRITICAL if found, OK if not")),
+                                        Checkbox(label = _("Multiline string matching")),
+                                    ]
+                                ),
+                                forth = lambda x: len(x) == 3 and tuple(list(x) + [False]) or x,
+                                title = _("Regular expression to expect in content"),
+                              ),
                             ),
                             ( "post_data",
                               Tuple(
@@ -490,6 +748,13 @@ register_rule(group,
                                     default_value = 443,
                                 )
                             ),
+                            ( "sni",
+                              FixedValue(
+                                  value = True,
+                                  totext = _("enable SNI"),
+                                  title = _("Enable SSL/TLS hostname extension support (SNI)"),
+                              )
+                            ),
                         ],
                         required_keys = [ "cert_days" ],
                     ),
@@ -497,7 +762,8 @@ register_rule(group,
             ),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 register_rule(group,
     "active_checks:ldap",
@@ -581,11 +847,11 @@ register_rule(group,
                          title = _("Expected response time"),
                          elements = [
                              Float(
-                                 title = _("Warning at"),
+                                 title = _("Warning if above"),
                                  unit = "ms",
                                  default_value = 1000.0),
                              Float(
-                                 title = _("Critical at"),
+                                 title = _("Critical if above"),
                                  unit = "ms",
                                  default_value = 2000.0),
                          ])
@@ -700,7 +966,7 @@ register_rule(group,
                    ("starttls",
                       FixedValue(
                           True,
-                          totext = "STARTTLS enabled.",
+                          totext = _("STARTTLS enabled."),
                           title = _("Use STARTTLS for the connection.")
                       )
                    ),
@@ -725,11 +991,11 @@ register_rule(group,
                          title = _("Expected response time"),
                          elements = [
                              Integer(
-                                 title = _("Warning at"),
+                                 title = _("Warning if above"),
                                  unit = "sec"
                              ),
                              Integer(
-                                 title = _("Critical at"),
+                                 title = _("Critical if above"),
                                  unit = "sec"
                              ),
                          ])
@@ -742,7 +1008,8 @@ register_rule(group,
                       )
                     ),
                 ])
-        ]),
+        ]
+    ),
     match = 'all'
 )
 
@@ -786,8 +1053,8 @@ register_rule(group,
               Tuple(
                   title = _("Levels for used disk space"),
                   elements = [
-                      Percentage(title = _("Warning at"), default_value = 85, unit=_("% used space"), allow_int = True),
-                      Percentage(title = _("Critical at"), default_value = 95, unit=_("% used space"), allow_int = True),
+                      Percentage(title = _("Warning if above"), default_value = 85,  allow_int = True),
+                      Percentage(title = _("Critical if above"), default_value = 95, allow_int = True),
                   ]
             )),
             ( "auth",
@@ -807,8 +1074,27 @@ register_rule(group,
         ],
         required_keys = [ "share", "levels" ],
     ),
-    match = 'all')
+    match = 'all'
+)
 
+def PluginCommandLine(addhelp = ""):
+    return TextAscii(
+          title = _("Command line"),
+          help = _("Please enter the complete shell command including "
+                   "path name and arguments to execute. You can use Nagios "
+                   "macros here. The most important are:<ul>"
+                   "<li><tt>$HOSTADDRESS$</tt>: The IP address of the host</li>"
+                   "<li><tt>$HOSTNAME$</tt>: The name of the host</li>"
+                   "<li><tt>$USER1$</tt>: user macro 1 (usually path to shipped plugins)</li>"
+                   "<li><tt>$USER2$</tt>: user marco 2 (usually path to your own plugins)</li>"
+                   "</ul>"
+                   "If you are using OMD, then you can omit the path and just specify "
+                   "the command (e.g. <tt>check_foobar</tt>). This command will be "
+                   "searched first in the local plugins directory "
+                   "(<tt>~/local/lib/nagios/plugins</tt>) and then in the shipped plugins "
+                   "directory (<tt>~/lib/nagios/plugins</tt>) within your site directory."),
+          size = "max",
+       )
 
 register_rule(group,
     "custom_checks",
@@ -829,25 +1115,9 @@ register_rule(group,
                   default_value = _("Customcheck"))
             ),
             ( "command_line",
-              TextAscii(
-                  title = _("Command line"),
-                  help = _("Please enter the complete shell command including "
-                           "path name and arguments to execute. You can use Nagios "
-                           "macros here. The most important are:<ul>"
-                           "<li><tt>$HOSTADDRESS$</tt>: The IP address of the host</li>"
-                           "<li><tt>$HOSTNAME$</tt>: The name of the host</li>"
-                           "<li><tt>$USER1$</tt>: user macro 1 (usually path to shipped plugins)</li>"
-                           "<li><tt>$USER2$</tt>: user marco 2 (usually path to your own plugins)</li>"
-                           "</ul>"
-                           "If you are using OMD, then you can omit the path and just specify "
-                           "the command (e.g. <tt>check_foobar</tt>). This command will be "
-                           "searched first in the local plugins directory "
-                           "(<tt>~/local/lib/nagios/plugins</tt>) and then in the shipped plugins "
-                           "directory (<tt>~/lib/nagios/plugins</tt>) within your site directory.<br><br>"
-                           "<b>Passive checks</b>: Do no specify a command line if you want "
-                           "to define passive checks."),
-                  size = "max",
-               )
+              PluginCommandLine(addhelp = _("<br><br>"
+                   "<b>Passive checks</b>: Do no specify a command line if you want "
+                   "to define passive checks.")),
             ),
             ( "command_name",
               TextAscii(
@@ -869,9 +1139,13 @@ register_rule(group,
             ( "freshness",
               Dictionary(
                   title = _("Check freshness"),
-                  help = _("Freshness checking is only useful for passive checks. It makes sure that passive "
-                           "check results are submitted on a regular base. If not, the check is being set to "
-                           "warning, critical or unknown."),
+                  help = _("Freshness checking is only useful for passive checks when the staleness feature "
+                           "is not enough for you. It changes the state of a check to a configurable other state "
+                           "when the check results are not arriving in time. Staleness will still grey out the "
+                           "test after the corrsponding interval. If you dont want that, you might want to adjust "
+                           "the staleness interval as well. The staleness interval is calculated from the normal "
+                           "check interval multiplied by the staleness value in the <tt>Global Settings</tt>. "
+                           "The normal check interval can be configured in a separate rule for your check."),
                   optional_keys = False,
                   elements = [
                       ( "interval",
@@ -894,7 +1168,7 @@ register_rule(group,
                       )),
                       ( "output",
                         TextUnicode(
-                            title = _("Plugin output in case of absent abdates"),
+                            title = _("Plugin output in case of absent updates"),
                             size = 40,
                             allow_empty = False,
                             default_value = _("Check result did not arrive in time")
@@ -909,4 +1183,129 @@ register_rule(group,
     match = 'all'
 )
 
+register_rule(group,
+    "active_checks:form_submit",
+    Tuple(
+        title = _("Check HTML Form Submit"),
+        help = _("Check submission of HTML forms via HTTP/HTTPS using the plugin <tt>check_form_submit</tt> "
+                 "provided with Check_MK. This plugin provides more functionality as <tt>check_http</tt>, "
+                 "as it automatically follows HTTP redirect, accepts and uses cookies, parses forms "
+                 "from the requested pages, changes vars and submits them to check the response "
+                 "afterwards."),
+        elements = [
+            TextUnicode(
+                title = _("Name"),
+                help = _("The name will be used in the service description"),
+                allow_empty = False
+            ),
+            Dictionary(
+                title = _("Check the URL"),
+                elements = [
+                    ("hosts", ListOfStrings(
+                        title = _('Check specific host(s)'),
+                        help = _('By default, if you do not specify any host addresses here, '
+                                 'the host address of the host this service is assigned to will '
+                                 'be used. But by specifying one or several host addresses here, '
+                                 'it is possible to let the check monitor one or multiple hosts.')
+                    )),
+                    ("virthost", TextAscii(
+                        title = _("Virtual host"),
+                        help = _("Set this in order to specify the name of the "
+                         "virtual host for the query (using HTTP/1.1). When you "
+                         "leave this empty, then the IP address of the host "
+                         "will be used instead."),
+                        allow_empty = False,
+                    )),
+                    ("uri", TextAscii(
+                        title = _("URI to fetch (default is <tt>/</tt>)"),
+                        allow_empty = False,
+                        default_value = "/",
+                        regex = '^/.*',
+                    )),
+                    ("port", Integer(
+                        title = _("TCP Port"),
+                        minvalue = 1,
+                        maxvalue = 65535,
+                        default_value = 80,
+                    )),
+                    ("ssl", FixedValue(
+                        value = True,
+                        totext = _("use SSL/HTTPS"),
+                        title = _("Use SSL/HTTPS for the connection."))
+                    ),
+                    ("timeout", Integer(
+                        title = _("Seconds before connection times out"),
+                        unit = _("sec"),
+                        default_value = 10,
+                    )),
+                    ("expect_regex", RegExp(
+                        title = _("Regular expression to expect in content"),
+                    )),
+                    ("form_name", TextAscii(
+                        title = _("Name of the form to populate and submit"),
+                        help = _("If there is only one form element on the requested page, you "
+                                 "do not need to provide the name of that form here. But if you "
+                                 "have several forms on that page, you need to provide the name "
+                                 "of the form here, to make the check able to identify the correct "
+                                 "form element."),
+                        allow_empty = True,
+                    )),
+                    ("query", TextAscii(
+                        title = _("Send HTTP POST data"),
+                        help = _("Data to send via HTTP POST method. Please make sure, that the data "
+                                 "is URL-encoded (for example \"key1=val1&key2=val2\")."),
+                        size = 40,
+                    )),
+                    ("num_succeeded", Tuple(
+                        title = _("Multiple Hosts: Number of successful results"),
+                        elements = [
+                            Integer(title = _("Warning if equal or below")),
+                            Integer(title = _("Critical if equal or below")),
+                        ]
+                    )),
+                ]
+            ),
+        ]
+    ),
+    match = 'all'
+)
 
+register_rule(group,
+    "active_checks:notify_count",
+    Tuple(
+        title = _("Check Number of Notifications per Contact"),
+        help = _("Check the number of sent notifications per contact using the plugin <tt>check_notify_count</tt> "
+                 "provided with Check_MK. This plugin counts the total number of notifcations sent by the local "
+                 "monitoring core and creates graphs for each individual contact. You can configure thresholds "
+                 "on the number of notifications per contact in a defined time interval."
+                 "This plugin queries livestatus to extract the notification related log entries from the "
+                 "log file of your monitoring core."),
+        elements = [
+            TextUnicode(
+                title = _("Name"),
+                help = _("The name will be used in the service description"),
+                allow_empty = False
+            ),
+            Integer(
+                title = _("Interval to monitor"),
+                label = _("notifications within last"),
+                unit = _("minutes"),
+                minvalue = 1,
+                default_value = 60,
+            ),
+            Dictionary(
+                title = _("Optional parameters"),
+                elements = [
+                    ("num_per_contact", Tuple(
+                        title = _("Thresholds for Notifications per Contact"),
+                        elements = [
+                            Integer(title = _("Warning if above"), default_value = 20),
+                            Integer(title = _("Critical if above"), default_value = 50),
+                        ]
+                    )),
+                ]
+            ),
+        ]
+    ),
+    match = 'all'
+)

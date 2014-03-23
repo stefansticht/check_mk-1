@@ -69,7 +69,7 @@ sidebar_snapins["about"] = {
 visible_views = [ "allhosts", "searchsvc" ]
 
 def views_by_topic():
-    s = [ (view.get("topic", _("Other")), view["title"], name)
+    s = [ (view.get("topic") or _("Other"), view.get("title"), name)
           for name, view
           in html.available_views.items()
           if not view["hidden"] and not view.get("mobile")]
@@ -77,7 +77,7 @@ def views_by_topic():
     # Add all the dashboards to the views list
     s += [ (_('Dashboards'), d['title'] and d['title'] or d_name, d_name)
            for d_name, d
-           in dashboard.dashboards.items()
+           in dashboard.permitted_dashboards()
     ]
 
     s.sort()
@@ -111,9 +111,9 @@ def render_views():
                     html.begin_foldable_container("views", topic, False, topic, indent=True)
                     first = False
                 if topic == _('Dashboards'):
-                    bulletlink(title, 'dashboard.py?name=%s' % name)
+                    bulletlink(title, 'dashboard.py?name=%s' % name, onclick = "return wato_views_clicked(this)")
                 else:
-                    bulletlink(title, "view.py?view_name=%s" % name)
+                    bulletlink(title, "view.py?view_name=%s" % name, onclick = "return wato_views_clicked(this)")
         if not first: # at least one item rendered
             html.end_foldable_container()
 
@@ -580,7 +580,6 @@ def render_performance():
 
     data = html.live.query("GET status\nColumns: service_checks_rate host_checks_rate "
                            "external_commands_rate connections_rate forks_rate "
-                           "livechecks_rate livecheck_overflows_rate "
                            "log_messages_rate cached_log_messages\n")
     for what, col, format in \
         [("Service checks",        0, "%.2f/s"),
@@ -588,10 +587,8 @@ def render_performance():
         ("External commands",      2, "%.2f/s"),
         ("Livestatus-conn.",       3, "%.2f/s"),
         ("Process creations",      4, "%.2f/s"),
-        ("Livechecks",             5, "%.2f/s"),
-        ("Livecheck overflows",    6, "%.2f/s"),
-        ("New log messages",       7, "%.2f/s"),
-        ("Cached log messages",    8, "%d")]:
+        ("New log messages",       5, "%.2f/s"),
+        ("Cached log messages",    6, "%d")]:
         write_line(what + ":", format % sum([row[col] for row in data]))
 
     if len(config.allsites()) == 1:
@@ -743,11 +740,11 @@ speedometer_show_speed(0, 0, 0);
 
 
 sidebar_snapins["speedometer"] = {
-    "title" : _("Speed-O-Meter"),
-    "description" : _("A gadget that shows your current check rate in relation to "
+    "title" : _("Service Speed-O-Meter"),
+    "description" : _("A gadget that shows your current service check rate in relation to "
                       "the scheduled check rate. If the Speed-O-Meter shows a speed "
-                      "of 100 percent, then all checks are being executed in exactly "
-                      "the rate that is configured (via check_interval)"),
+                      "of 100 percent, all service checks are being executed in exactly "
+                      "the rate that is desired."),
     "render" : render_speedometer,
     "allowed" : [ "admin", ],
     "styles" : """
@@ -977,8 +974,8 @@ def render_bookmarks():
     n = 0
     for title, href in bookmarks:
         html.write("<div class=bookmark id=\"bookmark_%d\">" % n)
-        iconbutton(_("delete"), "del_bookmark.py?num=%d" % n, "side", "updateContents", 'snapin_bookmarks', css_class = 'bookmark')
-        iconbutton(_("edit"), "edit_bookmark.py?num=%d" % n, "main", css_class = 'bookmark')
+        iconbutton("delete", "del_bookmark.py?num=%d" % n, "side", "updateContents", 'snapin_bookmarks', css_class = 'bookmark')
+        iconbutton("edit", "edit_bookmark.py?num=%d" % n, "main", css_class = 'bookmark')
         html.write(link(title, href))
         html.write("</div>")
         n += 1
@@ -1063,3 +1060,140 @@ sidebar_snapins["custom_links"] = {
 }
 """
 }
+
+
+
+#Example Sidebar:
+#Heading1:
+#   * [[link1]]
+#   * [[link2]]
+#
+#----
+#
+#Heading2:
+#   * [[link3]]
+#   * [[link4]]
+
+def render_wiki():
+    import re
+    filename = defaults.omd_root + '/var/dokuwiki/data/pages/sidebar.txt'
+    html.javascript("""
+    function wiki_search()
+    {
+        var oInput = document.getElementById('wiki_search_field');
+        top.frames["main"].location.href =
+           "/%s/wiki/doku.php?do=search&id=" + escape(oInput.value);
+    }
+    """ % defaults.omd_site)
+
+    html.write('<form id="wiki_search" onSubmit="wiki_search()">')
+    html.write('<input id="wiki_search_field" type="text" name="wikisearch"></input>\n')
+    html.icon_button("#", _("Search"), "wikisearch", onclick="wiki_search();")
+    html.write('</form>')
+    html.write('<div id="wiki_side_clear"></div>')
+
+    start_ul = True
+    ul_started = False
+    try:
+        title = None
+        for line in file(filename).readlines():
+            line = line.strip()
+            if line == "":
+                if ul_started == True:
+                    html.end_foldable_container()
+                    start_ul = True
+                    ul_started = False
+            elif line.endswith(":"):
+                title = line[:-1]
+            elif line == "----":
+                pass
+                # html.write("<br>")
+
+            elif line.startswith("*"):
+                if start_ul == True:
+                    if title:
+                         html.begin_foldable_container("wikisnapin", title, True, title, indent=True)
+                    start_ul = False
+                    ul_started = True
+
+                erg = re.findall('\[\[(.*)\]\]', line)
+                if len(erg) == 0:
+                    continue
+                erg = erg[0].split('|')
+                if len(erg) > 1:
+                    link = erg[0]
+                    name = erg[1]
+                else:
+                    link = erg[0]
+                    name = erg[0]
+
+
+                if link.startswith("http://") or link.startswith("https://"):
+                    simplelink(name, link, "_blank")
+                else:
+                    erg = name.split(':')
+                    if len(erg) > 0:
+                        name = erg[-1]
+                    else:
+                        name = erg[0]
+                    bulletlink(name, "/%s/wiki/doku.php?id=%s" % (defaults.omd_site, link))
+
+            else:
+                html.write(line)
+
+        if ul_started == True:
+            html.write("</ul>")
+    except IOError:
+        html.write("You have to create a <a href='/%s/wiki/doku.php?id=%s'>sidebar</a> first" %
+           (defaults.omd_site, _("sidebar") ))
+
+if defaults.omd_root:
+    sidebar_snapins["wiki"] = {
+        "title" : _("Wiki"),
+        "description" : _("Shows the Wiki Navigation of the OMD Site"),
+        "render" : render_wiki,
+        "allowed" : [ "admin", "user", "guest" ],
+        "styles" : """
+        #snapin_container_wiki div.content {
+            font-weight: bold;
+            color: white;
+        }
+
+        #wiki_navigation {
+            text-align: left;
+        }
+
+        #wiki_search {
+            width: 232px;
+            padding: 0;
+        }
+
+        #wiki_side_clear {
+            clear: both;
+        }
+
+        #wiki_search img.iconbutton {
+            width: 33px;
+            height: 26px;
+            margin-top: -25px;
+            left: 196px;
+            float:right;
+            z-index:100;
+        }
+
+        #wiki_search input {
+            margin:  0;
+            padding: 0px 5px;
+            font-size: 8pt;
+            width: 194px;
+            height: 25px;
+            background-image: url("images/quicksearch_field_bg.png");
+            background-repeat: no-repeat;
+            -moz-border-radius: 0px;
+            border-style: none;
+            float: left;
+        }
+        """
+    }
+
+

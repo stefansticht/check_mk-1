@@ -25,7 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 import config, defaults, livestatus, time, os, re, pprint, time, copy
-import weblib, traceback, forms, valuespec
+import weblib, traceback, forms, valuespec, inventory
 from lib import *
 from pagefunctions import *
 
@@ -60,8 +60,9 @@ def load_plugins():
     global multisite_commands        ; multisite_commands         = []
     global ubiquitary_filters        ; ubiquitary_filters         = [] # Always show this filters
     global view_hooks                ; view_hooks                 = {}
+    global inventory_displayhints    ; inventory_displayhints     = {}
 
-    config.declare_permission_section("action", _("Commands on host and services"))
+    config.declare_permission_section("action", _("Commands on host and services"), do_sort = True)
 
     load_web_plugins("views", globals())
 
@@ -71,18 +72,19 @@ def load_plugins():
     loaded_with_language = current_language
 
     # Declare permissions for builtin views
-    config.declare_permission_section("view", _("Builtin views"))
+    config.declare_permission_section("view", _("Multisite Views"), do_sort = True)
     for name, view in multisite_builtin_views.items():
         config.declare_permission("view.%s" % name,
                 view["title"],
                 view["description"],
                 config.builtin_role_ids)
 
+    # Make sure that custom views also have permissions
+    config.declare_dynamic_permissions(declare_custom_view_permissions)
+
     # Add painter names to painter objects (e.g. for JSON web service)
     for n, p in multisite_painters.items():
         p["name"] = n
-
-
 
 
 ##################################################################################
@@ -141,10 +143,13 @@ def show_painter_options(painter_options):
     html.begin_form("painteroptions")
     forms.header(_("Display Options"))
     for on in painter_options:
-        opt = multisite_painter_options[on]
-        forms.section(opt["title"])
-        html.select(on, opt["values"], get_painter_option(on), "submit();" )
+        vs = multisite_painter_options[on]['valuespec']
+        forms.section(vs.title())
+        vs.render_input('po_' + on, get_painter_option(on))
     forms.end()
+
+    html.button("painter_options", _("Submit"), "submit")
+
     html.hidden_fields()
     html.end_form()
     html.write('</div>')
@@ -209,6 +214,10 @@ class Filter:
     def filter(self, tablename):
         return ""
 
+    # Wether this filter needs to load host inventory data
+    def need_inventory(self):
+        return False
+
     # post-Livestatus filtering (e.g. for BI aggregations)
     def filter_table(self, rows):
         return rows
@@ -229,6 +238,7 @@ class Filter:
 
 # Load all views - users or builtins
 def load_views():
+    declare_custom_view_permissions()
     html.multisite_views = {}
 
     # first load builtins. Set username to ''
@@ -261,11 +271,48 @@ def load_views():
                 for name, view in views.items():
                     view["owner"] = user
                     view["name"] = name
+
+                    if view['datasource'] not in multisite_datasources:
+                        continue
+
+                    # Maybe resolve inherited attributes
+                    builtin_view = html.multisite_views.get(('', name))
+                    if builtin_view:
+                        for attr in view_inherit_attrs:
+                            if attr not in view and attr in builtin_view:
+                                view[attr] = builtin_view[attr]
+
                     html.multisite_views[(user, name)] = view
+
+                    # Repair views with missing 'title' or 'description'
+                    for key in [ "title", "description" ]:
+                        if key not in view:
+                            view[key] = _("Missing %s") % key
+
         except SyntaxError, e:
             raise MKGeneralException(_("Cannot load views from %s/views.mk: %s") % (dirpath, e))
 
     html.available_views = available_views()
+
+# Load all users views just in order to declare permissions of custom views
+def declare_custom_view_permissions():
+    # Now scan users subdirs for files "views.mk"
+    subdirs = os.listdir(config.config_dir)
+    for user in subdirs:
+        try:
+            dirpath = config.config_dir + "/" + user
+            if os.path.isdir(dirpath):
+                path = dirpath + "/views.mk"
+                if not os.path.exists(path):
+                    continue
+                views = eval(file(path).read())
+                for name, view in views.items():
+                    if view["public"] and not config.permission_exists("view." + name):
+                        config.declare_permission("view." + name, view["title"], 
+                                    view["description"], ['admin','user','guest'])
+        except:
+            if config.debug:
+                raise
 
 # Get the list of views which are available to the user
 # (which could be retrieved with get_view)
@@ -282,12 +329,12 @@ def available_views():
     # 2. views of special users allowed to globally override builtin views
     for (u, n), view in html.multisite_views.items():
         if n not in views and view["public"] and config.user_may(u, "general.force_views"):
-                # Honor original permissions for the current user
-                permname = "view.%s" % n
-                if config.permission_exists(permname) \
-                    and not config.may(permname):
-                    continue
-                views[n] = view
+            # Honor original permissions for the current user
+            permname = "view.%s" % n
+            if config.permission_exists(permname) \
+                and not config.may(permname):
+                continue
+            views[n] = view
 
     # 3. Builtin views, if allowed.
     for (u, n), view in html.multisite_views.items():
@@ -306,14 +353,6 @@ def available_views():
                     and not config.may(permname):
                     continue
                 views[n] = view
-
-    # Maybe resolve inherited attributes
-    for name, view in views.items():
-        builtin_view = html.multisite_views.get(('', name))
-        if builtin_view:
-            for attr in view_inherit_attrs:
-                if attr not in view and attr in builtin_view:
-                    view[attr] = builtin_view[attr]
 
     return views
 
@@ -361,22 +400,36 @@ def page_edit_views(msg=None):
     delname  = html.var("_delete")
     if delname:
         deltitle = html.multisite_views[(config.user_id, delname)]['title']
-        if html.confirm(_("Please confirm the deletion of the view \"%s\".") % deltitle):
+        c = html.confirm(_("Please confirm the deletion of the view \"%s\".") % deltitle)
+        if c:
             del html.multisite_views[(config.user_id, delname)]
             save_views(config.user_id)
             html.reload_sidebar()
+        elif c == False:
+            return
 
-    html.begin_form("create_view", "edit_view.py")
+    if html.var('mode') == 'create':
+        datasource = html.var('datasource')
+        if not datasource:
+            html.show_error(_('Please select a datasource. The datasource specifies which kind of objects '
+                              'can be rendered within the view.'))
+        else:
+            html.immediate_browser_redirect(1, "edit_view.py?mode=create&datasource=%s" % datasource)
+            return
 
+    html.begin_form("create_view")
+    html.hidden_field('mode', 'create')
     html.button("create", _("Create New View"))
     html.write(_(" for datasource: "))
-    html.sorted_select("datasource", [ (k, v["title"]) for k, v in multisite_datasources.items() ])
+    html.sorted_select("datasource", [('', _('--- Select a Datasource ---'))]
+              + [ (k, v["title"]) for k, v in multisite_datasources.items() ])
+    html.end_form()
 
     html.write('<h3>' + _("Existing Views") + '</h3>')
     html.write('<table class=data>')
     html.write("<tr>")
     html.write("<th>%s</th>" % _("Actions"))
-    html.write("<th>%s</th>" % _("Link Name"))
+    html.write("<th>%s</th>" % _("View Name"))
     html.write("<th>%s</th>" % _("Title"))
     html.write("<th>%s</th>" % _("Datasource"))
     html.write("<th>%s</th>" % _("Owner"))
@@ -420,7 +473,7 @@ def page_edit_views(msg=None):
                                  % viewname, _("Delete this view!"), "delete")
             html.write('</td>')
 
-            # Link name
+            # View Name
             html.write('<td>%s</td>' % viewname)
 
             # Title
@@ -447,7 +500,6 @@ def page_edit_views(msg=None):
             html.write("</tr>\n")
 
     html.write("</table>\n")
-    html.end_form()
     html.footer()
 
 
@@ -487,6 +539,8 @@ def page_edit_view():
         if cloneuser:
             mode  = 'clone'
             view = copy.deepcopy(html.multisite_views.get((cloneuser, viewname), None))
+            if not view:
+                raise MKUserError('cloneuser', _('The view does not exist.'))
             # Make sure, name is unique
             if cloneuser == config.user_id: # Clone own view
                 newname = viewname + "_clone"
@@ -517,7 +571,7 @@ def page_edit_view():
             mode = 'create'
         datasourcename = html.var("datasource")
     else:
-        raise MKInternalError(_("No view name and not datasource defined."))
+        raise MKInternalError(_("No view name and no datasource defined."))
 
     if mode == 'clone':
         title = _('Clone View')
@@ -527,15 +581,19 @@ def page_edit_view():
         title = _('Edit View')
 
     vs = {
-        'title'       : TextUnicode(size = 50, allow_empty = False),
-        'linktitle'   : TextUnicode(size = 26),
-        'topic'       : TextUnicode(size = 50),
-        'description' : TextAreaUnicode(rows = 4, cols = 50),
+        #               edit      attribute
+        #               optional  valuespec
+        'title'       : (True,    TextUnicode(size = 50, allow_empty = False)),
+        'linktitle'   : (True,    TextUnicode(size = 26)),
+        'topic'       : (True,    TextUnicode(size = 50)),
+        'description' : (True,    TextAreaUnicode(rows = 4, cols = 50)),
+        'icon'        : (False,   IconSelector()),
     }
 
     if mode != 'create':
-        for key, valuespec in vs.items():
-            vs[key] = OptionalEdit(valuespec)
+        for key, (edit_opt, valuespec) in vs.items():
+            if edit_opt:
+                vs[key] = (edit_opt, OptionalEdit(valuespec))
 
     # handle case of save or try or press on search button
     if html.var("save") or html.var("try") or html.var("search"):
@@ -579,39 +637,42 @@ def page_edit_view():
 
     forms.header(_("Basic Settings"))
 
-    forms.section(_("Title"))
-    vs['title'].render_input('view_title', view.get('title'))
-
-    forms.section(_("Link Name"))
-    html.text_input("view_name", size=12)
-    html.help(_("The link name will be used in URLs that point to a view, e.g. "
+    forms.section(_("View Name"))
+    html.text_input("view_name", size=24)
+    html.help(_("The view name will be used in URLs that point to a view, e.g. "
                 "<tt>view.py?view_name=<b>myview</b></tt>. It will also be used "
                 "internally for identifying a view. You can create several views "
-                "with the same title but only one per link name. If you create a "
-                "view that has the same link name as a builtin view, then your "
+                "with the same title but only one per view name. If you create a "
+                "view that has the same view name as a builtin view, then your "
                 "view will override that (shadowing it)."))
 
     forms.section(_("Datasource"), simple=True)
     datasource_title = multisite_datasources[datasourcename]["title"]
-    html.write("%s: <b>%s</b><br>\n" % (_('Datasource'), datasource_title))
+    html.write("%s: <b>%s</b><br />\n" % (_('Datasource'), datasource_title))
     html.hidden_field("datasource", datasourcename)
     html.help(_("The datasource of a view cannot be changed."))
 
+    forms.space()
+
+    forms.section(_("Title"))
+    vs['title'][1].render_input('view_title', view.get('title'))
+
     forms.section(_("Topic"))
-    vs['topic'].render_input('view_topic', view.get('topic'))
+    vs['topic'][1].render_input('view_topic', view.get('topic'))
     html.help(_("The view will be sorted under this topic in the Views snapin. "))
 
-    forms.section(_("Button"))
-    html.write(_('Text') + ': ')
-    vs['linktitle'].render_input('view_linktitle', view.get('linktitle'))
+    forms.section(_("Description"))
+    vs['description'][1].render_input('view_description', view.get('description'))
+
+    forms.section(_("Button Text"))
+    vs['linktitle'][1].render_input('view_linktitle', view.get('linktitle'))
     html.help(_("If you define a text here, then it will be used in "
                 "buttons to the view instead of of view title."))
-    html.write('<p>' + _('Icon') + ': ')
-    html.text_input("view_icon", size=14)
-    html.write('</p>')
 
-    forms.section(_("Description"))
-    vs['description'].render_input('view_description', view.get('description'))
+    forms.section(_("Button Icon"))
+    vs['icon'][1].render_input('view_icon', view.get('icon'))
+
+    forms.space()
 
     forms.section(_("Visibility"))
     if config.may("general.publish_views"):
@@ -621,14 +682,17 @@ def page_edit_view():
     html.write("<br />\n")
     html.checkbox("mobile", label=_('show this view in the Mobile GUI'))
     html.write("<br />\n")
-    html.checkbox("mustsearch", label=_('show data only on search') + "<br>")
+    html.checkbox("mustsearch", label=_('show data only on search'))
+    html.write("<br />\n")
     html.checkbox("hidebutton", label=_('do not show a context button to this view'))
+    html.write("<br />\n")
+    html.checkbox("force_checkboxes", label = _('always show the checkboxes'))
 
     forms.section(_("Automatic page reload"))
     html.write(_("Reload page every "))
     html.number_input("browser_reload", 0)
     html.write(_(" seconds"))
-    html.help(_("Leave this empty or at 0 for now automatic reload."))
+    html.help(_("Leave this empty or at 0 for no automatic reload."))
 
     forms.section(_("Audible alarm sounds"), simple=True)
     html.checkbox("play_sounds", False, label=_("Play alarm sounds"))
@@ -707,7 +771,7 @@ def page_edit_view():
         allowed = allowed_for_datasource(data, datasourcename)
         forms.header(title, isopen=False)
         # make sure, at least 3 selection boxes are free for new columns
-        while html.has_var("%s%d" % (var_prefix, maxnum - 2)):
+        while html.var("%s%d" % (var_prefix, maxnum - 2)):
             maxnum += 1
         for n in range(1, maxnum + 1):
             forms.section(_("%d. Column") % n)
@@ -864,6 +928,7 @@ def load_view_into_html_vars(view):
     html.set_var("hidden",           view["hidden"] and "on" or "")
     html.set_var("mobile",           view.get("mobile") and "on" or "")
     html.set_var("mustsearch",       view["mustsearch"] and "on" or "")
+    html.set_var("force_checkboxes", view.get("force_checkboxes", False) and "on" or "")
     html.set_var("hidebutton",       view.get("hidebutton",  False) and "on" or "")
     html.set_var("user_sortable",    view.get("user_sortable", True) and "on" or "")
 
@@ -953,10 +1018,11 @@ def create_view(vs):
                 base_view = html.multisite_views.get(('', oldname)) # load builtin view
     elif mode == 'edit' and ('', oldname) in html.multisite_views:
         base_view = html.multisite_views.get(('', oldname)) # load builtin view
-        override = True
+        if oldname == name:
+            override = True
 
     view = {}
-    for key, valuespec in vs.items():
+    for key, (opt_edit, valuespec) in vs.items():
         val = valuespec.from_html_vars('view_' + key)
         valuespec.validate_value(val, 'view_' + key)
         if not override or val != base_view.get(key):
@@ -967,10 +1033,6 @@ def create_view(vs):
             view['linktitle'] = view['title']
         if not view['topic']:
             view['topic'] = _("Other")
-
-    icon = html.var("view_icon")
-    if not icon:
-        icon = None
 
     datasourcename = html.var("datasource")
     datasource = multisite_datasources[datasourcename]
@@ -994,6 +1056,7 @@ def create_view(vs):
     hidden           = html.var("hidden", "") != ""
     mobile           = html.var("mobile", "") != ""
     mustsearch       = html.var("mustsearch", "") != ""
+    force_checkboxes = html.var("force_checkboxes", "") != ""
     hidebutton       = html.var("hidebutton", "") != ""
     column_headers   = html.var("column_headers")
     user_sortable    = html.var("user_sortable")
@@ -1071,12 +1134,12 @@ def create_view(vs):
     view.update({
         "name"            : name,
         "owner"           : config.user_id,
-        "icon"            : icon,
         "datasource"      : datasourcename,
         "public"          : public,
         "hidden"          : hidden,
         "mobile"          : mobile,
         "mustsearch"      : mustsearch,
+        "force_checkboxes" : force_checkboxes,
         "hidebutton"      : hidebutton,
         "layout"          : layoutname,
         "num_columns"     : num_columns,
@@ -1113,7 +1176,7 @@ def page_view():
         raise MKGeneralException(_("Missing the variable view_name in the URL."))
     view = html.available_views.get(view_name)
     if not view:
-        raise MKGeneralException(("No view defined with the name '%s'.") % view_name)
+        raise MKGeneralException(("No view defined with the name '%s'.") % html.attrencode(view_name))
 
     show_view(view, True, True, True)
 
@@ -1238,7 +1301,8 @@ def show_view(view, show_heading = False, show_buttons = True,
     num_columns     = vo.get("num_columns",     view.get("num_columns",    1))
     browser_reload  = vo.get("refresh",         view.get("browser_reload", None))
 
-    show_checkboxes = html.var('show_checkboxes', '0') == '1'
+    force_checkboxes = view.get("force_checkboxes", False)
+    show_checkboxes = force_checkboxes or html.var('show_checkboxes', '0') == '1'
 
     # Get the datasource (i.e. the logical table)
     datasource = multisite_datasources[view["datasource"]]
@@ -1264,6 +1328,10 @@ def show_view(view, show_heading = False, show_buttons = True,
         if only_count or (html.var("filled_in") != "filter" and not html.has_var(varname)):
             html.set_var(varname, value)
 
+    # Af any painter, sorter or filter needs the information about the host's
+    # inventory, then we load it and attach it as column "host_inventory"
+    need_inventory_data = False
+
     # Prepare Filter headers for Livestatus
     filterheaders = ""
     only_sites = None
@@ -1274,6 +1342,8 @@ def show_view(view, show_heading = False, show_buttons = True,
             only_sites = header.strip().split(" ")[1:]
         else:
             filterheaders += header
+        if filt.need_inventory():
+            need_inventory_data = True
 
     # Prepare limit:
     # We had a problem with stats queries on the logtable where
@@ -1322,6 +1392,8 @@ def show_view(view, show_heading = False, show_buttons = True,
             columns += s[0]["columns"]
         else:
             join_columns += s[0]["columns"]
+        if s[0].get("load_inv"):
+            need_inventory_data = True
 
     # Add key columns, needed for executing commands
     columns += datasource["keys"]
@@ -1341,6 +1413,9 @@ def show_view(view, show_heading = False, show_buttons = True,
     for entry in all_painters:
         p = entry[0]
         painter_options += p.get("options", [])
+        if p.get("load_inv"):
+            need_inventory_data = True
+
     painter_options = list(set(painter_options))
     painter_options.sort()
 
@@ -1360,6 +1435,11 @@ def show_view(view, show_heading = False, show_buttons = True,
         # Now add join information, if there are join columns
         if len(join_painters) > 0:
             do_table_join(datasource, rows, filterheaders, join_painters, join_columns, only_sites)
+
+        # Add inventory data if one of the painters needs it
+        if need_inventory_data:
+            for row in rows:
+                row["host_inventory"] = inventory.host(row["host_name"])
 
         sort_data(rows, sorters)
     else:
@@ -1407,6 +1487,8 @@ def render_view(view, rows, datasource, group_painters, painters,
                 show_checkboxes, layout, num_columns, show_filters, show_footer, hide_filters,
                 browser_reload):
 
+    if html.transaction_valid() and html.do_actions():
+        html.set_browser_reload(0)
 
     # Show heading (change between "preview" mode and full page mode)
     if show_heading:
@@ -1437,7 +1519,7 @@ def render_view(view, rows, datasource, group_painters, painters,
                        # Take into account: permissions, display_options
                        row_count > 0 and command_form,
                        # Take into account: layout capabilities
-                       can_display_checkboxes, show_checkboxes,
+                       can_display_checkboxes and not view.get("force_checkboxes"), show_checkboxes,
                        # Show link to availability. This exists only for plain hosts
                        # and services table. The grouping tables have columns that statehist
                        # is missing. That way some of the filters might fail.
@@ -1506,8 +1588,8 @@ def render_view(view, rows, datasource, group_painters, painters,
             if show_buttons:
                 update_context_links(
                     # don't take display_options into account here ('c' is set during reload)
-                    row_count > 0 and should_show_command_form('C', datasource) \
-                    and not html.do_actions(),
+                    row_count > 0 and should_show_command_form('C', datasource),
+                    # and not html.do_actions(),
                     can_display_checkboxes
                 )
 
@@ -1538,6 +1620,13 @@ def render_view(view, rows, datasource, group_painters, painters,
         if bi.reused_compilation():
             html.add_status_icon("aggrcomp", _("Reused cached compiled BI aggregations (PID %d)") % pid)
 
+        if config.may('wato.users'):
+            try:
+                msg = file(defaults.var_dir + '/web/ldap_sync_fail.mk').read()
+                html.add_status_icon("ldap", _('Last LDAP sync failed! %s') % html.attrencode(msg))
+            except IOError:
+                pass
+
         html.bottom_focuscode()
         if 'Z' in display_options:
             html.bottom_footer()
@@ -1554,26 +1643,31 @@ def view_options(viewname):
 
     if config.may("general.painter_options"):
         for on, opt in multisite_painter_options.items():
-            if html.has_var(on):
+            vs = opt['valuespec']
+            value = vs.from_html_vars('po_' + on)
+            if value is None:
+                value = vs.default_value()
+
+            old_value = v.get(on)
+
+            v[on] = value
+            opt['value'] = value
+
+            if v[on] != old_value:
                 must_save = True
-                # Make sure only allowed values are returned
-                value = html.var(on)
-                for val, title in opt["values"]:
-                    if value == val:
-                        v[on] = value
-            elif on not in v:
-                v[on] = opt["default"]
-            opt["value"] = v[on]
 
     else:
         for on, opt in multisite_painter_options.items():
             if on in v:
                 del v[on]
-            opt["value"] = None
+                must_save = True
+            if 'value' in opt:
+                del opt['value']
 
     if must_save:
         vo[viewname] = v
         config.save_user_file("viewoptions", vo)
+
     return v
 
 
@@ -1757,9 +1851,10 @@ def show_context_links(thisview, active_filters, show_filters, display_options,
         togglebutton_off("commands", "commands", hidden = enable_commands)
 
         selection_enabled = enable_commands and enable_checkboxes
-        toggler("checkbox", "checkbox", _("Enable/Disable checkboxes for selecting rows for commands"),
-                "location.href='%s';" % html.makeuri([('show_checkboxes', show_checkboxes and '0' or '1')]),
-                show_checkboxes, hidden = not selection_enabled)
+        if not thisview.get("force_checkboxes"):
+            toggler("checkbox", "checkbox", _("Enable/Disable checkboxes for selecting rows for commands"),
+                    "location.href='%s';" % html.makeuri([('show_checkboxes', show_checkboxes and '0' or '1')]),
+                    show_checkboxes, hidden = True) # not selection_enabled)
         togglebutton_off("checkbox", "checkbox", hidden = selection_enabled)
         html.javascript('g_selection_enabled = %s;' % (selection_enabled and 'true' or 'false'))
 
@@ -1807,8 +1902,8 @@ def show_context_links(thisview, active_filters, show_filters, display_options,
                   (thisview["owner"], thisview["name"], backurl)
         html.context_button(_("Edit View"), url, "edit", id="edit", bestof=config.context_buttons_to_show)
 
-        if show_availability:
-            html.context_button(_("Availability"), html.makeuri([("mode", "availability")]), "availability")
+    if 'E' in display_options and show_availability:
+        html.context_button(_("Availability"), html.makeuri([("mode", "availability")]), "availability")
 
     if 'B' in display_options:
         execute_hooks('buttons-end')
@@ -1929,7 +2024,7 @@ def do_query_data(query, columns, add_columns, merge_column,
         html.live.set_limit(limit + 1) # + 1: We need to know, if limit is exceeded
     if config.debug_livestatus_queries \
             and html.output_format == "html" and 'W' in html.display_options:
-        html.write('<div class="livestatus message" onmouseover="this.style.display=\'none\';">'
+        html.write('<div class="livestatus message">'
                    '<tt>%s</tt></div>\n' % (query.replace('\n', '<br>\n')))
 
     if only_sites:
@@ -2152,6 +2247,10 @@ def show_command_form(is_open, datasource):
     by_group = {}
     for command in multisite_commands:
         if what in command["tables"] and config.may(command["permission"]):
+            # Some special commands can be shown on special views using this option.
+            # It is currently only used in custom views, not shipped with check_mk.
+            if command.get('only_view') and html.var('view_name') != command['only_view']:
+                continue
             group = command.get("group", _("Various Commands"))
             by_group.setdefault(group, []).append(command)
 
@@ -2192,6 +2291,7 @@ def core_command(what, row):
             cmdtag = "HOST"
 
     commands = None
+    title = None
     # Call all command actions. The first one that detects
     # itself to be executed (by examining the HTML variables)
     # will return a command to execute and a title for the
@@ -2338,6 +2438,12 @@ def execute_hooks(hook):
             else:
                 pass
 
+def paint_painter(painter, row):
+    if "args" in painter:
+        return painter["paint"](row, *painter["args"])
+    else:
+        return painter["paint"](row)
+
 def prepare_paint(p, row):
     painter = p[0]
     linkview = p[1]
@@ -2348,10 +2454,7 @@ def prepare_paint(p, row):
         if not row:
             return "", ""  # no join information available for that column
 
-    if "args" in painter:
-        tdclass, content = painter["paint"](row, *painter["args"])
-    else:
-        tdclass, content = painter["paint"](row)
+    tdclass, content = paint_painter(painter, row)
 
     content = html.utf8_to_entities(content)
 
@@ -2362,7 +2465,7 @@ def prepare_paint(p, row):
     # Tooltip
     if content != '' and tooltip:
         cla, txt = multisite_painters[tooltip]["paint"](row)
-        tooltiptext = html.strip_tags(txt)
+        tooltiptext = html.utf8_to_entities(html.strip_tags(txt))
         content = '<span title="%s">%s</span>' % (tooltiptext, content)
     return tdclass, content
 
@@ -2402,11 +2505,19 @@ def row_id(view, row):
 
 def paint(p, row, tdattrs=""):
     tdclass, content = prepare_paint(p, row)
+
     if tdclass:
         html.write("<td %s class=\"%s\">%s</td>\n" % (tdattrs, tdclass, content))
     else:
         html.write("<td %s>%s</td>" % (tdattrs, content))
     return content != ""
+
+def paint_stalified(row, text):
+    if is_stale(row):
+        return "stale", text
+    else:
+        return "", text
+
 
 def substract_sorters(base, remove):
     for s in remove:
@@ -2562,10 +2673,10 @@ def register_events(row):
     if config.sounds != []:
         host_state = row.get("host_hard_state", row.get("host_state"))
         if host_state != None:
-            html.register_event({0:"up", 1:"down", 2:"unreachable"}[host_state])
+            html.register_event({0:"up", 1:"down", 2:"unreachable"}[saveint(host_state)])
         svc_state = row.get("service_last_hard_state", row.get("service_state"))
         if svc_state != None:
-            html.register_event({0:"up", 1:"warning", 2:"critical", 3:"unknown"}[svc_state])
+            html.register_event({0:"up", 1:"warning", 2:"critical", 3:"unknown"}[saveint(svc_state)])
 
 # The Group-value of a row is used for deciding wether
 # two rows are in the same group or not
@@ -2574,7 +2685,10 @@ def group_value(row, group_painters):
     for p in group_painters:
         groupvalfunc = p[0].get("groupby")
         if groupvalfunc:
-            group.append(groupvalfunc(row))
+            if "args" in p[0]:
+                group.append(groupvalfunc(row, *p[0]["args"]))
+            else:
+                group.append(groupvalfunc(row))
         else:
             for c in p[0]["columns"]:
                 group.append(row[c])
@@ -2583,18 +2697,28 @@ def group_value(row, group_painters):
 def get_painter_option(name):
     opt = multisite_painter_options[name]
     if not config.may("general.painter_options"):
-        return opt["default"]
-    return opt.get("value", opt["default"])
+        return opt['valuespec'].default_value()
+    return opt.get("value", opt['valuespec'].default_value())
 
 def get_host_tags(row):
+    if "host_custom_variables" in row:
+        return row["host_custom_variables"].get("TAGS", "")
+
     for name, val in zip(row["host_custom_variable_names"],
                          row["host_custom_variable_values"]):
         if name == "TAGS":
             return  val
     return ""
 
+def get_custom_var(row, key):
+    for name, val in zip(row["custom_variable_names"],
+                         row["custom_variable_values"]):
+        if name == key:
+            return  val
+    return ""
+
 def is_stale(row):
-    return row.get('service_staleness', row.get('host_staleness', 0)) >= 1.5
+    return row.get('service_staleness', row.get('host_staleness', 0)) >= config.staleness_threshold
 
 def cmp_insensitive_string(v1, v2):
     c = cmp(v1.lower(), v2.lower())
@@ -2613,7 +2737,7 @@ def cmp_ip_address(column, r1, r2):
         except:
             return ip
     v1, v2 = split_ip(r1.get(column, '')), split_ip(r2.get(column, ''))
-    return cmp(v1, v2) 
+    return cmp(v1, v2)
 
 
 def cmp_simple_string(column, r1, r2):
@@ -2628,6 +2752,9 @@ def cmp_string_list(column, r1, r2):
 def cmp_simple_number(column, r1, r2):
     return cmp(r1.get(column), r2.get(column))
 
+def cmp_custom_variable(r1, r2, key, cmp_func):
+    return cmp(get_custom_var(r1, key), get_custom_var(r2, key))
+
 def declare_simple_sorter(name, title, column, func):
     multisite_sorters[name] = {
         "title"   : title,
@@ -2639,8 +2766,26 @@ def declare_1to1_sorter(painter_name, func, col_num = 0, reverse = False):
     multisite_sorters[painter_name] = {
         "title"   : multisite_painters[painter_name]['title'],
         "columns" : multisite_painters[painter_name]['columns'],
-        "cmp"     : lambda r1, r2: func(multisite_painters[painter_name]['columns'][col_num],
-                                        reverse and r1 or r2,
-                                        reverse and r2 or r1)
     }
+    if not reverse:
+        multisite_sorters[painter_name]["cmp"] = \
+            lambda r1, r2: func(multisite_painters[painter_name]['columns'][col_num], r1, r2)
+    else:
+        multisite_sorters[painter_name]["cmp"] = \
+            lambda r1, r2: func(multisite_painters[painter_name]['columns'][col_num], r2, r1)
     return painter_name
+
+
+
+# Ajax call for fetching parts of the tree
+def ajax_inv_render_tree():
+    hostname = html.var("host")
+    invpath = html.var("path")
+    tree = inventory.host(hostname)
+    node = inventory.get(tree, invpath)
+    if not node:
+        html.show_error(_("Invalid path %s in inventory tree") % invpath)
+    else:
+        render_inv_subtree_container(hostname, invpath, node)
+
+

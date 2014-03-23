@@ -22,37 +22,67 @@
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#ifndef store_h
-#define store_h
+#ifndef Store_h
+#define Store_h
 
 #include "config.h"
 
-#ifdef __cplusplus
-extern "C"
+#include "TableServices.h"
+#include "TableHosts.h"
+#include "TableHostgroups.h"
+#include "TableServicegroups.h"
+#include "TableContacts.h"
+#include "TableCommands.h"
+#include "TableTimeperiods.h"
+#include "TableContactgroups.h"
+#include "TableDownComm.h"
+#include "TableStatus.h"
+#include "TableLog.h"
+#include "TableStateHistory.h"
+#include "TableColumns.h"
+#include "OutputBuffer.h"
+#include "InputBuffer.h"
+#include "LogCache.h"
+
+class Store
 {
-#endif
+    LogCache           _log_cache;
+    TableContacts      _table_contacts;
+    TableCommands      _table_commands;
+    TableHostgroups    _table_hostgroups;
+    TableHosts         _table_hosts;
+    TableHosts         _table_hostsbygroup;
+    TableServicegroups _table_servicegroups;
+    TableServices      _table_services;
+    TableServices      _table_servicesbygroup;
+    TableServices      _table_servicesbyhostgroup;
+    TableTimeperiods   _table_timeperiods;
+    TableContactgroups _table_contactgroups;
+    TableDownComm      _table_downtimes;
+    TableDownComm      _table_comments;
+    TableStatus        _table_status;
+    TableLog           _table_log;
+    TableStateHistory  _table_statehistory;
+    TableColumns       _table_columns;
 
-    void store_init();
-    void store_deinit();
-    void store_register_comment(nebstruct_comment_data *);
-    void store_register_downtime(nebstruct_downtime_data *);
-    int  store_answer_request(void *input_buffer, void *output_buffer);
-    void *create_outputbuffer();
-    void flush_output_buffer(void *ob, int fd, int *termination_flag);
-    void delete_outputbuffer(void *);
-    void *create_inputbuffer(int *termination_flag);
-    void set_inputbuffer_fd(void *, int fd);
-    void delete_inputbuffer(void *);
-    void queue_add_connection(int cc);
-    int  queue_pop_connection();
-    void queue_wakeup_all();
-    void update_timeperiods_cache(time_t);
-    void log_timeperiods_cache();
+    typedef map<string, Table *> _tables_t;
+    _tables_t _tables;
+
+public:
+    Store();
+    LogCache* logCache() { return &_log_cache; };
+    void registerHostgroup(hostgroup *);
+    void registerComment(nebstruct_comment_data *);
+    void registerDowntime(nebstruct_downtime_data *);
+    bool answerRequest(InputBuffer *, OutputBuffer *);
+
+private:
+    Table *findTable(string name);
+    void answerGetRequest(InputBuffer *, OutputBuffer *, const char *);
+    void answerCommandRequest(const char *);
+};
 
 
-#ifdef __cplusplus
-}
-#endif
+#endif // Store_h
 
-#endif /* store_h */
 

@@ -88,6 +88,10 @@ input, select, textarea {
     margin-top: 0px;
 }
 
+input[type=file] {
+    color: black;
+}
+
 form {
     margin: 0px;
 }
@@ -158,7 +162,7 @@ label.image_button {
     top: 0px;
     background: transparent url('images/image_button_l.png') no-repeat;
     background-position: 0px -35px;
-    padding: 0 0 0 8px;
+    padding: 0 0 0 7.5px;
     height: 22px;
     margin-right: 5px;
     vertical-align: middle;
@@ -211,6 +215,12 @@ img.icon {
    height: 20px;
 }
 
+img.icon.inline {
+   vertical-align: middle;
+   width: 16px;
+   height: 16px;
+}
+
 h1 {
     color: #fff;
     font-size: 17pt;
@@ -244,6 +254,15 @@ img.treeangle {
     height: 12px;
     margin-right: 3px;
     margin-top: 0px;
+}
+img.treeangle.nform {
+    margin-left: -5px;
+}
+img.treeangle.title {
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-right: 5px;
 }
 b.treeangle.title {
    font-weight: bold;
@@ -394,7 +413,9 @@ td.dictleft div.dictelement.indent {
 table.vs_dict_text {
     padding: 0px;
     margin: 0px;
+    border-collapse: collapse;
 }
+table.vs_dict_text td,
 table.data tr td table.vs_dict_text > tbody > tr > td {
     padding: 0px;
     margin: 0px;
@@ -468,7 +489,7 @@ table.valuespec_listof option[selected] {
     font-weight: bold;
 }
 
-div.listofstring.horizontal {
+div.listofstrings.horizontal {
     clear: left;
 }
 
@@ -481,7 +502,7 @@ div.listofstrings.horizontal > div {
     margin-right: 2px;
 }
 div.listofstrings.horizontal > div:last-child {
-    /* float: none; */
+    float: none;
 }
 
 table.listchoice {
@@ -499,4 +520,34 @@ table.listchoice td input[type=checkbox] {
     margin: 0px;
     display: inline-block;
     height: 12px;
+}
+
+div.popup_container {
+    position: relative;
+}
+
+div.popup {
+    padding:10px;
+    background-color: #45829D;
+
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 200;
+
+    width: -moz-max-content;
+    width: intrinsic;
+
+    -webkit-border-radius: 5px;
+    border-radius: 5px;
+    border-radius: 5px;
+    border: 1px solid #fff;
+
+    color: #fff;
+}
+
+div.popup span {
+    display: block;
+    margin-bottom: 5px;
+    color: white;
 }

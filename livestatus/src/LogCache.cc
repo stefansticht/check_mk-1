@@ -38,10 +38,18 @@
 #include "LogEntry.h"
 #include "LogCache.h"
 
+#ifdef CMC
+#include "Core.h"
+extern Core *g_core;
+#else
+extern time_t last_log_rotation;
+#endif // CMC
+
+
+
 #define CHECK_MEM_CYCLE 1000 /* Check memory every N'th new message */
 
 // watch nagios' logfile rotation
-extern time_t last_log_rotation;
 extern int g_debug_level;
 extern char *log_archive_path;
 extern char *log_file;
@@ -52,7 +60,7 @@ int num_cached_log_messages = 0;
 // Debugging logging is hard if debug messages are logged themselves...
 void debug(const char *loginfo, ...)
 {
-    if (g_debug_level < 2)
+    if (g_debug_level >= 3)
         return;
 
     FILE *x = fopen("/tmp/livestatus.log", "a+");
@@ -67,7 +75,6 @@ void debug(const char *loginfo, ...)
 LogCache::LogCache(unsigned long max_cached_messages)
     : _max_cached_messages(max_cached_messages)
     , _num_at_last_check(0)
-    , _my_world(0)
 {
     pthread_mutex_init(&_lock, 0);
     updateLogfileIndex();
@@ -100,12 +107,6 @@ void LogCache::unlockLogCache()
 
 bool LogCache::logCachePreChecks()
 {
-#ifdef CMC
-    if (g_live_world != _my_world) {
-        forgetLogfiles();
-        updateLogfileIndex();
-    }
-#endif
     // Do we have any logfiles (should always be the case,
     // but we don't want to crash...
     if (_logfiles.size() == 0) {
@@ -115,7 +116,11 @@ bool LogCache::logCachePreChecks()
     // Has Nagios rotated logfiles? => Update
     // our file index. And delete all memorized
     // log messages.
+    #ifdef CMC
+    if (g_core->_last_logfile_rotation > _last_index_update) {
+    #else
     if (last_log_rotation > _last_index_update) {
+    #endif
         logger(LG_INFO, "Nagios has rotated logfiles. Rebuilding logfile index");
         forgetLogfiles();
         updateLogfileIndex();
@@ -125,6 +130,7 @@ bool LogCache::logCachePreChecks()
 
 void LogCache::forgetLogfiles()
 {
+    logger(LOG_INFO, "Logfile cache: flushing complete cache.");
     for (_logfiles_t::iterator it = _logfiles.begin();
             it != _logfiles.end();
             ++it)
@@ -133,9 +139,6 @@ void LogCache::forgetLogfiles()
     }
     _logfiles.clear();
     num_cached_log_messages = 0;
-#ifdef CMC
-    _my_world = g_live_world;
-#endif
 }
 
 void LogCache::updateLogfileIndex()

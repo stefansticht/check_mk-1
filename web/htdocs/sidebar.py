@@ -25,6 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 import config, defaults, livestatus, views, pprint, os, copy, userdb
+import notify, urlparse
 from lib import *
 
 # Constants to be used in snapins
@@ -34,6 +35,7 @@ snapin_width = 230
 # Datastructures and functions needed before plugins can be loaded
 loaded_with_language = False
 sidebar_snapins = {}
+search_plugins  = []
 
 def load_plugins():
     global loaded_with_language
@@ -43,6 +45,8 @@ def load_plugins():
     # Load all snapins
     global sidebar_snapins
     sidebar_snapins = {}
+    global search_plugins
+    search_plugins = []
     load_web_plugins("sidebar", globals())
 
     # This must be set after plugin loading to make broken plugins raise
@@ -51,7 +55,7 @@ def load_plugins():
     loaded_with_language = current_language
 
     # Declare permissions: each snapin creates one permission
-    config.declare_permission_section("sidesnap", _("Sidebar snapins"))
+    config.declare_permission_section("sidesnap", _("Sidebar snapins"), do_sort = True)
     for name, snapin in sidebar_snapins.items():
         config.declare_permission("sidesnap.%s" % name,
             snapin["title"],
@@ -59,28 +63,30 @@ def load_plugins():
             snapin["allowed"])
 
 # Helper functions to be used by snapins
-def link(text, target, frame="main"):
+def link(text, url, target="main", onclick = None):
     # Convert relative links into absolute links. We have three kinds
     # of possible links and we change only [3]
     # [1] protocol://hostname/url/link.py
     # [2] /absolute/link.py
     # [3] relative.py
-    if not (":" in target[:10]) and target[0] != '/':
-        target = defaults.url_prefix + "check_mk/" + target
+    if not (":" in url[:10]) and url[0] != '/':
+        url = defaults.url_prefix + "check_mk/" + url
+    onclick = onclick and (' onclick="%s"' % html.attrencode(onclick)) or ''
     return '<a onfocus="if (this.blur) this.blur();" target="%s" ' \
-           'class=link href="%s">%s</a>' % (frame, target, html.attrencode(text))
+           'class=link href="%s"%s>%s</a>' % \
+            (html.attrencode(target), html.attrencode(url), onclick, html.attrencode(text))
 
-def simplelink(text, target, frame="main"):
-    html.write(link(text, target, frame) + "<br>\n")
+def simplelink(text, url, target="main"):
+    html.write(link(text, url, target) + "<br>\n")
 
-def bulletlink(text, target, frame="main"):
-    html.write("<li class=sidebar>" + link(text, target, frame) + "</li>\n")
+def bulletlink(text, url, target="main", onclick = None):
+    html.write("<li class=sidebar>" + link(text, url, target, onclick) + "</li>\n")
 
-def iconlink(text, target, icon):
+def iconlink(text, url, icon):
     linktext = '<img class=iconlink src="images/icon_%s.png">%s' % \
-         ( icon, text )
+         (html.attrencode(icon), html.attrencode(text))
     html.write('<a target=main class="iconlink link" href="%s">%s</a><br>' % \
-            (target, linktext))
+            (html.attrencode(url), linktext))
 
 def footnotelinks(links):
     html.write("<div class=footnotelink>")
@@ -108,30 +114,68 @@ def nagioscgilink(text, target):
 def heading(text):
     html.write("<h3>%s</h3>\n" % html.attrencode(text))
 
+# Load current state of user's sidebar. Convert from
+# old format (just a snapin list) to the new format
+# (dictionary) on the fly
 def load_user_config():
     path = config.user_confdir + "/sidebar.mk"
     try:
         user_config = eval(file(path).read())
+        if type(user_config) == list:
+            user_config = {
+                "snapins" : user_config,
+                "fold":     False,
+            }
     except:
-        user_config = config.sidebar
+        user_config = {
+            "snapins": config.sidebar,
+            "fold":    False,
+        }
 
     # Remove entries the user is not allowed for or which have state "off" (from legacy version)
     # silently skip configured but not existant snapins
-    return [ entry for entry in user_config
-                       if entry[0] in sidebar_snapins
-                          and entry[1] != "off"
-                          and config.may("sidesnap." + entry[0])]
+    user_config["snapins"] = [
+          entry for entry in user_config["snapins"]
+                if entry[0] in sidebar_snapins
+                   and entry[1] != "off"
+                   and config.may("sidesnap." + entry[0])]
+
+    return user_config
 
 def save_user_config(user_config):
     if config.may("general.configure_sidebar"):
         config.save_user_file("sidebar", user_config)
 
 def sidebar_head():
-    html.write('<div id="side_header">'
-               '<a title="%s" target="main" href="%s">'
+    html.write('<div id="side_header">')
+    html.write('<div id="side_fold"></div>')
+    html.write('<a title="%s" target="main" href="%s">'
                '<div id="side_version">%s</div>'
                '</a>'
-               '</div>\n' % (_("Go to main overview"), config.start_url, defaults.check_mk_version))
+               '</div>\n' % (_("Go to main overview"), html.attrencode(config.start_url), defaults.check_mk_version))
+
+def render_messages():
+    for msg in notify.get_gui_messages():
+        if 'gui_hint' in msg['methods']:
+            html.write('<div class="popup_msg" id="message-%s">' % msg['id'])
+            html.write('<a href="javascript:void(0)" class="close" onclick="message_close(\'%s\')">x</a>' % msg['id'])
+            html.write(html.attrencode(msg['text']).replace('\n', '<br />\n'))
+            html.write('</div>\n')
+        if 'gui_popup' in msg['methods']:
+            html.javascript('alert(\'%s\'); mark_message_read("%s")' %
+                (html.attrencode(msg['text']).replace('\n', '\\n'), msg['id']))
+
+def ajax_get_messages():
+    render_messages()
+
+def ajax_message_read():
+    try:
+        notify.delete_gui_message(html.var('id'))
+        html.write("OK")
+    except:
+        if config.debug:
+            raise
+        html.write("ERROR")
 
 def sidebar_foot():
     html.write('<div id="side_footer">')
@@ -141,20 +185,33 @@ def sidebar_foot():
     if config.may("general.edit_profile") or config.may("general.change_password"):
         html.icon_button("user_profile.py", _("Edit your personal settings, change your password"), "sidebar_settings",
                          target="main")
-        # html.write('<li><a class=profile target="main" href="user_profile.py" title="%s"></a></li>' % _('Edit user profile'))
     if config.may("general.logout") and not config.auth_by_http_header:
         html.icon_button("logout.py", _("Log out"), "sidebar_logout", target="_top")
-        # html.write('<li><a class=logout target="_top" href="logout.py" title="%s"></a></li>' % _('Logout'))
-    html.write('</ul>')
-    html.write("<div class=copyright>%s</div>\n" % _("&copy; <a target=\"_blank\" href=\"http://mathias-kettner.de\">Mathias Kettner</a>"))
+
+    html.icon_button("return void();", _("You have pending messages."),
+                     "sidebar_messages", onclick = 'read_message()', id = 'msg_button', style = 'display:none')
+    html.write('<div id="messages" style="display:none;">')
+    render_messages()
     html.write('</div>')
+
+    html.write("<div class=copyright>%s</div>\n" %
+        _("&copy; <a target=\"_blank\" href=\"http://mathias-kettner.de\">Mathias Kettner</a>"))
+    html.write('</div>')
+
+    if load_user_config()["fold"]:
+        html.final_javascript("foldSidebar();")
 
 # Standalone sidebar
 def page_side():
     if not config.may("general.see_sidebar"):
         return
+    if config.sidebar_notify_interval is not None:
+        interval = config.sidebar_notify_interval
+    else:
+        interval = 'null'
     html.html_head(_("Check_MK Sidebar"), javascripts=["sidebar"], stylesheets=["sidebar", "status"])
-    html.write('<body class="side" onload="initScrollPos(); setSidebarHeight();" onunload="storeScrollPos()">\n')
+    html.write('<body class="side" onload="initScrollPos(); setSidebarHeight(); init_messages(%s);" '
+               'onunload="storeScrollPos()">\n' % interval)
     html.write('<div id="check_mk_sidebar">\n')
 
     views.load_views()
@@ -168,7 +225,7 @@ def page_side():
         scrolling = ' class=scroll'
 
     html.write('<div id="side_content"%s>' % scrolling)
-    for name, state in user_config:
+    for name, state in user_config["snapins"]:
         if not name in sidebar_snapins or not config.may("sidesnap." + name):
             continue
         # Performs the initial rendering and might return an optional refresh url,
@@ -192,10 +249,11 @@ def page_side():
     html.write("refresh_snapins = %r;\n" % refresh_snapins)
     html.write("restart_snapins = %r;\n" % restart_snapins)
     html.write("sidebar_scheduler();\n")
-    html.write("window.onresize = function() { setSidebarHeight(); }\n")
+    html.write("window.onresize = function() { setSidebarHeight(); };\n")
+    html.write("if (contentFrameAccessible()) { update_content_location(); };\n")
     html.write("</script>\n")
 
-    html.write("</body>\n</html>")
+    html.body_end()
 
 def render_snapin(name, state):
     snapin = sidebar_snapins.get(name)
@@ -269,15 +327,22 @@ def snapin_exception(e):
                 "<h2>%s</h2>\n"
                 "<p>%s</p></div>" % (_('Error'), e))
 
+def ajax_fold():
+    config = load_user_config()
+    config["fold"] = not not html.var("fold")
+    save_user_config(config)
+
+
 def ajax_openclose():
     config = load_user_config()
-    new_config = []
-    for name, usage in config:
+    new_snapins = []
+    for name, usage in config["snapins"]:
         if html.var("name") == name:
             usage = html.var("state")
         if usage != "off":
-            new_config.append((name, usage))
-    save_user_config(new_config)
+            new_snapins.append((name, usage))
+    config["snapins"] = new_snapins
+    save_user_config(config)
 
 def ajax_snapin():
     # Update online state of the user (if enabled)
@@ -298,8 +363,8 @@ def ajax_snapin():
             snapin = sidebar_snapins.get(snapname)
 
             # When restart snapins are about to be refreshed, only render
-            # them, when core restarted after they have been redendered
-            # before
+            # them, when the core has been restarted after their initial
+            # rendering
             if not snapin.get('refresh') and snapin.get('restart'):
                 since = float(html.var('since', 0))
                 newest = since
@@ -333,11 +398,11 @@ def move_snapin():
     snapname_to_move = html.var("name")
     beforename = html.var("before")
 
-    snapin_config = load_user_config()
+    user_config = load_user_config()
 
     # Get current state of snaping being moved (open, closed)
     snap_to_move = None
-    for name, state in snapin_config:
+    for name, state in user_config["snapins"]:
         if name == snapname_to_move:
             snap_to_move = name, state
     if not snap_to_move:
@@ -345,29 +410,32 @@ def move_snapin():
 
     # Build new config by removing snaping at current position
     # and add before "beforename" or as last if beforename is not set
-    new_config = []
-    for name, state in snapin_config:
+    new_snapins = []
+    for name, state in user_config["snapins"]:
         if name == snapname_to_move:
             continue # remove at this position
         elif name == beforename:
-            new_config.append(snap_to_move)
-        new_config.append( (name, state) )
+            new_snapins.append(snap_to_move)
+        new_snapins.append( (name, state) )
     if not beforename: # insert as last
-        new_config.append(snap_to_move)
-    save_user_config(new_config)
+        new_snapins.append(snap_to_move)
+
+    user_config["snapins"] = new_snapins
+    save_user_config(user_config)
 
 def page_add_snapin():
     if not config.may("general.configure_sidebar"):
         raise MKGeneralException(_("You are not allowed to change the sidebar."))
 
     html.header(_("Available snapins"), stylesheets=["pages", "sidebar", "status"])
-    used_snapins = [name for (name, state) in load_user_config()]
+    used_snapins = [name for (name, state) in load_user_config()["snapins"]]
 
     addname = html.var("name")
     if addname in sidebar_snapins and addname not in used_snapins and html.check_transaction():
-        user_config = load_user_config() + [(addname, "open")]
+        user_config = load_user_config()
+        user_config["snapins"].append((addname, "open"))
         save_user_config(user_config)
-        used_snapins = [name for (name, state) in load_user_config()]
+        used_snapins = [name for (name, state) in load_user_config()["snapins"]]
         html.reload_sidebar()
 
     names = sidebar_snapins.keys()
@@ -412,9 +480,9 @@ def ajax_speedometer():
         # Get the current rates and the program start time. If there
         # are more than one site, we simply add the start times.
         data = html.live.query_summed_stats("GET status\n"
-               "Columns: service_checks_rate host_checks_rate program_start")
-        current_rate = data[0] + data[1]
-        program_start = data[2]
+               "Columns: service_checks_rate program_start")
+        current_rate = data[0]
+        program_start = data[1]
 
         # Recompute the scheduled_rate only if it is not known (first call)
         # or if one of the sites has been restarted. The computed value cannot
@@ -422,47 +490,18 @@ def ajax_speedometer():
         # That way we save CPU resources since the computation of the
         # scheduled checks rate needs to loop over all hosts and services.
         if last_program_start != program_start:
-
-            # 1. First compute number of expected host checks per second
+            # These days, we configure the correct check interval for Check_MK checks.
+            # We do this correctly for active and for passive ones. So we can simply
+            # use the check_interval of all services. Hosts checks are ignored.
+            #
+            # Manually added services without check_interval could be a problem, but
+            # we have no control there.
             scheduled_rate = html.live.query_summed_stats(
-                        "GET hosts\n"
+                        "GET services\n"
                         "Stats: suminv check_interval\n")[0] / 60.0
 
-            # 2. Now get data of all active services and of passive/non-check_mk-services.
-            # For passive services we assume that they are scheduled with the rate the
-            # is configured via "check_interval". Nagios does not use this setting for i
-            # passive checks, but we have no other option.
-            scheduled_rate += html.live.query_summed_stats(
-                        "GET services\n"
-                        "Stats: suminv check_interval\n"
-                        "Filter: active_checks_enabled = 1\n"
-                        "Filter: check_command ~ ^check_mk-\n"
-                        "Negate:\n"
-                        "Filter: active_checks_enabled = 0\n"
-                        "And: 2\n"
-                        "Or: 2\n")[0] / 60.0
-
-            # 3. Acount for check_mk-checks. Here we need to check interval of the
-            # Check_MK services on the host. Its check rate applies to the passive
-            # checks. First get the check intervals of the check_mk checks:
-            intervals = html.live.query_table(
-                "GET services\n"
-                "Columns: host_name check_interval\n"
-                "Filter: description = Check_MK")
-
-            # Now get the number of passive check_mk checks for each host and convert
-            # it to a dict from host -> number of services
-            num_svcs = dict(html.live.query_table(
-                "GET services\n"
-                "Columns: host_name\n"
-                "Stats: check_command ~ ^check_mk-"))
-
-            for host_name, check_interval in intervals:
-                num_services = num_svcs.get(host_name, 0)
-                scheduled_rate += float(num_services) / check_interval / 60.0
-
         percentage = 100.0 * current_rate / scheduled_rate;
-        title = _("Scheduled check rate: %.1f/s, current rate: %.1f/s, that is "
+        title = _("Scheduled service check rate: %.1f/s, current rate: %.1f/s, that is "
                   "%.0f%% of the scheduled rate" %
                   (scheduled_rate, current_rate, percentage))
 
@@ -506,9 +545,15 @@ def ajax_switch_masterstate():
         html.write(_("Command %s/%d not found") % (column, state))
 
 def ajax_del_bookmark():
-    num = int(html.var("num"))
+    try:
+        num = int(html.var("num"))
+    except ValueError:
+        raise MKGeneralException(_("Invalid bookmark id."))
     bookmarks = load_bookmarks()
-    del bookmarks[num]
+    try:
+        del bookmarks[num]
+    except IndexError:
+        raise MKGeneralException(_("Unknown bookmark id: %d. This is probably a problem with reload or browser history. Please try again.") % html.attrencode(num))
     save_bookmarks(bookmarks)
     render_bookmarks()
 
@@ -517,26 +562,53 @@ def ajax_add_bookmark():
     href = html.var("href")
     if title and href:
         bookmarks = load_bookmarks()
-        # We try to remove http://hostname/some/path/check_mk from the
-        # URI. That keeps the configuration files (bookmarks) portable.
-        # Problem here: We have not access to our own URL, only to the
-        # path part. The trick: we use the Referrer-field from our
-        # request. That points to the sidebar.
         referer = html.req.headers_in.get("Referer")
+
         if referer:
-            while '/' in referer and referer.split('/')[0] == href.split('/')[0]:
-                referer = referer.split('/', 1)[1]
-                href = href.split('/', 1)[1]
+            ref_p = urlparse.urlsplit(referer)
+            url_p = urlparse.urlsplit(href)
+
+            # If http/https or user, pw, host, port differ, don't try to shorten
+            # the URL to be linked. Simply use the full URI
+            if ref_p.scheme == url_p.scheme and ref_p.netloc == url_p.netloc:
+                # We try to remove http://hostname/some/path/check_mk from the
+                # URI. That keeps the configuration files (bookmarks) portable.
+                # Problem here: We have not access to our own URL, only to the
+                # path part. The trick: we use the Referrer-field from our
+                # request. That points to the sidebar.
+                referer = ref_p.path
+                href    = url_p.path
+                if url_p.query:
+                    href += '?' + url_p.query
+                removed = 0
+                while '/' in referer and referer.split('/')[0] == href.split('/')[0]:
+                    referer = referer.split('/', 1)[1]
+                    href = href.split('/', 1)[1]
+                    removed += 1
+
+                if removed == 1:
+                    # removed only the first "/". This should be an absolute path.
+                    href = '/' + href
+                elif '/' in referer:
+                    # there is at least one other directory layer in the path, make
+                    # the link relative to the sidebar.py's topdir. e.g. for pnp
+                    # links in OMD setups
+                    href = '../' + href
+
         bookmarks.append((title, href))
         save_bookmarks(bookmarks)
     render_bookmarks()
 
+
 def page_edit_bookmark():
     html.header(_("Edit Bookmark"))
-    n = int(html.var("num"))
+    try:
+        n = int(html.var("num"))
+    except ValueError:
+        raise MKGeneralException(_("Invalid bookmark id."))
     bookmarks = load_bookmarks()
     if n >= len(bookmarks):
-        raise MKGeneralException(_("Unknown bookmark id: %d. This is probably a problem with reload or browser history. Please try again.") % n)
+        raise MKGeneralException(_("Unknown bookmark id: %d. This is probably a problem with reload or browser history. Please try again.") % html.attrencode(n))
 
     if html.var("save") and html.check_transaction():
         title = html.var("title")
@@ -569,3 +641,338 @@ def page_edit_bookmark():
     html.end_form()
 
     html.footer()
+
+#.
+#   .--Quicksearch---------------------------------------------------------.
+#   |         ___        _      _                            _             |
+#   |        / _ \ _   _(_) ___| | _____  ___  __ _ _ __ ___| |__          |
+#   |       | | | | | | | |/ __| |/ / __|/ _ \/ _` | '__/ __| '_ \         |
+#   |       | |_| | |_| | | (__|   <\__ \  __/ (_| | | | (__| | | |        |
+#   |        \__\_\\__,_|_|\___|_|\_\___/\___|\__,_|_|  \___|_| |_|        |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   | Handles ajax search reuquests (like issued by the quicksearch dialog |
+#   '----------------------------------------------------------------------'
+
+def parse_search_query(s):
+    types = {'h': 'hosts', 'hg': 'hostgroups', 's': 'services', 'sg': 'servicegroups'}
+
+    found_filters = []
+    if ":" in s:
+        regex = "(^((hg)|h|(sg)|s)| (hg|h|sg|s)):"
+        found = []
+        matches = re.finditer(regex, s)
+        for match in matches:
+            found.append((match.group(1), match.start()))
+
+        found_filters = []
+        current_string = s
+        for token_type, token_offset in found[-1::-1]:
+            found_filters.append( (types[token_type.lstrip()],
+                                   current_string[token_offset+len(token_type)+1:].replace("*", ".*").strip()) )
+            current_string = current_string[:token_offset]
+
+    if found_filters:
+        return found_filters
+    else:
+        return [("hosts", s.replace('*', '.*'))]
+
+def is_ipaddress(s):
+    try:
+        octets = map(int, s.strip(".").split("."))
+        for o in octets:
+            if o < 0 or o > 255:
+                return False
+        return True
+    except:
+        return False
+
+def plugin_matches_filters(plugin, used_filters):
+    if not ((len(used_filters) > 1) == (plugin.get("required_types") != None)):
+        return False
+
+    if len(used_filters) == 1: # Simple filters
+        if plugin.get("lq_table", plugin.get("id")) != used_filters[0][0]:
+            return False
+    else:                      # Multi filters
+        # used_filters example [ ('services', 'CPU'), ('hosts', 'localhost'), ('services', 'Mem') ]
+        search_types = list(set(map(lambda x: x[0], used_filters)))
+        # Only allow plugins with specified "required_types"
+        if not plugin.get("required_types"):
+            return False
+
+        # If search_types does not include all required fields -> do not use
+        for entry in plugin["required_types"]:
+            if entry not in search_types:
+                return False
+
+        # If there are unknown types in the search -> do not use
+        for entry in search_types:
+            if entry not in plugin["required_types"] + plugin.get("optional_types", []):
+                return False
+    return True
+
+def search_url_tmpl(used_filters, row, exact = True):
+    if not row:
+        def find_plugin(filters):
+            for entry in search_plugins:
+                if plugin_matches_filters(entry, filters):
+                    return entry, {}, {}
+            return None, None, None
+        plugin, row_options, row_data = find_plugin(used_filters)
+        if not plugin: # find a plugin for the first used filter
+            plugin, row_options, row_data = find_plugin([used_filters[0]])
+        if not plugin:
+            return ""  # shouldn't happen..
+    else:
+        plugin, row_options, row_data = row
+
+    def find_tmpl():
+        if exact: # Get the match template
+            if plugin.get("match_url_tmpl_func"):
+                return plugin['match_url_tmpl_func'](used_filters, row_data)
+            if plugin.get("match_url_tmpl"):
+                return plugin.get("match_url_tmpl")
+
+            # Default match templates
+            ty = plugin.get("dftl_url_tmpl", plugin.get("id"))
+            if ty == 'hosts':
+                return 'view.py?view_name=host&host=%(name)s&site=%(site)s'
+            elif ty == 'hostgroups':
+                return 'view.py?view_name=hostgroup&hostgroup=%(name)s&site=%(site)s'
+            elif ty == 'servicegroups':
+                return 'view.py?view_name=servicegroup&servicegroup=%(name)s&site=%(site)s'
+            elif ty == 'services':
+                return 'view.py?view_name=allservices&service=%(name)s&site=%(site)s'
+        else: # Get the search template
+            if plugin.get("search_url_tmpl_func"):
+                return plugin['search_url_tmpl_func'](used_filters, row_data)
+            if plugin.get("search_url_tmpl"):
+                return plugin.get("search_url_tmpl")
+
+            # Default search templates
+            ty = plugin.get("dftl_url_tmpl", plugin.get("id"))
+            if ty == 'hosts':
+                return 'view.py?view_name=hosts&host=%(name)s'
+            elif ty == 'hostgroups':
+                return 'view.py?view_name=hostgroups&hostgroup_name=%(name)s&site=%(site)s'
+            elif ty == 'servicegroups':
+                return 'view.py?view_name=svcgroups&servicegroup_name=%(name)s&site=%(site)s'
+            elif ty == 'services':
+                return 'view.py?view_name=allservices&service=%(name)s&site=%(site)s'
+
+    # Search the template
+    url_tmpl = find_tmpl()
+
+    # Some templates with single filters contain %(name)s, %(search)s, %(site)
+    if len(used_filters) == 1:
+        if exact:
+            site = row_data.get("site")
+            name = row_data.get(get_row_name(row))
+        else:
+            site = ""
+            name = used_filters[0][1]
+
+        url_tmpl = url_tmpl % {
+            'name'   : html.urlencode(name),
+            'search' : html.urlencode(name),
+            'site'   : site,
+        }
+
+    return url_tmpl
+
+
+def search_livestatus(used_filters):
+    try:
+        limit = config.quicksearch_dropdown_limit
+    except:
+        limit = 80
+
+    # We need to know which plugin lead to finding a particular host, so it
+    # is neccessary to make one query for each plugin - sorry. For example
+    # for the case, that a host can be found via alias or name.
+    data = []
+
+    html.live.set_prepend_site(True)
+    for plugin in search_plugins:
+        if 'filter_func' not in plugin:
+            continue
+
+        if not plugin_matches_filters(plugin, used_filters):
+            continue
+
+        lq_filter = plugin['filter_func'](used_filters)
+        if lq_filter:
+            lq_table   = plugin.get("lq_table", plugin.get("id"))
+            lq_columns = plugin.get("lq_columns")
+            lq         = "GET %s\nCache: reload\nColumns: %s\n%sLimit: %d\n" % \
+                          (lq_table, " ".join(lq_columns), lq_filter, limit)
+            #html.debug("<br>%s" % lq.replace("\n", "<br>"))
+
+            lq_columns = [ "site" ] + lq_columns
+            for row in html.live.query(lq):
+                # Put result columns into a dict
+                row_dict = {}
+                for idx, col in enumerate(row):
+                    row_dict[lq_columns[idx]] = col
+
+                # The plugin itself might add more info to the row
+                # This is saved into an extra dict named options
+                options = {}
+                if plugin.get("match_url_tmpl_func"):
+                    options["url"] = plugin["match_url_tmpl_func"](used_filters, row_dict)
+
+                data.append([ plugin ] + [ options ] + [ row_dict ])
+            if len(data) >= limit:
+                break
+
+    for plugin in search_plugins:
+        if "search_func" in plugin and plugin_matches_filters(plugin, used_filters):
+            for row in plugin['search_func'](used_filters):
+                row_options, row_data = row
+                data.append((plugin, row_options, row_data))
+
+    html.live.set_prepend_site(False)
+
+    # Apply the limit once again (search_funcs of plugins could have added some results)
+    data = data[:limit]
+
+    used_keys = []
+
+    # Function to create a unqiue hashable key from a row
+    def get_key(row):
+        plugin, row_options, row_data = row
+        name = row_data.get(get_row_name(row))
+        return (row_data.get("site"), row_data.get("host_name"), name)
+
+    # Remove duplicate rows
+    used_keys = []
+    new_data  = []
+    for row in data:
+        row_key = get_key(row)
+        if row_key not in used_keys:
+            new_data.append(row)
+            used_keys.append(row_key)
+    data = new_data
+
+    # Sort data if its not a host filter
+    def sort_data(data):
+        sorted_data = data
+        def sort_fctn(a, b):
+            return cmp(get_key(a), get_key(b))
+        data.sort(cmp = sort_fctn)
+        return sorted_data
+
+    if len(used_filters) == 1 and used_filters[0][0] != "hosts":
+        data = sort_data(data)
+
+    return data
+
+
+def format_result(row, render_options):
+    plugin, row_options, row_data = row
+    name_column = get_row_name(row)
+    name        = row_data.get(name_column)
+    url         = row_options["url"]
+    css         = plugin.get("css_class", plugin["id"])
+
+    name_append = ""
+    if render_options.get("display_site"):
+        name_append += " (%s)" % row_data.get("site")
+    if render_options.get("display_host"):
+        # Don't append the host name if its already the display name..
+        if not name_column == "host_name" and row_data.get("host_name"):
+            name_append += " &lt;%s&gt;" % row_data.get("host_name")
+    if name_append:
+        name = "%s %s" % (name, name_append)
+
+    html.write('<a id="result_%s" class="%s" href="%s" onClick="mkSearchClose()" target="main">%s' %
+                (name, css, url, name))
+    html.write('</a>\n')
+
+
+def get_row_name(row):
+    plugin, row_options, row_data = row
+    if plugin.get("qs_show"):
+        return plugin.get("qs_show")
+    elif plugin.get("lq_columns"):
+        return plugin.get("lq_columns")[0]
+    return ""
+
+def render_search_results(used_filters, objects, format_func = format_result):
+    # When results contain infos from several sites or hosts, display
+    # display that info in the result text
+    options = {}
+    values  = {}
+    for row in objects:
+        plugin, row_options, row_data = row
+        name = get_row_name(row)
+
+        for action, name in [ ("display_site", "site"),
+                              ("display_host", "host_name") ]:
+            if row_data.get(name):
+                values.setdefault(action, row_data.get(name))
+                # If this values differs from the default setting -> set is as option
+                if values.get(action) != row_data.get(name):
+                    options[action] = True
+
+    # Remove duplicate entries, i.e. with the same name and the same URL.
+    unique = set([])
+    for row in objects:
+        plugin, row_options, row_data = row
+        # Find missing urls
+        name = get_row_name(row)
+        if "url" not in row_options:
+            row_options["url"] = search_url_tmpl(used_filters, row)
+
+        obj_id = (row_options["url"], name)
+        if obj_id not in unique:
+            format_func(row, options)
+            unique.add(obj_id)
+
+def process_search(q):
+    used_filters = parse_search_query(q)
+
+    data = search_livestatus(used_filters)
+    if len(used_filters) == 1 and used_filters[0][0] == "hosts" and not data:
+        # When asking for hosts and no host found, try searching services instead
+        data = search_livestatus( [("services", used_filters[0][1])] )
+        return data, [("services", used_filters[0][1])]
+
+    return data, used_filters
+
+def ajax_search():
+    q = html.var('q').strip()
+    if not q:
+        return
+
+    data, used_filters = process_search(q)
+    if not data:
+        return
+
+    try:
+        render_search_results(used_filters, data)
+    except Exception, e:
+        html.write("error")
+        import traceback
+        html.write(traceback.format_exc())
+        html.write(repr(e))
+
+
+def search_open():
+    q = html.var('q').strip()
+    if not q:
+        return
+
+    data, used_filters = process_search(q)
+    if not used_filters:
+        return
+
+    if data and len(data) == 1:
+        url = search_url_tmpl(used_filters, data[0])
+    else:
+        url = search_url_tmpl(used_filters, data and data[0] or None, exact = False)
+
+    html.set_http_header('Location', url)
+    from mod_python import apache
+    raise apache.SERVER_RETURN, apache.HTTP_MOVED_TEMPORARILY
