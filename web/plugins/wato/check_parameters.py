@@ -330,7 +330,8 @@ register_rule(group + '/' + subgroup_inventory,
                          '<p>Specifying "grab user" makes the created check expect the process to run as the same user as during inventory: the user '
                          'name will be hardcoded into the check. In that case if you put %u into the service description, that will be replaced '
                          'by the actual user name during inventory. You need that if your rule might match for more than one user - your would '
-                         'create duplicate services with the same description otherwise.</p>'),
+                         'create duplicate services with the same description otherwise.</p><p>Windows users are specified by the namespace followed by '
+                         'the actual user name. For example "\\\\NT AUTHORITY\NETWORK SERVICE" or "\\\\CHKMKTEST\Administrator".</p>'),
             )),
             ('perfdata', Checkbox(
                 title = _('Performance Data'),
@@ -641,6 +642,7 @@ register_check_parameters(
                            "default, averaging is turned off. "),
                    unit = _("minutes"),
                    minvalue = 1,
+                   default_value = 60,
                 )
             ),
             ("phystate",
@@ -898,6 +900,7 @@ register_rule(group + '/' + subgroup_storage,
     ),
     match = 'all',
 )
+
 register_rule(group + '/' + subgroup_storage,
     varname   = "fileinfo_groups",
     title     = _('File Grouping Patterns'),
@@ -914,20 +917,28 @@ register_rule(group + '/' + subgroup_storage,
                   'of single services for each file. This rule also applies when '
                   'you use manually configured checks instead of inventorized ones.'),
     valuespec = ListOf(
-      Tuple(
-          help = _("This defines one file grouping pattern"),
-          show_titles = True,
-          orientation = "horizontal",
-          elements = [
-             TextAscii(
-                 title = _("Name of group"),
-             ),
-             TextAscii(
-                 title = _("File pattern (using * and ?)"),
-             ),
-          ]
-      ),
-      add_label = _("Add pattern"),
+        Tuple(
+            help = _("This defines one file grouping pattern"),
+            show_titles = True,
+            orientation = "horizontal",
+            elements = [
+                TextAscii(
+                     title = _("Name of group"),
+                ),
+                Transform(
+                    Tuple(
+                        show_titles = True,
+                        orientation = "vertical",
+                        elements = [
+                            TextAscii(title = _("Include Pattern")),
+                            TextAscii(title = _("Exclude Pattern"))
+                        ],
+                    ),
+                    forth = lambda params: type(params) == str and ( params, '' ) or params
+                ),
+            ],
+        ),
+        add_label = _("Add pattern group"),
     ),
     match = 'all',
 )
@@ -1094,7 +1105,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_os,
     "memory_pagefile_win",
-    _("Memory and pagefile levels for Windows"),
+    _("Memory, pagefile and swap levels for Windows"),
     Dictionary(
         elements = [
             ( "memory",
@@ -1102,39 +1113,93 @@ register_check_parameters(
                    title = _("Memory Levels"),
                    elements = [
                        Tuple(
-                           title = _("Usage Levels in Percent"),
+                           title = _("Memory usage in percent"),
                            elements = [
-                               Percentage(title = _("Warning if above") ),
-                               Percentage(title = _("Critical if above") ),
-                           ]
+                               Percentage(title = _("Warning if above")),
+                               Percentage(title = _("Critical if above")),
+                           ],
                        ),
-                       Tuple(
-                           title = _("Absolute Usage Levels"),
-                           elements = [
-                                Filesize(title = _("Warning if above")),
-                                Filesize(title = _("Critical if above")),
-                           ]
+                       Transform(
+                            Tuple(
+                                title = _("Absolute free memory"),
+                                elements = [
+                                     Filesize(title = _("Warning if less than")),
+                                     Filesize(title = _("Critical if less than")),
+                                ]
+                            ),
+                            # Note: Memory values lesser 1MB will not work
+                            # -> need hide option in filesize valuespec
+                            back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
+                            forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
                         )
-                   ])),
+                   ],
+                   default_value = (80.0, 90.0))),
             ( "pagefile",
                Alternative(
                    title = _("Pagefile Levels"),
                    elements = [
                        Tuple(
-                           title = _("Usage Levels in Percent"),
+                           title = _("Pagefile usage in percent"),
                            elements = [
                                Percentage(title = _("Warning if above")),
                                Percentage(title = _("Critical if above")),
                            ]
                        ),
-                       Tuple(
-                           title = _("Absolute Usage Levels"),
-                           elements = [
-                                Filesize(title = _("Warning if above")),
-                                Filesize(title = _("Critical if above")),
-                           ]
+                       Transform(
+                            Tuple(
+                                title = _("Absolute free pagefile"),
+                                elements = [
+                                     Filesize(title = _("Warning if less than")),
+                                     Filesize(title = _("Critical if less than")),
+                                ]
+                            ),
+                            # Note: Memory values lesser 1MB will not work
+                            # -> need hide option in filesize valuespec
+                            back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
+                            forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
                         )
-                   ])),
+                   ],
+                   default_value = (50.0, 70.0))
+            ),
+            ( "swap",
+               Alternative(
+                   title = _("Swap Levels"),
+                   elements = [
+                       Tuple(
+                           title = _("Swap usage in percent"),
+                           elements = [
+                               Percentage(title = _("Warning if above")),
+                               Percentage(title = _("Critical if above")),
+                           ]
+                       ),
+                       Transform(
+                            Tuple(
+                                title = _("Absolute free swap"),
+                                elements = [
+                                     Filesize(title = _("Warning if less than")),
+                                     Filesize(title = _("Critical if less than")),
+                                ]
+                            ),
+                            # Note: Memory values lesser 1MB will not work
+                            # -> need hide option in filesize valuespec
+                            back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
+                            forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
+                        )
+                   ],
+                   default_value = (70.0, 80.0))
+            ),
+            ("average",
+                Integer (
+                    title = _("Averaging"),
+                    help = _("If this parameter is set, all measured values will be averaged "
+                           "over the specified time interval before levels are being applied. Per "
+                           "default, averaging is turned off. "),
+                   unit = _("minutes"),
+                   minvalue = 1,
+                   default_value = 60,
+                )
+            ),
+
         ]),
     None,
     "dict"
@@ -1533,7 +1598,14 @@ def get_filesystem_valuespec(what):
                                 )],
                     )
 
-def match_filesystem_level_type(value):
+
+# Match and transform functions for level configurations like
+# -- used absolute,        positive int   (2, 4)
+# -- used percentage,      positive float (2.0, 4.0)
+# -- available absolute,   negative int   (-2, -4)
+# -- available percentage, negative float (-2.0, -4.0)
+# (4 alternatives)
+def match_dual_level_type(value):
     if type(value) == list:
         for entry in value:
             if entry[1][0] < 0 or entry[1][1] < 0:
@@ -1546,7 +1618,7 @@ def match_filesystem_level_type(value):
         else:
             return 0
 
-def transform_filesystem_levels(value):
+def transform_filesystem_free(value):
     tuple_convert = lambda val: tuple(map(lambda x: -x, val))
 
     if type(value) == tuple:
@@ -1564,15 +1636,15 @@ filesystem_elements = [
             title = _("Levels for filesystem"),
             show_alternative_title = True,
             default_value = (80.0, 90.0),
-            match = match_filesystem_level_type,
+            match = match_dual_level_type,
             elements = [
                    get_filesystem_valuespec("used"),
                    Transform(
                             get_filesystem_valuespec("free"),
                             title = _("Levels for filesystem free space"),
                             allow_empty = False,
-                            forth = transform_filesystem_levels,
-                            back  = transform_filesystem_levels
+                            forth = transform_filesystem_free,
+                            back  = transform_filesystem_free
                     )
                 ]
                 )
@@ -1586,6 +1658,27 @@ filesystem_elements = [
           totext = "",
           title = "",
           )),
+    ( "inodes_levels",
+        Alternative(
+                    title = _("Levels for Inodes"),
+                    help  = _("The number of remaining inodes on the filesystem. "
+                              "Please note that this setting has no effect on some filesystem checks."),
+                    elements = [
+                            Tuple( title = _("Percentage free"),
+                                   elements = [
+                                       Percentage(title = _("Warning if less than") , unit = "%", minvalue = 0.0),
+                                       Percentage(title = _("Critical if less than"), unit = "%", minvalue = 0.0),
+                                   ]
+                            ),
+                            Tuple( title = _("Absolute free"),
+                                   elements = [
+                                       Integer(title = _("Warning if less than"),  size = 10, unit = _("inodes"), minvalue = 0),
+                                       Integer(title = _("Critical if less than"), size = 10, unit = _("inodes"), minvalue = 0),
+                                ]
+                            )
+                    ]
+        )
+    ),
     (  "magic",
        Float(
           title = _("Magic factor (automatic level adaptation for large filesystems)"),
@@ -1721,8 +1814,8 @@ register_check_parameters(
                            "the given bounds. The error rate is computed by dividing number of "
                            "errors by the total number of packets (successful plus errors)."),
                   elements = [
-                      Percentage(title = _("Warning if above"), label = _("errors"), default_value = 0.01),
-                      Percentage(title = _("Critical if above"), label = _("errors"), default_value = 0.1)
+                      Percentage(title = _("Warning if above"), label = _("errors"), default_value = 0.01, display_format = '%.3f' ),
+                      Percentage(title = _("Critical if above"), label = _("errors"), default_value = 0.1, display_format = '%.3f' )
                   ])),
              ( "speed",
                OptionalDropdownChoice(
@@ -1848,6 +1941,20 @@ register_check_parameters(
         allow_empty = False),
     "dict",
 )
+register_check_parameters(
+    subgroup_networking,
+    "signal_quality",
+    _("Signal quality of Wireless device"),
+    Tuple(
+        elements=[
+            Percentage( title = _( "Warning if under"), maxvalue=100 ),
+            Percentage( title = _( "Critical if under"), maxvalue=100 ),
+    ]),
+    TextAscii(
+        title = _("Network specification"),
+        allow_empty = True),
+    "first",
+)
 
 register_check_parameters(
     subgroup_networking,
@@ -1957,30 +2064,106 @@ register_check_parameters(
 
 register_check_parameters(
     subgroup_os,
+    "cisco_supervisor_mem",
+    _("Cisco Nexus Supervisor Memory Usage"),
+    Tuple(
+        title = _("The average utilization of memory on the active supervisor"),
+        elements = [
+          Percentage(title = _("Warning at a usage of"), default_value = 80.0, maxvalue = 100.0 ),
+          Percentage(title = _("Critical at a usage of"), default_value = 90.0, maxvalue = 100.0 )
+        ]
+    ),
+    None,
+    None
+)
+
+register_check_parameters(
+    subgroup_os,
     "memory",
     _("Main memory usage (Linux / UNIX / Other Devices)"),
-    Alternative(
-        help = _("The levels for memory usage on Linux and UNIX systems take into account the "
-               "currently used memory (RAM or SWAP) by all processes and sets this in relation "
-               "to the total RAM of the system. This means that the memory usage can exceed 100%. "
-               "A usage of 200% means that the total size of all processes is twice as large as "
-               "the main memory, so <b>at least</b> the half of it is currently swapped out. "
-               "Besides Linux and UNIX systems, these parameters are also used for memory checks "
-               "of other devices, like Fortigate devices."),
-        elements = [
-            Tuple(
-                title = _("Specify levels in percentage of total RAM"),
-                elements = [
-                    # Disable limit of value to 101%, because levels > 100% make sense here
-                    # (swap+ram is > ram)
-                    Percentage(title = _("Warning at a memory usage of"), default_value = 80.0, maxvalue = None),
-                    Percentage(title = _("Critical at a memory usage of"), default_value = 90.0, maxvalue = None)]),
-            Tuple(
-                title = _("Specify levels in absolute usage values"),
-                elements = [
-                  Integer(title = _("Warning if above"), unit = _("MB")),
-                  Integer(title = _("Critical if above"), unit = _("MB"))]),
-            ]),
+    Transform(
+        Dictionary(
+            elements = [
+                ( "levels",
+                    Alternative(
+                        title = _("Levels for memory"),
+                        show_alternative_title = True,
+                        default_value = (150.0, 200.0),
+                        match = match_dual_level_type,
+                        help = _("The used and free levels for the memory on Linux and UNIX systems take into account the "
+                               "currently used memory (RAM or SWAP) by all processes and sets this in relation "
+                               "to the total RAM of the system. This means that the memory usage can exceed 100%. "
+                               "A usage of 200% means that the total size of all processes is twice as large as "
+                               "the main memory, so <b>at least</b> the half of it is currently swapped out. "
+                               "Besides Linux and UNIX systems, these parameters are also used for memory checks "
+                               "of other devices, like Fortigate devices."),
+                        elements = [
+                            Alternative(
+                                title = _("Levels for used memory"),
+                                elements = [
+                                    Tuple(
+                                        title = _("Specify levels in percentage of total RAM"),
+                                        elements = [
+                                          Percentage(title = _("Warning at a usage of"),  maxvalue = None),
+                                          Percentage(title = _("Critical at a usage of"), maxvalue = None)
+                                        ]
+                                    ),
+                                    Tuple(
+                                        title = _("Specify levels in absolute values"),
+                                        elements = [
+                                          Integer(title = _("Warning if above"), unit = _("MB")),
+                                          Integer(title = _("Critical if above"), unit = _("MB"))
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            Transform(
+                                    Alternative(
+                                        elements = [
+                                            Tuple(
+                                                title = _("Specify levels in percentage of total RAM"),
+                                                elements = [
+                                                  Percentage(title = _("Warning if less than"),  maxvalue = None),
+                                                  Percentage(title = _("Critical if less than"), maxvalue = None)
+                                                ]
+                                            ),
+                                            Tuple(
+                                                title = _("Specify levels in absolute values"),
+                                                elements = [
+                                                  Integer(title = _("Warning if below"), unit = _("MB")),
+                                                  Integer(title = _("Critical if below"), unit = _("MB"))
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    title = _("Levels for free memory"),
+                                    help = _("Keep in mind that if you have 1GB RAM and 1GB SWAP you need to "
+                                             "specify 120% or 1200MB to get an alert if there is only 20% free RAM available. "
+                                             "The free memory levels do not work with the fortigate check, because it does "
+                                             "not provide total memory data."),
+                                    allow_empty = False,
+                                    forth = lambda val: tuple(map(lambda x: -x, val)),
+                                    back  = lambda val: tuple(map(lambda x: -x, val))
+                             )
+                        ]
+                    ),
+                ),
+                ("average",
+                    Integer(
+                        title = _("Averaging"),
+                        help = _("If this parameter is set, all measured values will be averaged "
+                               "over the specified time interval before levels are being applied. Per "
+                               "default, averaging is turned off. "),
+                       unit = _("minutes"),
+                       minvalue = 1,
+                       default_value = 60,
+                    )
+                ),
+            ],
+            optional_keys = [ "average" ],
+        ),
+        forth = lambda t: type(t) == tuple and { "levels" : t } or t,
+    ),
     None, None
 )
 
@@ -2023,10 +2206,47 @@ register_check_parameters(
         title = _("Specify levels in percentage of total RAM"),
         elements = [
           Percentage(title = _("Warning at a RAM usage of"), default_value = 80.0),
-          Percentage(title = _("Critical at a RAM usage of"), default_value = 90.0)]),
+          Percentage(title = _("Critical at a RAM usage of"), default_value = 90.0),
+        ]),
     None, None
 )
 
+register_check_parameters(
+    subgroup_os,
+    "vm_guest_tools",
+    _("Virtual machine guest tools status"),
+     Dictionary(
+         optional_keys = False,
+         elements = [
+            ( "guestToolsCurrent",
+               MonitoringState(
+                   title = _("VMware Tools is installed, and the version is current"),
+                   default_value = 0,
+               )
+            ),
+            ( "guestToolsNeedUpgrade",
+               MonitoringState(
+                   title = _("VMware Tools is installed, but the version is not current"),
+                   default_value = 1,
+               )
+            ),
+             ( "guestToolsNotInstalled",
+               MonitoringState(
+                   title = _("VMware Tools has never been installed"),
+                   default_value = 2,
+               )
+            ),
+            ( "guestToolsUnmanaged",
+               MonitoringState(
+                   title = _("VMware Tools is installed, but it is not managed by VMWare"),
+                   default_value = 1,
+               )
+            ),
+         ]
+      ),
+    None,
+    "dict",
+)
 register_check_parameters(
     subgroup_os,
     "vm_heartbeat",
@@ -2067,6 +2287,38 @@ register_check_parameters(
     None,
     "dict",
 )
+
+register_check_parameters(
+    subgroup_applications,
+    "services_summary",
+    _("Windows Service Summary"),
+    Dictionary(
+        title = _('Autostart Services'),
+        elements = [
+            ('ignored',
+            ListOfStrings(
+                title = _("Ignored autostart services"),
+                help  = _('Regular expressions matching the begining of the internal name '
+                          'or the description of the service. '
+                          'If no name is given then this rule will match all services. The '
+                          'match is done on the <i>beginning</i> of the service name. It '
+                          'is done <i>case sensitive</i>. You can do a case insensitive match '
+                          'by prefixing the regular expression with <tt>(?i)</tt>. Example: '
+                          '<tt>(?i).*mssql</tt> matches all services which contain <tt>MSSQL</tt> '
+                          'or <tt>MsSQL</tt> or <tt>mssql</tt> or...'),
+                orientation = "horizontal",
+            )),
+            ('state_if_stopped',
+            MonitoringState(
+                title = _("Default state if stopped autostart services are found"),
+                default_value = 0,
+            )),
+        ],
+    ),
+    None,
+    "dict"
+)
+
 register_check_parameters(
     subgroup_applications,
     "esx_vsphere_objects",
@@ -2666,21 +2918,17 @@ register_check_parameters(
     Dictionary(
         elements = [
             ( "conns",
-                Tuple(
-                    title = _("Max. number of connections"),
-                    elements = [
-                       Integer(title = _("Warning if above"), default_value = 25000 ),
-                       Integer(title = _("Critical if above"), default_value = 30000 ) ,
-                    ]
+                Levels(
+                     title = _("Max. number of connections"),
+                     default_value = None,
+                     default_levels = (25000, 30000)
                 )
             ),
             ( "ssl_conns",
-                Tuple(
-                    title = _("Max. number of ssl connections"),
-                    elements = [
-                       Integer(title = _("Warning if above"), default_value = 25000 ),
-                       Integer(title = _("Critical if above"), default_value = 30000 ),
-                    ]
+                Levels(
+                     title = _("Max. number of connections"),
+                     default_value = None,
+                     default_levels = (25000, 30000)
                 )
             ),
         ]),
@@ -3067,15 +3315,6 @@ register_check_parameters(
     None, None
 )
 
-# register_check_parameters(
-#     subgroup_virt,
-#     "esx_hostsystems",
-#     _("Available HostSystems in ESX cluster"),
-#     None,
-#     "first",
-#     False,
-# )
-
 
 register_check_parameters(
     subgroup_hardware,
@@ -3210,7 +3449,8 @@ register_check_parameters(
                             title = _("Resulting state"),
                         ),
                     ],
-                    default_value = ( "running", "auto", 0)),
+                    default_value = ( "running", "auto", 0)
+                ),
                 title = _("Services states"),
                 help = _("You can specify a separate monitoring state for each possible "
                          "combination of service state and start type. If you do not use "
@@ -3664,88 +3904,94 @@ register_check_parameters(
     "first"
 )
 
+def apc_convert_from_tuple(params):
+    if type(params) in (list, tuple):
+        params = { "levels": params}
+    return params
+
 register_check_parameters(
    subgroup_environment,
     "apc_symentra",
     _("APC Symmetra Checks"),
-    Dictionary(
-        elements = [
-            ("levels",
-            Tuple(
-                title = _("Levels of battery parameters during normal operation"),
-                elements = [
-                    Integer(
-                        title = _("Critical Battery Capacity"),
-                        help = _("The battery capacity in percent at and below which a critical state is triggered"),
-                        unit = "%",
-                        default_value = 95,
+    Transform(
+        Dictionary(
+            elements = [
+                ("levels",
+                Tuple(
+                    title = _("Levels of battery parameters during normal operation"),
+                    elements = [
+                        Integer(
+                            title = _("Critical Battery Capacity"),
+                            help = _("The battery capacity in percent at and below which a critical state is triggered"),
+                            unit = "%", default_value = 95,
+                        ),
+                        Integer(
+                            title = _("Critical System Temperature"),
+                            help = _("The critical temperature of the System"),
+                            unit = _("C"),
+                            default_value = 55,
+                        ),
+                        Integer(
+                            title = _("Critical Battery Current"),
+                            help = _("The critical battery current in Ampere"),
+                            unit = _("A"),
+                            default_value = 1,
+                        ),
+                        Integer(
+                            title = _("Critical Battery Voltage"),
+                            help = _("The output voltage at and below which a critical state "
+                                     "is triggered."),
+                            unit = _("V"),
+                            default_value = 220,
+                        ),
+                    ]
+                )),
+                ("output_load",
+                Tuple(
+                  title = _("Current Output Load"),
+                  help = _("Here you can set levels on the current percentual output load of the UPS. "
+                           "This load affects the running time of all components being supplied "
+                           "with battery power."),
+                  elements = [
+                     Percentage(
+                         title = _("Warning level"),
+                     ),
+                     Percentage(
+                         title = _("Critical level"),
+                     ),
+                  ]
+                )),
+                ("post_calibration_levels",
+                Dictionary(
+                    title = _("Levels of battery parameters after calibration"),
+                    help = _("After a battery calibration the battery capacity is reduced until the "
+                             "battery is fully charged again. Here you can specify an alternative "
+                             "lower level in this post-calibration phase. "
+                             "Since apc devices remember the time of the last calibration only "
+                             "as a date, the alternative lower level will be applied on the whole "
+                             "day of the calibration until midnight. You can extend this time period "
+                             "with an additional time span to make sure calibrations occuring just "
+                             "before midnight do not trigger false alarms."
                     ),
-                    Integer(
-                        title = _("Critical Battery Temperature"),
-                        help = _("The critical temperature of the battery"),
-                        unit = _("C"),
-                        default_value = 40,
-                    ),
-                    Integer(
-                        title = _("Critical Battery Current"),
-                        help = _("The critical battery current in Ampere"),
-                        unit = _("A"),
-                        default_value = 1,
-                    ),
-                    Integer(
-                        title = _("Critical Battery Voltage"),
-                        help = _("The output voltage at and below which a critical state is triggered."),
-                        unit = _("V"),
-                        default_value = 220,
-                    ),
-                ]
-            )),
-            ("output_load",
-            Tuple(
-              title = _("Current Output Load"),
-              help = _("Here you can set levels on the current percentual output load of the UPS. "
-                       "This load affects the running time of all components being supplied "
-                       "with battery power."),
-              elements = [
-                 Percentage(
-                     title = _("Warning level"),
-                 ),
-                 Percentage(
-                     title = _("Critical level"),
-                 ),
-              ]
-
-            )
-            ),
-            ("post_calibration_levels",
-            Dictionary(
-                title = _("Levels of battery parameters after calibration"),
-                help = _("After a battery calibration the battery capacity is reduced until the "
-                         "battery is fully charged again. Here you can specify an alternative lower "
-                         "level in this post-calibration phase. "
-                         "Since apc devices remember the time of the last calibration only "
-                         "as a date, the alternative lower level will be applied on the whole "
-                         "day of the calibration until midnight. You can extend this time period "
-                         "with an additional time span to make sure calibrations occuring just "
-                         "before midnight do not trigger false alarms."
-                ),
-                elements = [
-                    ("altcapacity",
-                    Percentage(
-                        title = _("Alternative critical battery capacity after calibration"),
-                        default_value = 50,
-                    )),
-                    ("additional_time_span",
-                    Integer(
-                        title = ("Extend post-calibration phase by additional time span"),
-                        unit = _("minutes"),
-                        default_value = 0,
-                    )),
-                ],
-                optional_keys = False,
-            )),
-        ],
-        optional_keys = ['post_calibration_levels', 'output_load'],
+                    elements = [
+                        ("altcapacity",
+                        Percentage(
+                            title = _("Alternative critical battery capacity after calibration"),
+                            default_value = 50,
+                        )),
+                        ("additional_time_span",
+                        Integer(
+                            title = ("Extend post-calibration phase by additional time span"),
+                            unit = _("minutes"),
+                            default_value = 0,
+                        )),
+                    ],
+                    optional_keys = False,
+                )),
+            ],
+            optional_keys = ['post_calibration_levels', 'output_load'],
+        ),
+        forth = apc_convert_from_tuple
     ),
     None,
     "first"
@@ -4332,6 +4578,16 @@ register_check_parameters(subgroup_applications,
                         choices = syslog_facilities,
                         default_value = 17, # local1
                     )),
+                    ('monitor_logfilelist',
+                        Checkbox(
+                            title =  _("Monitoring of forwarded logfiles"),
+                            label = _("Warn if list of forwarded logfiles changes"),
+                            help = _("If this option is enabled then the check monitors the list of forwarded "
+                                  "logfiles and will warn you if at any time a logfile is missing or exceeding "
+                                  "when compared to the initial list that was snapshotted during service detection. "
+                                  "Reinventorize this check in order to make it OK again."),
+                     )
+                    ),
                 ],
                 optional_keys = ['restrict_logfiles'],
             ),
@@ -4519,4 +4775,12 @@ register_check_parameters(
                         "dot and hyphon for your service description"),
     ),
     "first", False
+)
+
+register_check_parameters(
+    subgroup_os,
+    "zypper",
+    _("Zypper Updates"),
+    None,
+    None, None,
 )

@@ -36,7 +36,7 @@ TAROPTS        	= --owner=root --group=root --exclude=.svn --exclude=*~ \
 		  --exclude=.gitignore --exclude=.*.swp --exclude=.f12
 LIVESTATUS_SOURCES = configure aclocal.m4 config.guess config.h.in config.sub \
 		     configure.ac ltmain.sh Makefile.am Makefile.in missing \
-		     nagios/README nagios/*.h src/*.{h,c,cc} src/Makefile.{in,am} \
+		     nagios/README nagios/*.h nagios4/README nagios4/*.h src/*.{h,c,cc} src/Makefile.{in,am} \
 		     depcomp install-sh api/python/{*.py,README} api/perl/*
 
 
@@ -86,6 +86,7 @@ dist: mk-livestatus mk-eventd
 	tar czf $(DISTNAME)/share.tar.gz $(TAROPTS) check_mk_templates.cfg
 	tar czf $(DISTNAME)/checks.tar.gz $(TAROPTS) -C checks $$(cd checks ; ls)
 	tar czf $(DISTNAME)/notifications.tar.gz $(TAROPTS) -C notifications $$(cd notifications ; ls)
+	tar czf $(DISTNAME)/inventory.tar.gz $(TAROPTS) -C inventory $$(cd inventory ; ls)
 	tar czf $(DISTNAME)/checkman.tar.gz $(TAROPTS) -C checkman $$(cd checkman ; ls)
 	tar czf $(DISTNAME)/web.tar.gz $(TAROPTS) -C web htdocs plugins
 	tar czf $(DISTNAME)/livestatus.tar.gz $(TAROPTS) -C livestatus  $$(cd livestatus ; echo $(LIVESTATUS_SOURCES) )
@@ -126,6 +127,8 @@ mk-livestatus:
 	cd livestatus ; tar cf - $(LIVESTATUS_SOURCES) | tar xf - -C ../mk-livestatus-$(VERSION)
 	mkdir -p mk-livestatus-$(VERSION)/nagios
 	cp livestatus/nagios/*.h mk-livestatus-$(VERSION)/nagios/
+	mkdir -p mk-livestatus-$(VERSION)/nagios4
+	cp livestatus/nagios4/*.h mk-livestatus-$(VERSION)/nagios4/
 	tar czf mk-livestatus-$(VERSION).tar.gz $(TAROPTS) mk-livestatus-$(VERSION)
 	rm -rf mk-livestatus-$(VERSION)
 
@@ -153,6 +156,7 @@ setversion:
         sed -i 's/say "Version: .*"/say "Version: $(NEW_VERSION)"/' agents/check_mk_agent.openvms
 	sed -i 's/#define CHECK_MK_VERSION .*/#define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' agents/windows/check_mk_agent.cc ; \
 	sed -i 's/!define CHECK_MK_VERSION .*/!define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' agents/windows/installer.nsi ; \
+	sed -ri 's/^(VERSION[[:space:]]*= *).*/\1'"$(NEW_VERSION)/" agents/windows/Makefile ; \
 	sed -i 's/^AC_INIT.*/AC_INIT([MK Livestatus], ['"$(NEW_VERSION)"'], [mk@mathias-kettner.de])/' livestatus/configure.ac ; \
 	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' mkeventd/bin/mkeventd ; \
 	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' doc/treasures/mknotifyd ; \
@@ -226,11 +230,11 @@ mrproper:
 	git clean -xfd -e .bugs 2>/dev/null || git clean -xfd
 
 
-SOURCE_FILES = checkman/* modules/* checks/* notifications/* $$(find -name Makefile) \
+SOURCE_FILES = checkman/* modules/* checks/* notifications/* inventory/* $$(find -name Makefile) \
           livestatus/src/*{cc,c,h} web/htdocs/*.{py,css} web/htdocs/js/*.js web/plugins/*/*.py \
-          doc/helpers/* scripts/setup.sh scripts/autodetect.py $(find -type f pnp-templates/*.php) \
+          doc/helpers/* scripts/setup.sh scripts/autodetect.py $$(find pnp-templates -type f -name "*.php") \
           mkeventd/bin/mkeventd mkeventd/web/htdocs/*.py mkeventd/web/plugins/*/*.py mkeventd/src/*.c \
-          mkeventd/checks/*
+          mkeventd/checks/* check_mk_templates.cfg doc/treasures/mknotifyd
 
 healspaces:
 	@echo "Removing trailing spaces from code lines..."

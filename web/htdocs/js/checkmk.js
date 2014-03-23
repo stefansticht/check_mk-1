@@ -1000,8 +1000,8 @@ function toggle_folding(oImg, state) {
 
 function folding_step(oImg, state, step) {
     // Initialize unset step
-    if(typeof step === 'undefined')
-        if(state == 1)
+    if (typeof step === 'undefined')
+        if (state == 1)
             step = 1;
         else
             step = 8;
@@ -1010,14 +1010,15 @@ function folding_step(oImg, state, step) {
     // current rotating angle
     oImg.src = oImg.src.substr(0, oImg.src.length - 6) + step + "0.png";
 
-    if(state == 1) {
-        if(step == 9) {
+    if (state == 1) {
+        if (step == 9) {
             oImg = null;
             return;
         }
         step += 1;
-    } else {
-        if(step == 0) {
+    }
+    else {
+        if (step == 0) {
             oImg = null;
             return;
         }
@@ -1058,16 +1059,20 @@ function change_class(o, a, b) {
 }
 
 
-function toggle_tree_state(tree, name, oContainer) {
+function toggle_tree_state(tree, name, oContainer, fetch_url) {
     var state;
     if (has_class(oContainer, 'closed')) {
         change_class(oContainer, 'closed', 'open');
+        if (fetch_url && !oContainer.innerHTML) {
+            oContainer.innerHTML = get_url_sync(fetch_url);
+        }
         state = 'on';
         if (oContainer.tagName == 'TR') { // handle in-table toggling
             while (oContainer = oContainer.nextSibling)
                 change_class(oContainer, 'closed', 'open');
         }
-    } else {
+    }
+    else {
         change_class(oContainer, 'open', 'closed');
         state = 'off';
         if (oContainer.tagName == 'TR') { // handle in-table toggling
@@ -1080,19 +1085,20 @@ function toggle_tree_state(tree, name, oContainer) {
 }
 
 
-function toggle_foldable_container(treename, id) {
+// fetch_url: dynamically load content of opened element.
+function toggle_foldable_container(treename, id, fetch_url) {
     // Check, if we fold a NG-Norm
     var oNform = document.getElementById('nform.' + treename + '.' + id);
     if (oNform) {
         var oImg = oNform.childNodes[0];
         toggle_folding(oImg, oImg.src[oImg.src.length - 6] == '0');
         var oTr = oNform.parentNode.nextSibling;
-        toggle_tree_state(treename, id, oTr);
+        toggle_tree_state(treename, id, oTr, fetch_url);
     }
     else {
         var oImg = document.getElementById('treeimg.' + treename + '.' + id);
         var oBox = document.getElementById('tree.' + treename + '.' + id);
-        toggle_tree_state(treename, id, oBox);
+        toggle_tree_state(treename, id, oBox, fetch_url);
         toggle_folding(oImg, !has_class(oBox, "closed"));
         oImg = null;
         oBox = null;
@@ -1803,7 +1809,20 @@ function vs_duallist_switch(field, varprefix) {
     // Move the selected option to the other select field
     var selected = field.options[field.selectedIndex];
     field.removeChild(selected);
-    other_field.appendChild(selected);
+
+    // Determine the correct child to insert
+    var sibling = other_field.firstChild;
+    while (sibling != null) {
+        if (sibling.nodeType == 1 && sibling.label.toLowerCase() > selected.label.toLowerCase())
+            break;
+        sibling = sibling.nextSibling
+    }
+
+    if (sibling)
+        other_field.insertBefore(selected, sibling);
+    else
+        other_field.appendChild(selected);
+
     selected.selected = false;
 
     // add remove from internal helper field

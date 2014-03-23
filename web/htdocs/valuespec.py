@@ -174,6 +174,8 @@ class Age(ValueSpec):
         minutes, seconds = divmod(rest,      60)
 
         html.write("<div>")
+        if self._label:
+            html.write(self._label + " ")
         html.number_input(varprefix+'_days', days, 2)
         html.write(" %s " % _("days"))
         html.number_input(varprefix+'_hours', hours, 2)
@@ -319,7 +321,8 @@ class TextAscii(ValueSpec):
         self._size          = kwargs.get("size", 25) # also possible: "max"
         self._cssclass      = kwargs.get("cssclass", "text")
         self._strip         = kwargs.get("strip", True)
-        self._allow_empty   = kwargs.get("allow_empty", True)
+        self._allow_empty   = kwargs.get("allow_empty", _("none"))
+        self._empty_text    = kwargs.get("empty_text", "")
         self._read_only     = kwargs.get("read_only")
         self._none_is_empty = kwargs.get("none_is_empty", False)
         self._regex         = kwargs.get("regex")
@@ -358,8 +361,8 @@ class TextAscii(ValueSpec):
 
 
     def value_to_text(self, value):
-        if value == None:
-            return _("none")
+        if not value:
+            return self._empty_text
         else:
             if self._attrencode:
                 return html.attrencode(value)
@@ -451,10 +454,16 @@ class RegExpUnicode(TextUnicode, RegExp):
 class EmailAddress(TextAscii):
     def __init__(self, **kwargs):
         TextAscii.__init__(self, **kwargs)
-        self._regex = re.compile('^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4}$', re.I)
+        self._regex = re.compile('^[A-Z0-9._%+-]+@(localhost|[A-Z0-9.-]+\.[A-Z]{2,4})$', re.I)
+        self._make_clickable = kwargs.get("make_clickable", False)
 
     def value_to_text(self, value):
-        return '<a href="mailto:%s">%s</a>' % (value, value)
+        if not value:
+            return TextAscii.value_to_text(self, value)
+        elif self._make_clickable:
+            return '<a href="mailto:%s">%s</a>' % (value, value)
+        else:
+            return value
 
 
 # Network as used in routing configuration, such as
@@ -644,6 +653,7 @@ class ListOfStrings(ValueSpec):
             self._valuespec = TextAscii()
         self._vertical = kwargs.get("orientation", "vertical") == "vertical"
         self._allow_empty = kwargs.get("allow_empty", True)
+        self._empty_text  = kwargs.get("empty_text", "")
 
     def render_input(self, vp, value):
         # Form already submitted?
@@ -669,6 +679,9 @@ class ListOfStrings(ValueSpec):
         return []
 
     def value_to_text(self, value):
+        if not value:
+            return self._empty_text
+
         if self._vertical:
             s = '<table>'
             for v in value:
@@ -696,7 +709,11 @@ class ListOfStrings(ValueSpec):
 
     def validate_value(self, value, vp):
         if len(value) == 0 and not self._allow_empty:
-            raise MKUserError(vp + "_0", _("Please specify at least one value"))
+            if self._empty_text:
+                msg = self._empty_text
+            else:
+                msg = _("Please specify at least one value")
+            raise MKUserError(vp + "_0", msg)
         if self._valuespec:
             for nr, s in enumerate(value):
                 self._valuespec.validate_value(s, vp + "_%d" % nr)
@@ -1769,16 +1786,23 @@ class TimeofdayRange(ValueSpec):
             raise MKUserError(varprefix + "_until", _("The <i>from</i> time must not be greater then the <i>until</i> time."))
         ValueSpec.custom_validate(self, value, varprefix)
 
+month_names = [
+  _("January"),   _("February"), _("March"),    _("April"),
+  _("May"),       _("June"),     _("July"),     _("August"),
+  _("September"), _("October"),  _("November"), _("December")
+]
+
 class Timerange(CascadingDropdown):
     def __init__(self, **kwargs):
         self._title = _('Time range')
 
+        if 'choices' not in kwargs:
+            kwargs['choices'] = []
+
         if kwargs.get('allow_empty', False):
-            kwargs['choices'] = [
+            kwargs['choices'] += [
                 (None, ''),
             ]
-        else:
-            kwargs['choices'] = []
 
         kwargs['choices'] += [
             ( "d0",  _("Today") ),
@@ -1862,8 +1886,9 @@ class Timerange(CascadingDropdown):
             elif rangespec[0] == 'm': # month
                 broken[2] = 1
                 from_time = time.mktime(broken)
+                last_year = broken[0] - ((broken[1] == 1) and 1 or 0)
                 titles = month_names[broken[1] - 1] + " " + str(broken[0]), \
-                         month_names[(broken[1] + 10) % 12] + " " + str(broken[0])
+                         month_names[(broken[1] + 10) % 12] + " " + str(last_year)
 
             elif rangespec[0] == 'y': # year
                 broken[1:3] = [1, 1]
@@ -1889,6 +1914,20 @@ class Timerange(CascadingDropdown):
                         from_broken[1] = 12
                         from_broken[0] -= 1
                 return (time.mktime(from_broken), until_time), titles[1]
+
+class PNPTimerange(Timerange):
+    def __init__(self, **kwargs):
+        kwargs['choices'] = [
+            ('pnp_view', _("PNP View"), DropdownChoice(
+                default_value = '1',
+                choices = [
+                    ("0", _("4 Hours")),  ("1", _("25 Hours")),
+                    ("2", _("One Week")), ("3", _("One Month")),
+                    ("4", _("One Year")), ("", _("All"))
+                ],
+            )),
+        ]
+        Timerange.__init__(self, **kwargs)
 
 
 # Make a configuration value optional, i.e. it may be None.
@@ -2322,13 +2361,18 @@ class Dictionary(ValueSpec):
                 html.write('<tr><td class=dictleft>')
             div_id = varprefix + "_d_" + param
             vp     = varprefix + "_p_" + param
+            colon_printed = False
             if self._optional_keys and param not in self._required_keys:
                 visible = html.get_checkbox(vp + "_USE")
                 if visible == None:
                     visible = param in value
+                label = vs.title()
+                if self._columns == 2:
+                    label += ":"
+                    colon_printed = True
                 html.checkbox(vp + "_USE", param in value,
                               onclick="valuespec_toggle_option(this, %r)" % div_id,
-                              label=vs.title())
+                              label=label)
             else:
                 visible = True
                 if vs.title():
@@ -2342,7 +2386,7 @@ class Dictionary(ValueSpec):
                             html.write(": ")
 
             if self._columns == 2:
-                if vs.title():
+                if vs.title() and not colon_printed:
                     html.write(':')
                 html.help(vs.help())
                 if not oneline:
@@ -2648,6 +2692,12 @@ class Transform(ValueSpec):
             return self._back(value)
         else:
             return value
+
+    def title(self):
+        if self._title:
+            return self._title
+        else:
+            return self._valuespec.title()
 
     def render_input(self, varprefix, value):
         self._valuespec.render_input(varprefix, self.forth(value))

@@ -40,6 +40,7 @@ register_rule(group,
                  "via SSH. The command line may contain the placeholders <tt>&lt;IP&gt;</tt> and "
                  "<tt>&lt;HOST&gt;</tt>."),
         label = _("Command line to execute"),
+	empty_text = _("Access Check_MK Agent via TCP"),
         size = 80,
         attrencode = True))
 
@@ -63,8 +64,8 @@ register_rule(group,
                 ( "tcp_port",
                   Integer(
                        title = _("TCP Port number"),
-                       help = _("Port number for connecting to vSphere"),
-                       default_value = 4711,
+                       help = _("Port number for https connection to vSphere"),
+                       default_value = 443,
                        minvalue = 1,
                        maxvalue = 65535,
                   )
@@ -95,6 +96,16 @@ register_rule(group,
                        forth = lambda v: [ x.replace("storage", "datastore") for x in v ],
                        title = _("Retrieve information about..."),
                     )
+                 ),
+                 ( "spaces",
+                   DropdownChoice(
+                       title = _("Spaces in hostnames"),
+                       choices = [
+                           ( "underscore", _("Replace with underscores") ),
+                           ( "cut",        _("Cut everything after first space") ),
+                       ],
+                       default = "underscore",
+                   )
                  ),
                  ( "direct",
                    DropdownChoice(
@@ -137,8 +148,9 @@ register_rule(group,
         help = _("This rule selects the vSphere agent instead of the normal Check_MK Agent "
                  "and allows monitoring of VMWare ESX via the vSphere API. You can configure "
                  "your connection settings here."),
-        forth = lambda a: dict([("skip_placeholder_vms", True), ("use_pysphere" , False)] + a.items())
+        forth = lambda a: dict([("skip_placeholder_vms", True), ("use_pysphere" , False), ("spaces", "underscore")] + a.items())
     ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = 'first')
 
 
@@ -158,6 +170,7 @@ register_rule(group,
            )
         ]
     ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = "first")
 
 register_rule(group,
@@ -173,13 +186,23 @@ register_rule(group,
             ( "user",
               TextAscii(
                   title = _("EMC VNX admin user name"),
-                  allow_empty = False,
+                  allow_empty = True,
+                  help = _("If you leave user name and password empty, the special agent tries to "
+                           "authenticate against the EMC VNX device by Security Files. "
+                           "These need to be created manually before using. Therefor run as "
+                           "instance user (if using OMD) or Nagios user (if not using OMD) "
+                           "a command like "
+                           "<tt>naviseccli -AddUserSecurity -scope 0 -password PASSWORD -user USER</tt> "
+                           "This creates <tt>SecuredCLISecurityFile.xml</tt> and "
+                           "<tt>SecuredCLIXMLEncrypted.key</tt> in the home directory of the user "
+                           "and these files are used then."
+                           ),
               )
             ),
             ( "password",
               Password(
                   title = _("EMC VNX admin user password"),
-                  allow_empty = False,
+                  allow_empty = True,
               )
             ),
             ( "infos",
@@ -189,6 +212,8 @@ register_rule(group,
                          ( "disks",          _("Disks") ),
                          ( "hba",            _("iSCSI HBAs") ),
                          ( "hwstatus",       _("Hardware Status") ),
+                         ( "raidgroups",     _("RAID Groups") ),
+                         ( "agent",          _("Model and Revsion") ),
                      ],
                      default_value = [ "disks", "hba", "hwstatus", ],
                      allow_empty = False,
@@ -199,6 +224,7 @@ register_rule(group,
         ],
         optional_keys = [ ],
     ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = 'first')
 
 register_rule(group,
@@ -208,8 +234,9 @@ register_rule(group,
         title = _("Create random monitoring data"),
         help = _("By configuring this rule for a host - instead of the normal "
                  "Check_MK agent random monitoring data will be created."),
-        totext = _("No configuration neccessary."),
+        totext = _("Create random monitoring data"),
     ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = 'first')
 
 register_rule(group,
@@ -233,4 +260,5 @@ register_rule(group,
         ],
         optional_keys = [ "timeout" ],
     ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = 'first')

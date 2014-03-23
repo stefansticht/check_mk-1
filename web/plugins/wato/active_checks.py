@@ -88,8 +88,8 @@ register_rule(group,
                  default_value = "PING",
            ))
         ] + check_icmp_params,
-        match = "all",
-    )
+    ),
+    match = "all",
 )
 
 register_rule(group,
@@ -157,7 +157,8 @@ register_rule(group,
             ]),
             forth = lambda x: type(x) == tuple and x[1] or x,
             title = _("Check FTP Service"),
-        )
+    ),
+    match = "all",
 )
 
 
@@ -168,8 +169,10 @@ register_rule(group,
         help = _("Check the resolution of a hostname into an IP address by a DNS server. "
                  "This check uses <tt>check_dns</tt> from the standard Nagios plugins."),
         elements = [
-           TextAscii(title = _("Hostname"), allow_empty = False,
-                     help = _('The name or address you want to query')),
+           TextAscii(
+               title = _("Queried Hostname or IP address"),
+               allow_empty = False,
+               help = _('The name or IPv4 address you want to query')),
            Dictionary(
                title = _("Optional parameters"),
                elements = [
@@ -179,11 +182,15 @@ register_rule(group,
                          allow_empty = False,
                          help = _("Optional DNS server you want to use for the lookup"))),
                    ( "expected_address",
-                     TextAscii(
-                         title = _("Expected Address"),
-                         allow_empty = False,
-                         help = _("Optional IP-Address you expect the DNS server to return. The host "
-                                  "must end with a dot (.) " )),
+                     Transform(
+                         ListOfStrings(
+                             title = _("Expected answer (IP address or hostname)"),
+                             help = _("List all allowed expected answers here. If query for an "
+                                      "IP address then the answer will be host names, that end "
+                                      "with a dot."),
+                         ),
+                         forth = lambda old: type(old) in (str, unicode) and [old] or old,
+                     ),
                    ),
                    ( "expected_authority",
                      FixedValue(
@@ -217,7 +224,8 @@ register_rule(group,
                 ]),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 register_rule(group,
     "active_checks:sql",
@@ -315,7 +323,8 @@ register_rule(group,
             )
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 register_rule(group,
     "active_checks:tcp",
@@ -456,7 +465,8 @@ register_rule(group,
                 ]),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 
 register_rule(group,
@@ -609,6 +619,11 @@ register_rule(group,
                                   ],
                                   default_value = 'follow'),
                             ),
+                            ( "expect_response_header",
+                              TextAscii(
+                                  title = _("String to expect in response headers"),
+                              )
+                            ),
                             ( "expect_response",
                               ListOfStrings(
                                   title = _("Strings to expect in server response"),
@@ -747,7 +762,8 @@ register_rule(group,
             ),
         ]
     ),
-    match = 'all')
+    match = 'all'
+)
 
 register_rule(group,
     "active_checks:ldap",
@@ -992,7 +1008,8 @@ register_rule(group,
                       )
                     ),
                 ])
-        ]),
+        ]
+    ),
     match = 'all'
 )
 
@@ -1057,7 +1074,8 @@ register_rule(group,
         ],
         required_keys = [ "share", "levels" ],
     ),
-    match = 'all')
+    match = 'all'
+)
 
 def PluginCommandLine(addhelp = ""):
     return TextAscii(
@@ -1150,7 +1168,7 @@ register_rule(group,
                       )),
                       ( "output",
                         TextUnicode(
-                            title = _("Plugin output in case of absent abdates"),
+                            title = _("Plugin output in case of absent updates"),
                             size = 40,
                             allow_empty = False,
                             default_value = _("Check result did not arrive in time")
@@ -1243,6 +1261,46 @@ register_rule(group,
                         elements = [
                             Integer(title = _("Warning if equal or below")),
                             Integer(title = _("Critical if equal or below")),
+                        ]
+                    )),
+                ]
+            ),
+        ]
+    ),
+    match = 'all'
+)
+
+register_rule(group,
+    "active_checks:notify_count",
+    Tuple(
+        title = _("Check Number of Notifications per Contact"),
+        help = _("Check the number of sent notifications per contact using the plugin <tt>check_notify_count</tt> "
+                 "provided with Check_MK. This plugin counts the total number of notifcations sent by the local "
+                 "monitoring core and creates graphs for each individual contact. You can configure thresholds "
+                 "on the number of notifications per contact in a defined time interval."
+                 "This plugin queries livestatus to extract the notification related log entries from the "
+                 "log file of your monitoring core."),
+        elements = [
+            TextUnicode(
+                title = _("Name"),
+                help = _("The name will be used in the service description"),
+                allow_empty = False
+            ),
+            Integer(
+                title = _("Interval to monitor"),
+                label = _("notifications within last"),
+                unit = _("minutes"),
+                minvalue = 1,
+                default_value = 60,
+            ),
+            Dictionary(
+                title = _("Optional parameters"),
+                elements = [
+                    ("num_per_contact", Tuple(
+                        title = _("Thresholds for Notifications per Contact"),
+                        elements = [
+                            Integer(title = _("Warning if above"), default_value = 20),
+                            Integer(title = _("Critical if above"), default_value = 50),
                         ]
                     )),
                 ]

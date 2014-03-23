@@ -1,6 +1,6 @@
-title: Rittal CMC-III PSM Currents
+title: Rittal CMC-III PSM: Currents
 agents: snmp
-catalog: hw/environment
+catalog: hw/environment/rittal
 license: GPL
 distribution: check_mk
 description:
@@ -13,7 +13,7 @@ description:
  the check is {CRIT}.
 
 item:
- The name of the power system module found, comprised of the unit number on the bus, 
+ The name of the power system module found, comprised of the unit number on the bus,
  the PSM name, and the unit on the PSM
 
 perfdata:

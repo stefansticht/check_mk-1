@@ -393,6 +393,7 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
     # then we prepend this data and also tolerate a failing
     # normal Check_MK Agent access.
     piggy_output = get_piggyback_info(hostname) + get_piggyback_info(ipaddress)
+
     output = ""
     agent_failed = False
     if is_tcp_host(hostname):
@@ -422,9 +423,14 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
         raise MKAgentError("Too short output from agent: '%s'" % output)
 
     lines = [ l.strip() for l in output.split('\n') ]
-    info, piggybacked = parse_info(lines, hostname)
+    info, piggybacked, persisted = parse_info(lines, hostname)
     store_piggyback_info(hostname, piggybacked)
+    store_persisted_info(hostname, persisted)
     store_cached_hostinfo(hostname, info)
+
+    # Add information from previous persisted agent outputs, if those
+    # sections are not available in the current output
+    add_persisted_info(hostname, info)
 
     # If the agent has failed and the information we seek is
     # not contained in the piggy data, raise an exception
@@ -435,6 +441,34 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
             return []
 
     return info[check_type] # return only data for specified check
+
+def store_persisted_info(hostname, persisted):
+    dir = var_dir + "/persisted/"
+    if persisted:
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        file(dir + hostname, "w").write("%r\n" % persisted)
+        if opt_debug:
+            sys.stdout.write("Persisted sections %s.\n" % ", ".join(persisted.keys()))
+
+def add_persisted_info(hostname, info):
+    try:
+        path = var_dir + "/persisted/" + hostname
+        persisted = eval(file(path).read())
+    except:
+        return
+
+    now = time.time()
+    for section, (persisted_until, persisted_section) in persisted.items():
+        if now < persisted_until:
+            if section not in info:
+                info[section] = persisted_section
+                if opt_debug:
+                    sys.stdout.write("Added persisted section %s.\n" % section)
+        else:
+            if opt_debug:
+                sys.stdout.write("Persisted section %s is outdated by %d seconds.\n" % (
+                        section, persisted_until - now))
 
 
 def get_piggyback_info(hostname):
@@ -698,13 +732,19 @@ def store_cached_checkinfo(hostname, checkname, table):
     else:
         g_infocache[hostname] = { checkname: table }
 
-# Split agent output in chunks, splits lines by whitespaces
+# Split agent output in chunks, splits lines by whitespaces.
+# Returns a triple of:
+# 1. A dictionary from "sectionname" to a list of rows
+# 2. piggy-backed data for other hosts
+# 3. Sections to be persisted for later usage
 def parse_info(lines, hostname):
+
     info = {}
     piggybacked = {} # unparsed info for other hosts
+    persist = {} # handle sections with option persist(...)
     host = None
-    chunk = []
-    chunkoptions = {}
+    section = []
+    section_options = {}
     separator = None
     for line in lines:
         if line[:4] == '<<<<' and line[-4:] == '>>>>':
@@ -717,12 +757,14 @@ def parse_info(lines, hostname):
                     host = None # unpiggybacked "normal" host
         elif host: # processing data for an other host
             piggybacked.setdefault(host, []).append(line)
+
+        # Found normal section header
+        # section header has format <<<name:opt1(args):opt2:opt3(args)>>>
         elif line[:3] == '<<<' and line[-3:] == '>>>':
-            chunkheader = line[3:-3]
-            # chunk header has format <<<name:opt1(args):opt2:opt3(args)>>>
-            headerparts = chunkheader.split(":")
-            chunkname = headerparts[0]
-            chunkoptions = {}
+            section_header = line[3:-3]
+            headerparts = section_header.split(":")
+            section_name = headerparts[0]
+            section_options = {}
             for o in headerparts[1:]:
                 opt_parts = o.split("(")
                 opt_name = opt_parts[0]
@@ -730,19 +772,25 @@ def parse_info(lines, hostname):
                     opt_args = opt_parts[1][:-1]
                 else:
                     opt_args = None
-                chunkoptions[opt_name] = opt_args
+                section_options[opt_name] = opt_args
 
-            chunk = info.get(chunkname, None)
-            if chunk == None: # chunk appears in output for the first time
-                chunk = []
-                info[chunkname] = chunk
+            section = info.get(section_name, None)
+            if section == None: # section appears in output for the first time
+                section = []
+                info[section_name] = section
             try:
-                separator = chr(int(chunkoptions["sep"]))
+                separator = chr(int(section_options["sep"]))
             except:
                 separator = None
+
+            # Split of persisted section for server-side caching
+            if "persist" in section_options:
+                until = int(section_options["persist"])
+                persist[section_name] = ( until, section )
+
         elif line != '':
-            chunk.append(line.split(separator))
-    return info, piggybacked
+            section.append(line.split(separator))
+    return info, piggybacked, persist
 
 
 def cachefile_age(filename):
@@ -898,6 +946,8 @@ def do_check(hostname, ipaddress, only_check_types = None):
 
     start_time = time.time()
 
+    expected_version = agent_target_version(hostname)
+
     # Exit state in various situations is confiugrable since 1.2.3i1
     exit_spec = exit_code_spec(hostname)
 
@@ -915,6 +965,9 @@ def do_check(hostname, ipaddress, only_check_types = None):
         elif num_errors > 0:
             output = "Got no information from host, "
             status = exit_spec.get("empty_output", 2)
+        elif expected_version and agent_version != expected_version:
+            output = "unexpected agent version %s (should be %s), " % (agent_version, expected_version)
+            status = exit_spec.get("wrong_version", 1)
         elif agent_min_version and agent_version < agent_min_version:
             output = "old plugin version %s (should be at least %s), " % (agent_version, agent_min_version)
             status = exit_spec.get("wrong_version", 1)
@@ -1284,17 +1337,16 @@ def submit_check_result(host, servicedesc, result, sa):
 
 def submit_to_core(host, service, state, output):
     # Save data for sending it to the Check_MK Micro Core
-    if monitoring_core == "cmc":
+    # Replace \n to enable multiline ouput
+    if opt_keepalive:
+        output = output.replace("\n", "\x01", 1).replace("\n","\\n")
         result = "\t%d\t%s\t%s\n" % (state, service, output.replace("\0", "")) # remove binary 0, CMC does not like it
-        if opt_keepalive:
-            global total_check_output
-            total_check_output += result
-        else:
-            if not opt_verbose:
-                sys.stdout.write(result)
+        global total_check_output
+        total_check_output += result
 
     # Send to Nagios/Icinga command pipe
-    elif check_submission == "pipe":
+    elif check_submission == "pipe" or monitoring_core == "cmc": # CMC does not support file
+        output = output.replace("\n", "\\n")
         open_command_pipe()
         if nagios_command_pipe:
             nagios_command_pipe.write("[%d] PROCESS_SERVICE_CHECK_RESULT;%s;%s;%d;%s\n" %
@@ -1305,6 +1357,7 @@ def submit_to_core(host, service, state, output):
 
     # Create check result files for Nagios/Icinga
     elif check_submission == "file":
+        output = output.replace("\n", "\\n")
         open_checkresult_file()
         if checkresult_file_fd:
             now = time.time()
@@ -1347,10 +1400,18 @@ def i_am_root():
 
 # Returns the nodes of a cluster, or None if hostname is
 # not a cluster
+g_nodesof_cache = {}
 def nodes_of(hostname):
+    nodes = g_nodesof_cache.get(hostname, False)
+    if nodes != False:
+        return nodes
+
     for tagged_hostname, nodes in clusters.items():
         if hostname == tagged_hostname.split("|")[0]:
+            g_nodesof_cache[hostname] = nodes
             return nodes
+
+    g_nodesof_cache[hostname] = None
     return None
 
 def pnp_cleanup(s):

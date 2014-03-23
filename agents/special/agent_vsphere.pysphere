@@ -53,9 +53,10 @@ OPTIONS:
   -D, --direct                  Assume a directly queried host system (no vCenter). In
                                 This we expect data about only one HostSystem to be
                                 Found and do not create piggy host data for that host.
-  -p                            Skip placeholder virtualmachines. These backup vms are created
+  -P                            Skip placeholder virtualmachines. These backup vms are created
                                 by the Site Recovery Manager (SRM) and are identified by not
                                 having any assigned virtual disks.
+  -p, --port port               Alternative port number (default is 443 for the https connection)
   --pysphere                    Does nothing. For compatibility with new agent.
   -H, --hostname                Specify a hostname. This is neccessary if this is
                                 different from HOST. It is being used in --direct
@@ -87,10 +88,10 @@ OPTIONS:
 
 """)
 
-short_options = 'hi:u:s:Dat:H:cpS:'
+short_options = 'hi:u:s:Dat:H:cPp:S:'
 long_options  = [
     'help', 'user=', 'secret=', 'direct', 'agent', 'debug', 'modules=', 'timeout=', 'hostname=',
-    'dump-counters', 'profile', 'pysphere', 'spaces='
+    'dump-counters', 'profile', 'pysphere', 'spaces=', 'port='
 ]
 
 try:
@@ -104,6 +105,7 @@ opt_direct              = False
 opt_agent               = False
 opt_dump_counters       = False
 opt_timeout             = 60
+opt_port                = 443
 opt_hostname            = None
 opt_skip_placeholder_vm = False
 opt_spaces              = "cut"
@@ -127,8 +129,10 @@ for o,a in opts:
         opt_direct = True
     elif o in [ '-a', '--agent' ]:
         opt_agent = True
-    elif o in [ '-p' ]:
+    elif o in [ '-P' ]:
         opt_skip_placeholder_vm = True
+    elif o in [ '-p', '--port' ]:
+        opt_port = a
     elif o in [ '-u', '--user' ]:
         user = a
     elif o in [ '-s', '--secret' ]:
@@ -158,6 +162,8 @@ elif not args:
 else:
     sys.stderr.write("ERROR: Please specify exactly one host.\n")
     sys.exit(1)
+
+port = ":" + str(opt_port)
 
 socket.setdefaulttimeout(opt_timeout)
 
@@ -215,9 +221,9 @@ try:
     # server. Details can be found here:
     # http://www.vmware.com/support/developer/vc-sdk/visdk41pubs/ApiReference/vim.ServiceInstance.html)
     if opt_debug:
-        sys.stderr.write("Connecting to %s..." % host_address)
+        sys.stderr.write("Connecting to %s%s..." % (host_address, port))
         sys.stderr.flush()
-    host.connect(host_address, user, secret, sock_timeout=opt_timeout)
+    host.connect(host_address+port, user, secret, sock_timeout=opt_timeout)
     if opt_debug:
         sys.stderr.write("Connected.\n")
 except socket.timeout:
@@ -641,6 +647,7 @@ def output_mors(what, properties, direct=False):
                 print line
 
 
+g_datastores = {}
 def output_datastores():
     property_names = [ 
         "name",
@@ -662,11 +669,14 @@ def output_datastores():
     rows = host._retrieve_properties_traversal(property_names=property_names, obj_type=MORTypes.Datastore)
     # if the user has no permission to host / datastores, rows is None, skip it then
     if rows:
+        last_name = None
         for mor in rows:
             for entry in mor.PropSet:
                 if entry.Name == "name":
+                    last_name = entry.Val
                     print '[%s]' % entry.Val
                 else:
+                    g_datastores.setdefault(last_name, {})[entry.Name.split(".")[1]] = entry.Val
                     print '%s\t%s' % (entry.Name.split(".")[1], entry.Val)
 
 def conv_multipath(value):
@@ -736,6 +746,22 @@ if "hostsystem" in mortypes:
       #"summary.quickStats.uptime": str,
     }, opt_direct)
 
+def conv_vm_datastoreUrl(value):
+    result = []
+    for entry in value.VirtualMachineConfigInfoDatastoreUrlPair:
+        datastore_info = "name %s" % (entry.Name)
+        extra_info = []
+        if g_datastores.get(entry.Name):
+            for key, value in g_datastores.get(entry.Name).items():
+                extra_info.append("%s %s" % (key, value))
+        if extra_info:
+            datastore_info += "|" + "|".join(extra_info)
+        result.append(datastore_info)
+
+    return "\t".join(result)
+
+
+
 # Warning: we have no guarantee that all properties are always
 # output. For example if a VM is powered off, the only property
 # we get is summary.runtime.powerState
@@ -770,6 +796,7 @@ vm_propertys = {
       #"config.hardware.hwVersion": str,
       #"config.hardware.guestId": str,
       #"config.hardware.uuid": str,
+      "config.datastoreUrl": conv_vm_datastoreUrl,
 
       "runtime.powerState": str,
       "runtime.host" : conv_host,

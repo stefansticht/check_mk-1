@@ -169,6 +169,7 @@ rm -rf $RPM_BUILD_ROOT
 /usr/share/check_mk/agents
 /usr/share/check_mk/checks
 /usr/share/check_mk/notifications
+/usr/share/check_mk/inventory
 /usr/share/check_mk/modules
 /usr/share/check_mk/pnp-templates/*
 /usr/share/check_mk/check_mk_templates.cfg
@@ -189,6 +190,7 @@ rm -rf $RPM_BUILD_ROOT
 %files agent
 %config(noreplace) /etc/xinetd.d/check_mk
 /usr/bin/check_mk_agent
+/usr/bin/check_mk_caching_agent
 /usr/bin/waitmax
 /usr/bin/mk-job
 /usr/share/doc/check_mk_agent
@@ -201,6 +203,7 @@ rm -rf $RPM_BUILD_ROOT
 %config(noreplace) /etc/xinetd.d/check_mk
 /usr/bin/check_mk_agent
 /usr/bin/waitmax
+/usr/bin/check_mk_caching_agent
 /usr/bin/mk-job
 /usr/share/doc/check_mk_agent
 %dir /usr/lib/check_mk_agent/local

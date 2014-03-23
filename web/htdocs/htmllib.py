@@ -801,8 +801,11 @@ class html:
             self.bottom_footer()
             self.body_end()
 
-    def add_status_icon(self, img, tooltip):
-        self.status_icons[img] = tooltip
+    def add_status_icon(self, img, tooltip, url = None):
+	if url:
+	    self.status_icons[img] = tooltip, url
+	else:
+	    self.status_icons[img] = tooltip
 
     def render_status_icons(self):
         h = '<a target="_top" href="%s"><img class=statusicon src="images/status_frameurl.png" title="%s"></a>\n' % \
@@ -811,13 +814,17 @@ class html:
              ("index.py?" + self.urlencode_vars([("start_url", self.makeuri([]))]), _("URL to this page including sidebar"))
 
         if self.myfile == "view" and self.var('mode') != 'availability':
-            # h += '<a target="_top" href="%s"><img class=statusicon src="images/status_frameurl.png" title="%s"></a>\n' % \
-            #     (self.makeuri([("output_format", "json_export")]), _("Export as JSON"))
-            h += '<a target="_top" href="%s"><img class=statusicon src="images/icon_download_csv.png" title="%s"></a>\n' % \
+            h += '<a target="_top" href="%s">' \
+                 '<img class=statusicon src="images/status_download_csv.png" title="%s"></a>\n' % \
                  (self.makeuri([("output_format", "csv_export")]), _("Export as CSV"))
 
         for img, tooltip in self.status_icons.items():
-            h += '<img class=statusicon src="images/status_%s.png" title="%s">\n' % (img, tooltip)
+	    if type(tooltip) == tuple:
+		tooltip, url = tooltip
+		h += '<a target="_top" href="%s"><img class=statusicon src="images/status_%s.png" title="%s"></a>\n' % \
+		     (url, img, tooltip)
+	    else:
+		h += '<img class=statusicon src="images/status_%s.png" title="%s">\n' % (img, tooltip)
         return h
 
     def show_error(self, msg):
@@ -1184,35 +1191,39 @@ class html:
             ht = ht[0:x] + ht[y+9:]
         return ht
 
-    def begin_foldable_container(self, treename, id, isopen, title, indent = True, first = False):
+    def begin_foldable_container(self, treename, id, isopen, title, indent=True, first=False, icon=None, fetch_url=None):
         self.folding_indent = indent
-        # try to get persisted state of tree
-        tree_state = self.get_tree_states(treename)
 
-        if id in tree_state:
-            isopen = tree_state[id] == "on"
+        isopen = self.foldable_container_is_open(treename, id, isopen)
 
         img_num = isopen and "90" or "00"
-        onclick = ' onclick="toggle_foldable_container(\'%s\', \'%s\')"' % (treename, id)
+        onclick = ' onclick="toggle_foldable_container(\'%s\', \'%s\', \'%s\')"' % (
+               treename, id, fetch_url and fetch_url or '');
         onclick += ' onmouseover="this.style.cursor=\'pointer\';" '
         onclick += ' onmouseout="this.style.cursor=\'auto\';" '
 
         if indent == "nform":
             self.write('<tr class=heading><td id="nform.%s.%s" %s colspan=2>' % (treename, id, onclick))
-            self.write('<img align=absbottom class="treeangle nform" src="images/tree_%s.png">' % (
-                    isopen and "90" or "00"))
+            if icon:
+                self.write('<img class="treeangle title" src="images/icon_%s.png">' % icon)
+            else:
+                self.write('<img align=absbottom class="treeangle nform" src="images/tree_%s.png">' % (
+                        isopen and "90" or "00"))
             self.write('%s</td></tr>' % title)
         else:
-            self.write('<img align=absbottom class="treeangle" id="treeimg.%s.%s" '
-                       'src="images/tree_%s.png" %s>' %
-                    (treename, id, img_num, onclick))
+            if not icon:
+                self.write('<img align=absbottom class="treeangle" id="treeimg.%s.%s" '
+                           'src="images/tree_%s.png" %s>' %
+                        (treename, id, img_num, onclick))
             if title.startswith('<'): # custom HTML code
                 self.write(title)
                 if indent != "form":
                     self.write("<br>")
             else:
-                self.write('<b class="treeangle title" class=treeangle %s>%s</b><br>' %
-                         (onclick, title))
+                self.write('<b class="treeangle title" class=treeangle %s>' % onclick)
+                if icon:
+                    self.write('<img class="treeangle title" src="images/icon_%s.png">' % icon)
+                self.write('%s</b><br>' % title)
 
             indent_style = "padding-left: %dpx; " % (indent == True and 15 or 0)
             if indent == "form":
@@ -1224,11 +1235,19 @@ class html:
         # give caller information about current toggling state (needed for nform)
         return isopen
 
+    def foldable_container_is_open(self, treename, id, isopen):
+        # try to get persisted state of tree
+        tree_state = self.get_tree_states(treename)
+
+        if id in tree_state:
+            isopen = tree_state[id] == "on"
+        return isopen
+
     def end_foldable_container(self):
         if self.folding_indent != "nform":
             self.write("</ul>")
 
-    def get_tree_states(self,tree):
+    def get_tree_states(self, tree):
         self.load_tree_states()
         return self.treestates.get(tree, {})
 
@@ -1244,14 +1263,13 @@ class html:
         self.load_tree_states()
         self.treestates[tree] = val
 
-    def parse_field_storage(self, fields):
+    def parse_field_storage(self, fields, handle_uploads_as_file_obj = False):
         self.vars     = {}
         self.listvars = {} # for variables with more than one occurrance
         self.uploads  = {}
 
         for field in fields.list:
             varname = field.name
-            value = field.value
 
             # To prevent variours injections, we only allow a defined set
             # of characters to be used in variables
@@ -1260,19 +1278,23 @@ class html:
 
             # put uploaded file infos into separate storage
             if field.filename is not None:
-                self.uploads[varname] = (field.filename, field.type, field.value)
+                if handle_uploads_as_file_obj:
+                    value = field.file
+                else:
+                    value = field.value
+                self.uploads[varname] = (field.filename, field.type, value)
 
             else: # normal variable
                 # Multiple occurrance of a variable? Store in extra list dict
                 if varname in self.vars:
                     if varname in self.listvars:
-                        self.listvars[varname].append(value)
+                        self.listvars[varname].append(field.value)
                     else:
-                        self.listvars[varname] = [ self.vars[varname], value ]
+                        self.listvars[varname] = [ self.vars[varname], field.value ]
                 # In the single-value-store the last occurrance of a variable
                 # has precedence. That makes appending variables to the current
                 # URL simpler.
-                self.vars[varname] = value
+                self.vars[varname] = field.value
 
     def uploaded_file(self, varname, default = None):
         return self.uploads.get(varname, default)

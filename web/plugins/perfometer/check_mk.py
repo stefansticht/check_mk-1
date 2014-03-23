@@ -72,6 +72,9 @@ perfometers["check_mk-oracle_asm_diskgroup"] = perfometer_check_mk_df
 perfometers["check_mk-mysql_capacity"] = perfometer_check_mk_df
 perfometers["check_mk-esx_vsphere_counters.ramdisk"] = perfometer_check_mk_df
 perfometers["check_mk-hitachi_hnas_span"] = perfometer_check_mk_df
+perfometers["check_mk-hitachi_hnas_volume"] = perfometer_check_mk_df
+perfometers["check_mk-emcvnx_raidgroups.capacity"] = perfometer_check_mk_df
+perfometers["check_mk-emcvnx_raidgroups.capacity_contiguous"] = perfometer_check_mk_df
 
 def perfometer_esx_vsphere_datastores(row, check_command, perf_data):
     used_mb        = perf_data[0][1]
@@ -278,6 +281,8 @@ perfometers["check_mk-hwg_temp"] = perfometer_temperature
 perfometers["check_mk-sensatronics_temp"] = perfometer_temperature
 perfometers["check_mk-apc_inrow_temperature"] = perfometer_temperature
 perfometers["check_mk-hitachi_hnas_temp"] = perfometer_temperature
+perfometers["check_mk-dell_poweredge_temp"] = perfometer_temperature
+perfometers["check_mk-dell_chassis_temp"] = perfometer_temperature
 
 def perfometer_temperature_multi(row, check_command, perf_data):
     display_value = -1
@@ -297,6 +302,26 @@ def perfometer_temperature_multi(row, check_command, perf_data):
     return display_string, perfometer_linear(display_value, display_color)
 
 perfometers["check_mk-brocade_mlx_temp"] = perfometer_temperature_multi
+
+def perfometer_power(row, check_command, perf_data):
+    display_color = "#60f020"
+
+    value=savefloat(perf_data[0][1])
+    crit=savefloat(perf_data[0][4])
+    warn=savefloat(perf_data[0][3])
+    power_perc = value/crit*90 # critical is at 90% to allow for more than crit
+
+    if value > warn:
+        display_color = "#FFC840"
+    if value > crit:
+        display_color = "#FF0000"
+
+    display_string = "%.1f Watt" % value
+    return display_string, perfometer_linear(power_perc, display_color)
+
+perfometers["check_mk-dell_poweredge_amperage.power"] = perfometer_power
+perfometers["check_mk-dell_chassis_power"] = perfometer_power
+perfometers["check_mk-dell_chassis_powersupplies"] = perfometer_power
 
 def perfometer_users(row, check_command, perf_data):
     state = row["service_state"]
@@ -375,6 +400,7 @@ perfometers["check_mk-lnx_if"] = perfometer_check_mk_if
 perfometers["check_mk-hpux_if"] = perfometer_check_mk_if
 perfometers["check_mk-mcdata_fcport"] = perfometer_check_mk_if
 perfometers["check_mk-esx_vsphere_counters.if"] = perfometer_check_mk_if
+perfometers["check_mk-hitachi_hnas_fc_if"] = perfometer_check_mk_if
 
 
 def perfometer_check_mk_brocade_fcport(row, check_command, perf_data):
@@ -524,6 +550,12 @@ def perfometer_check_mk_hba(row, check_command, perf_data):
             read_blocks, "#30d050", write_blocks, "#0060c0", 100000, 2)
 perfometers["check_mk-emcvnx_hba"] = perfometer_check_mk_hba
 
+def perfometer_check_mk_iops(row, check_command, perf_data):
+    iops = int(perf_data[0][1])
+    text = "%d/s" % iops
+
+    return text, perfometer_logarithmic(iops, 100000, 2, "#30d050")
+perfometers["check_mk-emc_isilon_iops"] = perfometer_check_mk_iops
 
 def perfometer_check_mk_printer_supply(row, check_command, perf_data):
     left = savefloat(perf_data[0][1])
@@ -728,6 +760,10 @@ def perfometer_eaton(row, command, perf):
 
 perfometers['check_mk-ups_eaton_enviroment'] = perfometer_eaton
 
+def perfometer_battery(row, command, perf):
+    return u"%s%%" % str(perf[0][1]), perfometer_linear(float(perf[0][1]), '#C98D5C')
+
+perfometers['check_mk-emc_datadomain_nvbat'] = perfometer_battery
 
 def perfometer_ups_capacity(row, command, perf):
     return "%0.2f%%" % float(perf[1][1]), perfometer_linear(float(perf[1][1]), '#B2FF7F')
@@ -792,3 +828,10 @@ def perfometer_fanspeed_logarithmic(row, check_command, perf_data):
     return "%d rpm" % value, perfometer_logarithmic(value, 5000, 2, "silver")
 
 perfometers["check_mk-hitachi_hnas_fan"]  = perfometer_fanspeed_logarithmic
+
+def perfometer_check_mk_arcserve_backup(row, check_command, perf_data):
+    bytes = int(perf_data[2][1])
+    text = number_human_readable(bytes)
+
+    return text, perfometer_logarithmic(bytes, 1000 * 1024 * 1024 * 1024, 2, "#BDC6DE")
+perfometers["check_mk-arcserve_backup"] = perfometer_check_mk_arcserve_backup

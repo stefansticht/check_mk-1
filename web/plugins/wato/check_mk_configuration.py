@@ -24,16 +24,18 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+
+#   .--Global Settings-----------------------------------------------------.
+#   |  ____ _       _           _   ____       _   _   _                   |
+#   | / ___| | ___ | |__   __ _| | / ___|  ___| |_| |_(_)_ __   __ _ ___   |
+#   || |  _| |/ _ \| '_ \ / _` | | \___ \ / _ \ __| __| | '_ \ / _` / __|  |
+#   || |_| | | (_) | |_) | (_| | |  ___) |  __/ |_| |_| | | | | (_| \__ \  |
+#   | \____|_|\___/|_.__/ \__,_|_| |____/ \___|\__|\__|_|_| |_|\__, |___/  |
+#   |                                                          |___/       |
 #   +----------------------------------------------------------------------+
-#   |           ____             __ _                                      |
-#   |          / ___|___  _ __  / _(_) __ ___   ____ _ _ __ ___            |
-#   |         | |   / _ \| '_ \| |_| |/ _` \ \ / / _` | '__/ __|           |
-#   |         | |__| (_) | | | |  _| | (_| |\ V / (_| | |  \__ \           |
-#   |          \____\___/|_| |_|_| |_|\__, | \_/ \__,_|_|  |___/           |
-#   |                                 |___/                                |
-#   +----------------------------------------------------------------------+
-#   | Configuration variables for main.mk                                  |
-#   +----------------------------------------------------------------------+
+#   | Global configuration settings for main.mk and multisite.mk           |
+#   '----------------------------------------------------------------------'
+
 
 group = _("Status GUI (Multisite)")
 
@@ -380,7 +382,35 @@ register_configvar(group,
     domain = "multisite",
 )
 
+register_configvar(group,
+    "user_localizations",
+    Transform(
+        ListOf(
+            Tuple(
+                elements = [
+                   TextUnicode(title = _("Original Text"), size = 40),
+                    Dictionary(
+                        title = _("Translations"),
+                        elements = [
+                            ( l or "en", TextUnicode(title = a, size = 32) )
+                              for (l,a) in get_languages()
+                        ],
+                        columns = 2,
+                    ),
+                ],
+            ),
+            title = _("Custom localizations"),
+            movable = False,
+            totext = _("%d translations"),
+            default_value = sorted(default_user_localizations.items()),
+        ),
+        forth = lambda d: sorted(d.items()),
+        back = lambda l: dict(l),
+    ),
+    domain = "multisite",
+)
 
+#.
 #   .--WATO----------------------------------------------------------------.
 #   |                     __        ___  _____ ___                         |
 #   |                     \ \      / / \|_   _/ _ \                        |
@@ -388,6 +418,8 @@ register_configvar(group,
 #   |                       \ V  V / ___ \| || |_| |                       |
 #   |                        \_/\_/_/   \_\_| \___/                        |
 #   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   | Global Configuration for WATO                                        |
 #   '----------------------------------------------------------------------'
 
 group = _("Configuration GUI (WATO)")
@@ -466,7 +498,8 @@ register_configvar(group,
              default_value = False),
     domain = "multisite")
 
-#GUI----------------------------------------------------------------------.
+#.
+#   .--User Mgmt-----------------------------------------------------------.
 #   |          _   _                 __  __                 _              |
 #   |         | | | |___  ___ _ __  |  \/  | __ _ _ __ ___ | |_            |
 #   |         | | | / __|/ _ \ '__| | |\/| |/ _` | '_ ` _ \| __|           |
@@ -474,6 +507,8 @@ register_configvar(group,
 #   |          \___/|___/\___|_|    |_|  |_|\__, |_| |_| |_|\__|           |
 #   |                                       |___/                          |
 #   +----------------------------------------------------------------------+
+#   | Global settings for users and LDAP connector.                        |
+#   '----------------------------------------------------------------------'
 
 group = _("User Management")
 
@@ -879,14 +914,17 @@ register_configvar(group,
     domain = "multisite"
 )
 
-#   .----------------------------------------------------------------------.
-#   |                   _                                      _           |
-#   |     ___ _ __ ___ | | __   ___  _ __  _ __ ___   ___   __| | ___      |
-#   |    / __| '_ ` _ \| |/ /  / _ \| '_ \| '_ ` _ \ / _ \ / _` |/ _ \     |
-#   |   | (__| | | | | |   <  | (_) | |_) | | | | | | (_) | (_| |  __/     |
-#   |    \___|_| |_| |_|_|\_\  \___/| .__/|_| |_| |_|\___/ \__,_|\___|     |
-#   |                               |_|                                    |
+#.
+#   .--Check_MK------------------------------------------------------------.
+#   |              ____ _               _        __  __ _  __              |
+#   |             / ___| |__   ___  ___| | __   |  \/  | |/ /              |
+#   |            | |   | '_ \ / _ \/ __| |/ /   | |\/| | ' /               |
+#   |            | |___| | | |  __/ (__|   <    | |  | | . \               |
+#   |             \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\              |
+#   |                                      |_____|                         |
 #   +----------------------------------------------------------------------+
+#   |  Operation mode of Check_MK                                          |
+#   '----------------------------------------------------------------------'
 
 group = _("Operation mode of Check_MK")
 
@@ -1044,7 +1082,7 @@ register_configvar(group,
     need_restart = True
 )
 
-group = _("Inventory - automatic service detection")
+group = _("Service discovery")
 
 register_configvar(group,
     "inventory_check_interval",
@@ -1246,14 +1284,6 @@ register_configvar(group,
     need_restart = True
     )
 
-register_configvar(group,
-    "always_cleanup_autochecks",
-    Checkbox(title = _("Always cleanup autochecks"),
-             help = _("When switched on, Check_MK will always cleanup the autochecks files "
-                      "after each inventory, i.e. create one file per host. This is the same "
-                      "as adding the option <tt>-u</tt> to each call of <tt>-I</tt> on the "
-                      "command line.")))
-
 group = _("Check configuration")
 
 
@@ -1329,22 +1359,17 @@ register_configvar(group,
          ],
         ))
 
-#   +----------------------------------------------------------------------+
-#   |                         ____        _                                |
-#   |                        |  _ \ _   _| | ___                           |
-#   |                        | |_) | | | | |/ _ \                          |
-#   |                        |  _ <| |_| | |  __/                          |
-#   |                        |_| \_\\__,_|_|\___|                          |
-#   |                                                                      |
-#   |       ____            _                 _   _                        |
-#   |      |  _ \  ___  ___| | __ _ _ __ __ _| |_(_) ___  _ __  ___        |
-#   |      | | | |/ _ \/ __| |/ _` | '__/ _` | __| |/ _ \| '_ \/ __|       |
-#   |      | |_| |  __/ (__| | (_| | | | (_| | |_| | (_) | | | \__ \       |
-#   |      |____/ \___|\___|_|\__,_|_|  \__,_|\__|_|\___/|_| |_|___/       |
+#.
+#   .--Rulesets------------------------------------------------------------.
+#   |                ____        _                _                        |
+#   |               |  _ \ _   _| | ___  ___  ___| |_ ___                  |
+#   |               | |_) | | | | |/ _ \/ __|/ _ \ __/ __|                 |
+#   |               |  _ <| |_| | |  __/\__ \  __/ |_\__ \                 |
+#   |               |_| \_\\__,_|_|\___||___/\___|\__|___/                 |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
-#   | Declaration of rules to be defined in main.mk or in folders          |
-#   +----------------------------------------------------------------------+
+#   | Rulesets for hosts and services except check parameter rules.        |
+#   '----------------------------------------------------------------------'
 
 register_rulegroup("grouping", _("Grouping"),
    _("Assignment of host &amp; services to host, service and contacts groups. "))
@@ -1705,8 +1730,9 @@ register_rule(group,
         help = _("This setting delays notifications about host problems by the "
                  "specified amount of time. If the host is up again within that "
                  "time, no notification will be sent out."),
-        )
-    )
+    ),
+    factory_default = 0,
+)
 
 register_rule(group,
     "extra_service_conf:first_notification_delay",
@@ -1719,7 +1745,8 @@ register_rule(group,
         help = _("This setting delays notifications about service problems by the "
                  "specified amount of time. If the service is OK again within that "
                  "time, no notification will be sent out."),
-        ),
+    ),
+    factory_default = 0,
     itemtype = "service")
 
 register_rule(group,
@@ -2035,7 +2062,8 @@ register_rule(group,
            TextAscii(
                title = _("SNMP community (SNMP Versions 1 and 2c)"),
                allow_empty = False,
-               attrencode = True),
+               attrencode = True,
+           ),
            Tuple(
                title = _("Credentials for SNMPv3"),
                elements = _snmpv3_basic_elements),
@@ -2050,6 +2078,8 @@ register_rule(group,
                       title = _("Privacy protocol")),
                  Password(title = _("Privacy pass phrase")),
                    ])],
+
+        default_value = "public",
         title = _("SNMP communities of monitored hosts"),
         help = _("By default Check_MK uses the community \"public\" to contact hosts via SNMP. This rule "
                  "can be used to customize the the credentials to be used when contacting hosts via SNMP.")))
@@ -2062,7 +2092,7 @@ register_rule(group,
                  " always assumes UTF-8 encoding. You can declare other "
                  " other encodings here"),
         choices = [
-           ("utf-8", _("UTF-8 (default)") ),
+           ("utf-8", _("UTF-8") ),
            ("latin1" ,_("latin1")),
            ]
         )),
@@ -2122,7 +2152,9 @@ register_rule(group,
                   maxvalue = 50,
               )
             ),
-       ]),
+       ]
+    ),
+    factory_default = { "timeout" : 1, "retries" : 5 },
     match = "dict")
 
 
@@ -2179,11 +2211,30 @@ register_rule(group,
             ),
         ],
     ),
+    factory_default = { "connection" : 2, "missing_sections" : 1, "empty_output" : 2, "wrong_version" : 1, "exception": 3 },
     title = _("Status of the Check_MK service"),
     help = _("This ruleset specifies the total status of the Check_MK service in "
              "case of various error situations. One use case is the monitoring "
              "of hosts that are not always up. You can have Check_MK an OK status "
              "here if the host is not reachable."),
+    match = "dict",
+)
+
+register_rule(group,
+    "check_mk_agent_target_versions",
+    OptionalDropdownChoice(
+        title = _("Check for correct version of Check_MK agent"),
+        help = _("If you want to make sure all of your Check_MK agents are running"
+                 " one specific version, you may set it by this rule. Agents running "
+                 " some different version return a none ok state then"),
+        choices = [
+           ("ignore", _("Ignore the version")),
+           ("site",   _("Same version as the monitoring site")),
+           ],
+        otherlabel    = _("Specific version"),
+        explicit      = TextAscii(allow_empty = False),
+        default_value = "ignore",
+    )
 )
 
 register_rule(group,

@@ -84,24 +84,34 @@ def extract_from_file(filename, elements):
     elif type(elements) == dict:
         extract_domains(tarfile.open(filename, "r"), elements)
 
-def list_tar_content(filename):
+def list_tar_content(the_tarfile):
     files = {}
     try:
-        tar = tarfile.open(filename, "r")
+        if type(the_tarfile) != str:
+            the_tarfile.seek(0)
+            tar = tarfile.open("r", fileobj = the_tarfile)
+        else:
+            tar = tarfile.open(the_tarfile, "r")
         map(lambda x: files.update({x.name: {"size": x.size}}), tar.getmembers())
-    except:
+    except Exception, e:
         return {}
     return files
 
-def get_file_content(tarfilename, filename):
-    tar = tarfile.open(tarfilename, "r")
+def get_file_content(the_tarfile, filename):
+    if type(the_tarfile) != str:
+        the_tarfile.seek(0)
+        tar = tarfile.open("r", fileobj = the_tarfile)
+    else:
+        tar = tarfile.open(the_tarfile, "r")
     return tar.extractfile(filename).read()
 
 def extract_domains(tar, domains):
+    import subprocess
     tar_domains = {}
     for member in tar.getmembers():
         try:
-            tar_domains[member.name[:-7]] = member
+            if member.name.endswith(".tar.gz"):
+                tar_domains[member.name[:-7]] = member
         except Exception, e:
             pass
 
@@ -112,7 +122,7 @@ def extract_domains(tar, domains):
     if not os.path.exists(restore_dir):
         os.makedirs(restore_dir)
 
-    def check_domain_permissions(domain, tar_member):
+    def check_domain(domain, tar_member):
         def can_write(path):
             return os.access(path, os.W_OK)
         errors = []
@@ -126,28 +136,38 @@ def extract_domains(tar, domains):
                 if os.access("/".join(path_tokens), os.W_OK):
                     return True  # exists and writable
                 else:
-                    errors.append("Path not writable %s" % "/".join(path_tokens))
+                    errors.append(_("Permission problem: Path not writable %s") % "/".join(path_tokens))
                     return False # not writable
             else:
                 return check_exists_or_writable(path_tokens[:-1])
 
         # The complete tar file never fits in stringIO buffer..
         tar.extract(tar_member, restore_dir)
-        subtar = tarfile.open("%s/%s" % (restore_dir, tar_member.name))
 
-        # Set group id of extracted files, except base paths..
-        for entry in subtar.getmembers():
-            full_path = prefix + "/" + entry.name
+        # Older versions of python tarfile handle empty subtar archives :(
+        # This won't work: subtar = tarfile.open("%s/%s" % (restore_dir, tar_member.name))
+        p = subprocess.Popen("tar tzf %s/%s" % (restore_dir, tar_member.name), shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        stdout, stderr = p.communicate()
+        if stderr:
+            errors.append(_("Contains corrupt file %s") % tar_member.name)
+            return errors
+
+        for line in stdout:
+            full_path = prefix + "/" + line
             path_tokens = full_path.split("/")
             check_exists_or_writable(path_tokens)
 
         # Cleanup
         os.unlink("%s/%s" % (restore_dir, tar_member.name))
 
-        return len(errors) == 0, errors
+        return errors
 
 
     def cleanup_domain(domain):
+        # Some domains, e.g. authorization, do not get a cleanup
+        if domain.get("cleanup") == False:
+            return
+
         def path_valid(prefix, path):
             if path.startswith("/") or path.startswith(".."):
                 return False
@@ -170,26 +190,20 @@ def extract_domains(tar, domains):
             return
         # The complete tar.gz file never fits in stringIO buffer..
         tar.extract(tar_member, restore_dir)
-        subtar = tarfile.open("%s/%s" % (restore_dir, tar_member.name))
-        subtar.extractall(target_dir)
-
-        # Set group id of extracted files, except base paths..
-        base_paths = [path[1] for path in domain.get("paths") if path[0] == "dir"]
-        for entry in subtar.getmembers():
-            if entry.name not in base_paths:
-                os.chown("%s/%s" % (target_dir, entry.name), -1, gid)
+        p = subprocess.Popen("tar xzf %s/%s -C %s" % (restore_dir, tar_member.name, target_dir), shell = True)
+        p.communicate()
 
 
     # Check write permissions for target directories and files
     errors = []
     for name, tar_member in tar_domains.items():
         if name in domains:
-            result, dom_errors = check_domain_permissions(domains[name], tar_member)
+            dom_errors = check_domain(domains[name], tar_member)
             errors.extend(dom_errors)
     if len(errors):
         errors = list(set(errors))
-        errors.append(_("<br>Please ensure the group is set to '%s' and has write permissions.") % defaults.www_group)
-        raise MKGeneralException(_("Permission problems:<br>%s" % "<br>".join(errors)))
+        errors.append(_("<br>If there are permission problems, please ensure the group is set to '%s' and has write permissions.") % defaults.www_group)
+        raise MKGeneralException(_("Unable to restore snapshot:<br>%s" % "<br>".join(errors)))
 
     # Empty/remove target folders/files
     for name, tar_member in tar_domains.items():

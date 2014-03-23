@@ -70,7 +70,7 @@ The following placeholdes will be substituted by value from the actual event:
 <tr><td class=tt>$STATE$</td><td>State of the event (0/1/2/3)</td></tr>
 <tr><td class=tt>$PHASE$</td><td>Phase of the event (always open)</td></tr>
 <tr><td class=tt>$OWNER$</td><td>Owner of the event</td></tr>
-<tr><td class=tt>$MATCH_GROUPS$</td><td>Text groups from regular expression match, separated by spaces/td></tr>
+<tr><td class=tt>$MATCH_GROUPS$</td><td>Text groups from regular expression match, separated by spaces</td></tr>
 <tr><td class=tt>$MATCH_GROUP_1$</td><td>Text of the first match group from expression match</td></tr>
 <tr><td class=tt>$MATCH_GROUP_2$</td><td>Text of the second match group from expression match</td></tr>
 <tr><td class=tt>$MATCH_GROUP_3$</td><td>Text of the third match group from expression match (and so on...)</td></tr>
@@ -252,6 +252,18 @@ vs_mkeventd_rule = Dictionary(
             choices = mkeventd.service_levels,
             prefix_values = True,
           ),
+        ),
+        ( "contact_groups",
+          ListOf(
+              GroupSelection("contact"),
+              title = _("Fallback Contact Groups"),
+              help = _("When displaying events in the Check_MK GUI you can make a user only see events "
+                       "for hosts he is a contact for. When you expect this rule to reveice events from "
+                       "hosts that are <i>not</i> known to the monitoring you can specify contact groups "
+                       "for the visibility here. Note: if you activate this option and do not specify "
+                       "any group, then users with restricted permissions can never see these events."),
+              movable = False,
+          )
         ),
         ( "actions",
           ListChoice(
@@ -635,12 +647,12 @@ vs_mkeventd_rule = Dictionary(
     optional_keys = [ "delay", "livetime", "count", "expect", "match_priority", "match_priority",
                       "match_facility", "match_sl", "match_host", "match_application", "match_timeperiod",
                       "set_text", "set_host", "set_application", "set_comment",
-                      "set_contact", "cancel_priority", "match_ok" ],
+                      "set_contact", "cancel_priority", "match_ok", "contact_groups" ],
     headers = [
         ( _("General Properties"), [ "id", "description", "disabled" ] ),
         ( _("Matching Criteria"), [ "match", "match_host", "match_application", "match_priority", "match_facility",
                                     "match_sl", "match_ok", "cancel_priority", "match_timeperiod" ]),
-        ( _("Outcome &amp; Action"), [ "state", "sl", "actions", "drop", "autodelete" ]),
+        ( _("Outcome &amp; Action"), [ "state", "sl", "contact_groups", "actions", "drop", "autodelete" ]),
         ( _("Counting &amp; Timing"), [ "count", "expect", "delay", "livetime", ]),
         ( _("Rewriting"), [ "set_text", "set_host", "set_application", "set_comment", "set_contact" ]),
     ],
@@ -680,7 +692,10 @@ vs_mkeventd_event = Dictionary(
             size = 40,
             default_value = _("myhost089"),
             allow_empty = True,
-            attrencode = True)
+            attrencode = True,
+            regex = "^\\S*$",
+            regex_error = _("The host name may not contain spaces."),
+            )
         ),
         ( "priority",
           DropdownChoice(
@@ -918,7 +933,7 @@ def mode_mkeventd_rules(phase):
                 html.empty_icon_button()
                 html.empty_icon_button()
 
-            table.cell("")
+            table.cell("", css="buttons")
             if rule.get("disabled"):
                 html.icon(_("This rule is currently disabled and will not be applied"), "disabled")
             elif event:
@@ -940,6 +955,11 @@ def mode_mkeventd_rules(phase):
                     if groups:
                         msg += _(" Match groups: %s") % ",".join([ g or _('&lt;None&gt;') for g in groups ])
                     html.icon(msg, icon)
+
+            if rule.get("contact_groups") != None:
+                html.icon(_("This rule attaches contact group(s) to the events: %s") %
+                           (", ".join(rule["contact_groups"]) or _("(none)")),
+                         "contactgroups")
 
             table.cell(_("ID"), '<a href="%s">%s</a>' % (edit_url, rule["id"]))
 
@@ -1482,21 +1502,6 @@ if mkeventd_enabled:
     )
 
     register_configvar(group,
-        "mkeventd_connect_timeout",
-        Integer(
-            title = _("Connect timeout to status socket"),
-            help = _("When the Multisite GUI connects the socket of the event daemon "
-                     "in order to retrieve information about current and historic events "
-                     "then this timeout will be applied."),
-            minvalue = 1,
-            maxvalue = 120,
-            default_value = 10,
-            unit = "sec",
-        ),
-        domain = "multisite",
-    )
-
-    register_configvar(group,
         "replication",
         Optional(
             Dictionary(
@@ -1675,20 +1680,6 @@ if mkeventd_enabled:
     )
 
     register_configvar(group,
-        "mkeventd_pprint_rules",
-        Checkbox(title = _("Pretty-Print rules in configuration file"),
-                 label = _("enable pretty-printing of rules"),
-                 help = _("When the WATO module of the Event Console saves rules to the file "
-                          "<tt>mkeventd.d/wato/rules.mk</tt> it usually prints the Python "
-                          "representation of the rules-list into one single line by using the "
-                          "native Python code generator. Enabling this option switches to <tt>pprint</tt>, "
-                          "which nicely indents everything. While this is a bit slower for large "
-                          "rulesets it makes debugging and manual editing simpler."),
-                default_value = False),
-        domain = "multisite",
-    )
-
-    register_configvar(group,
         "actions",
         vs_mkeventd_actions,
         allow_reset = False,
@@ -1781,6 +1772,38 @@ if mkeventd_enabled:
         domain = "mkeventd",
     )
 
+    # A few settings for Multisite and WATO
+    register_configvar(_("Status GUI (Multisite)"),
+        "mkeventd_connect_timeout",
+        Integer(
+            title = _("Connect timeout to status socket of Event Console"),
+            help = _("When the Multisite GUI connects the socket of the event daemon "
+                     "in order to retrieve information about current and historic events "
+                     "then this timeout will be applied."),
+            minvalue = 1,
+            maxvalue = 120,
+            default_value = 10,
+            unit = "sec",
+        ),
+        domain = "multisite",
+    )
+
+    register_configvar(_("Configuration GUI (WATO)"),
+        "mkeventd_pprint_rules",
+        Checkbox(title = _("Pretty-Print rules in config file of Event Console"),
+                 label = _("enable pretty-printing of rules"),
+                 help = _("When the WATO module of the Event Console saves rules to the file "
+                          "<tt>mkeventd.d/wato/rules.mk</tt> it usually prints the Python "
+                          "representation of the rules-list into one single line by using the "
+                          "native Python code generator. Enabling this option switches to <tt>pprint</tt>, "
+                          "which nicely indents everything. While this is a bit slower for large "
+                          "rulesets it makes debugging and manual editing simpler."),
+                default_value = False),
+        domain = "multisite",
+    )
+
+
+
 # Settings that should also be avaiable on distributed Sites that
 # do not run an own eventd but want to query one or send notifications
 # to one.
@@ -1805,26 +1828,13 @@ register_configvar(group,
     need_restart = True)
 
 register_configvar(group,
-    "mkeventd_notify_facility",
-    DropdownChoice(
-        title = _("Syslog facility for Event Console notifications"),
-        help = _("When sending notifications from the monitoring system to the event console "
-                 "the following syslog facility will be set for these messages. Choosing "
-                 "a unique facility makes creation of rules easier."),
-        choices = mkeventd.syslog_facilities,
-        default_value = 16, # local0
-    ),
-    domain = "multisite",
-    need_restart = True)
-
-register_configvar(group,
     "mkeventd_notify_remotehost",
     Optional(
         TextAscii(
             title = _("Host running Event Console"),
             attrencode = True,
         ),
-        title = _("Forward notifications to remote host"),
+        title = _("Send notifications to remote Event Console"),
         help = _("This will send the notification to a Check_MK Event Console on a remote host "
                  "by using syslog. <b>Note</b>: this setting will only be applied if no Event "
                  "Console is running locally in this site! That way you can use the same global "
@@ -1833,6 +1843,19 @@ register_configvar(group,
                  "is enabled."),
         label = _("Send to remote Event Console via syslog"),
         none_label = _("Do not send to remote host"),
+    ),
+    domain = "multisite",
+    need_restart = True)
+
+register_configvar(group,
+    "mkeventd_notify_facility",
+    DropdownChoice(
+        title = _("Syslog facility for Event Console notifications"),
+        help = _("When sending notifications from the monitoring system to the event console "
+                 "the following syslog facility will be set for these messages. Choosing "
+                 "a unique facility makes creation of rules easier."),
+        choices = mkeventd.syslog_facilities,
+        default_value = 16, # local0
     ),
     domain = "multisite",
     need_restart = True)
@@ -1867,6 +1890,18 @@ register_rule(
                 otherlabel = _("Specify explicitly"),
                 explicit = TextAscii(allow_empty = False, attrencode = True),
                 default_value = '$HOSTNAME$',
+              )
+            ),
+            ( "item",
+              TextAscii(
+                title = _("Item (Used in service description)"),
+                help = _("If you enter an item name here, this will be used as "
+                   "part of the service description after the prefix \"Events \". "
+                   "The prefix plus the configured item must result in an unique "
+                   "service description per host. If you leave this empty either the "
+                   "string provided in \"Application\" is used as item or the service "
+                   "gets no item when the \"Application\" field is also not configured."),
+                allow_empty = False,
               )
             ),
             ( "application",
@@ -1928,7 +1963,7 @@ register_rule(
             )
           ),
         ],
-        optional_keys = [ "application", "remote", "ignore_acknowledged" ],
+        optional_keys = [ "application", "remote", "ignore_acknowledged", "item" ],
     ),
     match = 'all',
 )
@@ -2008,8 +2043,16 @@ register_rule(
 #   | Stuff for sending monitoring notifications into the event console.   |
 #   '----------------------------------------------------------------------'
 def mkeventd_update_notifiation_configuration(hosts):
-    contactgroup   = config.mkeventd_notify_contactgroup
-    remote_console = config.mkeventd_notify_remotehost
+    # Setup notification into the Event Console. Note: If
+    # the event console is not activated then also the global
+    # default settings are missing and we must skip this code.
+    # This can happen in a D-WATO setup where the master has
+    # enabled the EC and the slave not.
+    try:
+        contactgroup   = config.mkeventd_notify_contactgroup
+        remote_console = config.mkeventd_notify_remotehost
+    except:
+        return
 
     if not remote_console:
         remote_console = ""

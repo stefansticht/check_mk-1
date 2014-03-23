@@ -84,6 +84,10 @@ def load_plugins():
             'title':  _('Send hint to message inbox (bottom of sidebar)'),
             'handler': notify_gui_msg,
         },
+        'mail': {
+            'title':  _('Send an E-Mail'),
+            'handler': notify_mail,
+        },
     }
 
     dest_choices = [
@@ -198,18 +202,42 @@ def page_notify():
 
         num_recipients = len(recipients)
 
+        num_success = {}
+        for method in msg['methods']:
+            num_success[method] = 0
+
         # Now loop all notitification methods to send the notifications
+        errors = {}
         for user_id in recipients:
             for method in msg['methods']:
-                handler = notify_methods[method]['handler']
-                handler(user_id, msg)
+                try:
+                    handler = notify_methods[method]['handler']
+                    handler(user_id, msg)
+                    num_success[method] = num_success[method] + 1
+                except MKInternalError, e:
+                    errors.setdefault(method, []).append( (user_id, e) )
 
-        msg = _('The notification has been sent to %d recipients.') % num_recipients
-        msg += ' <a href="%s">%s</a>' % (html.makeuri([]), _('Back to previous page'))
+        message = _('The notification has been sent via<br>')
+        message += "<table>"
+        for method in msg['methods']:
+            message += "<tr><td>%s</td><td>to %d of %d recipients</td></tr>" %\
+                            (notify_methods[method]["title"], num_success[method], num_recipients)
+        message += "</table>"
 
-        msg += '<p>Sent notification to: %s</p>' % ', '.join(recipients)
+        message += ' <a href="%s">%s</a>' % (html.makeuri([]), _('Back to previous page'))
+        message += '<p>Sent notification to: %s</p>' % ', '.join(recipients)
+        html.message(message)
 
-        html.message(msg)
+        if errors:
+            error_message = ""
+            for key, values in errors.items():
+                error_message += _("Failed to sent %s notifications to the following users") % key
+                error_message += "<table>"
+                for user, error in values:
+                    error_message += "<tr><td>%s</td><td>%s</td></tr>" % (user, error )
+                error_message += "</table><br>"
+            html.show_error(error_message)
+
 
     html.footer()
 
@@ -227,3 +255,71 @@ def notify_gui_msg(user_id, msg):
     if msg not in messages:
         messages.append(msg)
         save_gui_messages(messages, user_id)
+    return True
+
+
+def notify_mail(user_id, msg):
+    import subprocess, time
+    users = userdb.load_users(lock = False)
+    user = users.get(user_id)
+
+    if not user:
+        raise MKInternalError(_('This user does not exist.'))
+
+    if not user.get('email'):
+        raise MKInternalError(_('This user has no mail address configured.'))
+
+    recipient_name = user.get('alias')
+    if not recipient_name:
+        recipient_name = user_id
+
+    sender_name = users[config.user_id].get('alias')
+    if not sender_name:
+        sender_name = user_id
+
+    # Code mostly taken from notify_via_email() from notify.py module
+    subject = _('Check_MK: Notification')
+    body = _('''Greetings %s,
+
+%s sent you a notification:
+
+---
+%s
+---
+
+''') % (recipient_name, sender_name, msg['text'])
+
+    if msg['valid_till']:
+        body += _('This notification has been created at %s and is valid till %s.') % (
+            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(msg['time'])),
+            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(msg['valid_till']))
+        )
+
+    # FIXME: Maybe use the configured mail command for Check_MK-Notify one day
+    command = u"mail -s '$SUBJECT$' '$CONTACTEMAIL$'"
+    command_utf8 = command.replace('$SUBJECT$', subject).replace('$CONTACTEMAIL$', user['email']).encode("utf-8")
+
+    # Make sure that mail(x) is using UTF-8. Otherwise we cannot send notifications
+    # with non-ASCII characters. Unfortunately we do not know whether C.UTF-8 is
+    # available. If e.g. nail detects a non-Ascii character in the mail body and
+    # the specified encoding is not available, it will silently not send the mail!
+    # Our resultion in future: use /usr/sbin/sendmail directly.
+    # Our resultion in the present: look with locale -a for an existing UTF encoding
+    # and use that.
+    for encoding in os.popen("locale -a 2>/dev/null"):
+        l = encoding.lower()
+        if "utf8" in l or "utf-8" in l or "utf.8" in l:
+            encoding = encoding.strip()
+            os.putenv("LANG", encoding)
+            break
+    else:
+        raise MKInternalError(_('No UTF-8 encoding found in your locale -a! Please provide C.UTF-8 encoding.'))
+
+    p = subprocess.Popen(command_utf8, shell=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+    stdout_txt, stderr_txt = p.communicate(body.encode("utf-8"))
+    exitcode = p.returncode
+    if exitcode != 0:
+        raise MKInternalError(_('Mail could not be delivered. Exit code of command is %r') % exitcode)
+    else:
+        return True

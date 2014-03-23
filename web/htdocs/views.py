@@ -25,7 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 import config, defaults, livestatus, time, os, re, pprint, time, copy
-import weblib, traceback, forms, valuespec
+import weblib, traceback, forms, valuespec, inventory
 from lib import *
 from pagefunctions import *
 
@@ -60,8 +60,9 @@ def load_plugins():
     global multisite_commands        ; multisite_commands         = []
     global ubiquitary_filters        ; ubiquitary_filters         = [] # Always show this filters
     global view_hooks                ; view_hooks                 = {}
+    global inventory_displayhints    ; inventory_displayhints     = {}
 
-    config.declare_permission_section("action", _("Commands on host and services"))
+    config.declare_permission_section("action", _("Commands on host and services"), do_sort = True)
 
     load_web_plugins("views", globals())
 
@@ -71,18 +72,19 @@ def load_plugins():
     loaded_with_language = current_language
 
     # Declare permissions for builtin views
-    config.declare_permission_section("view", _("Builtin views"))
+    config.declare_permission_section("view", _("Multisite Views"), do_sort = True)
     for name, view in multisite_builtin_views.items():
         config.declare_permission("view.%s" % name,
                 view["title"],
                 view["description"],
                 config.builtin_role_ids)
 
+    # Make sure that custom views also have permissions
+    config.declare_dynamic_permissions(declare_custom_view_permissions)
+
     # Add painter names to painter objects (e.g. for JSON web service)
     for n, p in multisite_painters.items():
         p["name"] = n
-
-
 
 
 ##################################################################################
@@ -212,6 +214,10 @@ class Filter:
     def filter(self, tablename):
         return ""
 
+    # Wether this filter needs to load host inventory data
+    def need_inventory(self):
+        return False
+
     # post-Livestatus filtering (e.g. for BI aggregations)
     def filter_table(self, rows):
         return rows
@@ -232,6 +238,7 @@ class Filter:
 
 # Load all views - users or builtins
 def load_views():
+    declare_custom_view_permissions()
     html.multisite_views = {}
 
     # first load builtins. Set username to ''
@@ -265,12 +272,47 @@ def load_views():
                     view["owner"] = user
                     view["name"] = name
 
-                    if view['datasource'] in multisite_datasources:
-                        html.multisite_views[(user, name)] = view
+                    if view['datasource'] not in multisite_datasources:
+                        continue
+
+                    # Maybe resolve inherited attributes
+                    builtin_view = html.multisite_views.get(('', name))
+                    if builtin_view:
+                        for attr in view_inherit_attrs:
+                            if attr not in view and attr in builtin_view:
+                                view[attr] = builtin_view[attr]
+
+                    html.multisite_views[(user, name)] = view
+
+                    # Repair views with missing 'title' or 'description'
+                    for key in [ "title", "description" ]:
+                        if key not in view:
+                            view[key] = _("Missing %s") % key
+
         except SyntaxError, e:
             raise MKGeneralException(_("Cannot load views from %s/views.mk: %s") % (dirpath, e))
 
     html.available_views = available_views()
+
+# Load all users views just in order to declare permissions of custom views
+def declare_custom_view_permissions():
+    # Now scan users subdirs for files "views.mk"
+    subdirs = os.listdir(config.config_dir)
+    for user in subdirs:
+        try:
+            dirpath = config.config_dir + "/" + user
+            if os.path.isdir(dirpath):
+                path = dirpath + "/views.mk"
+                if not os.path.exists(path):
+                    continue
+                views = eval(file(path).read())
+                for name, view in views.items():
+                    if view["public"] and not config.permission_exists("view." + name):
+                        config.declare_permission("view." + name, view["title"], 
+                                    view["description"], ['admin','user','guest'])
+        except:
+            if config.debug:
+                raise
 
 # Get the list of views which are available to the user
 # (which could be retrieved with get_view)
@@ -287,12 +329,12 @@ def available_views():
     # 2. views of special users allowed to globally override builtin views
     for (u, n), view in html.multisite_views.items():
         if n not in views and view["public"] and config.user_may(u, "general.force_views"):
-                # Honor original permissions for the current user
-                permname = "view.%s" % n
-                if config.permission_exists(permname) \
-                    and not config.may(permname):
-                    continue
-                views[n] = view
+            # Honor original permissions for the current user
+            permname = "view.%s" % n
+            if config.permission_exists(permname) \
+                and not config.may(permname):
+                continue
+            views[n] = view
 
     # 3. Builtin views, if allowed.
     for (u, n), view in html.multisite_views.items():
@@ -311,14 +353,6 @@ def available_views():
                     and not config.may(permname):
                     continue
                 views[n] = view
-
-    # Maybe resolve inherited attributes
-    for name, view in views.items():
-        builtin_view = html.multisite_views.get(('', name))
-        if builtin_view:
-            for attr in view_inherit_attrs:
-                if attr not in view and attr in builtin_view:
-                    view[attr] = builtin_view[attr]
 
     return views
 
@@ -658,7 +692,7 @@ def page_edit_view():
     html.write(_("Reload page every "))
     html.number_input("browser_reload", 0)
     html.write(_(" seconds"))
-    html.help(_("Leave this empty or at 0 for now automatic reload."))
+    html.help(_("Leave this empty or at 0 for no automatic reload."))
 
     forms.section(_("Audible alarm sounds"), simple=True)
     html.checkbox("play_sounds", False, label=_("Play alarm sounds"))
@@ -984,7 +1018,8 @@ def create_view(vs):
                 base_view = html.multisite_views.get(('', oldname)) # load builtin view
     elif mode == 'edit' and ('', oldname) in html.multisite_views:
         base_view = html.multisite_views.get(('', oldname)) # load builtin view
-        override = True
+        if oldname == name:
+            override = True
 
     view = {}
     for key, (opt_edit, valuespec) in vs.items():
@@ -1293,6 +1328,10 @@ def show_view(view, show_heading = False, show_buttons = True,
         if only_count or (html.var("filled_in") != "filter" and not html.has_var(varname)):
             html.set_var(varname, value)
 
+    # Af any painter, sorter or filter needs the information about the host's
+    # inventory, then we load it and attach it as column "host_inventory"
+    need_inventory_data = False
+
     # Prepare Filter headers for Livestatus
     filterheaders = ""
     only_sites = None
@@ -1303,6 +1342,8 @@ def show_view(view, show_heading = False, show_buttons = True,
             only_sites = header.strip().split(" ")[1:]
         else:
             filterheaders += header
+        if filt.need_inventory():
+            need_inventory_data = True
 
     # Prepare limit:
     # We had a problem with stats queries on the logtable where
@@ -1351,6 +1392,8 @@ def show_view(view, show_heading = False, show_buttons = True,
             columns += s[0]["columns"]
         else:
             join_columns += s[0]["columns"]
+        if s[0].get("load_inv"):
+            need_inventory_data = True
 
     # Add key columns, needed for executing commands
     columns += datasource["keys"]
@@ -1370,6 +1413,9 @@ def show_view(view, show_heading = False, show_buttons = True,
     for entry in all_painters:
         p = entry[0]
         painter_options += p.get("options", [])
+        if p.get("load_inv"):
+            need_inventory_data = True
+
     painter_options = list(set(painter_options))
     painter_options.sort()
 
@@ -1389,6 +1435,11 @@ def show_view(view, show_heading = False, show_buttons = True,
         # Now add join information, if there are join columns
         if len(join_painters) > 0:
             do_table_join(datasource, rows, filterheaders, join_painters, join_columns, only_sites)
+
+        # Add inventory data if one of the painters needs it
+        if need_inventory_data:
+            for row in rows:
+                row["host_inventory"] = inventory.host(row["host_name"])
 
         sort_data(rows, sorters)
     else:
@@ -1851,7 +1902,7 @@ def show_context_links(thisview, active_filters, show_filters, display_options,
                   (thisview["owner"], thisview["name"], backurl)
         html.context_button(_("Edit View"), url, "edit", id="edit", bestof=config.context_buttons_to_show)
 
-    if show_availability:
+    if 'E' in display_options and show_availability:
         html.context_button(_("Availability"), html.makeuri([("mode", "availability")]), "availability")
 
     if 'B' in display_options:
@@ -2634,7 +2685,10 @@ def group_value(row, group_painters):
     for p in group_painters:
         groupvalfunc = p[0].get("groupby")
         if groupvalfunc:
-            group.append(groupvalfunc(row))
+            if "args" in p[0]:
+                group.append(groupvalfunc(row, *p[0]["args"]))
+            else:
+                group.append(groupvalfunc(row))
         else:
             for c in p[0]["columns"]:
                 group.append(row[c])
@@ -2647,6 +2701,9 @@ def get_painter_option(name):
     return opt.get("value", opt['valuespec'].default_value())
 
 def get_host_tags(row):
+    if "host_custom_variables" in row:
+        return row["host_custom_variables"].get("TAGS", "")
+
     for name, val in zip(row["host_custom_variable_names"],
                          row["host_custom_variable_values"]):
         if name == "TAGS":
@@ -2717,3 +2774,18 @@ def declare_1to1_sorter(painter_name, func, col_num = 0, reverse = False):
         multisite_sorters[painter_name]["cmp"] = \
             lambda r1, r2: func(multisite_painters[painter_name]['columns'][col_num], r2, r1)
     return painter_name
+
+
+
+# Ajax call for fetching parts of the tree
+def ajax_inv_render_tree():
+    hostname = html.var("host")
+    invpath = html.var("path")
+    tree = inventory.host(hostname)
+    node = inventory.get(tree, invpath)
+    if not node:
+        html.show_error(_("Invalid path %s in inventory tree") % invpath)
+    else:
+        render_inv_subtree_container(hostname, invpath, node)
+
+
