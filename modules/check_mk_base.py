@@ -106,6 +106,8 @@ fake_dns                     = False
 opt_keepalive                = False
 opt_cmc_relfilename          = "config"
 opt_keepalive_fd             = None
+opt_oids                     = []
+opt_extra_oids               = []
 
 # register SIGINT handler for consistenct CTRL+C handling
 def interrupt_handler(signum, frame):
@@ -349,7 +351,13 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
             # cache file is newer than check_interval, skip this check
             raise MKSkipCheck()
 
-        content = read_cache_file(cache_relpath, max_cache_age)
+        try:
+            content = read_cache_file(cache_relpath, max_cache_age)
+        except:
+            if simulation_mode and not opt_no_cache:
+                return # Simply ignore missing SNMP cache files
+            raise
+
         if content:
             return eval(content)
         # Not cached -> need to get info via SNMP
@@ -965,8 +973,23 @@ def do_check(hostname, ipaddress, only_check_types = None):
         elif num_errors > 0:
             output = "Got no information from host, "
             status = exit_spec.get("empty_output", 2)
-        elif expected_version and agent_version != expected_version:
-            output = "unexpected agent version %s (should be %s), " % (agent_version, expected_version)
+        elif expected_version and agent_version \
+             and not is_expected_agent_version(agent_version, expected_version):
+            # expected version can either be:
+            # a) a single version string
+            # b) a tuple of ("at_least", {'daily_build': '2014.06.01', 'release': '1.2.5i4'}
+            #    (the dict keys are optional)
+            if type(expected_version) == tuple and expected_version[0] == 'at_least':
+                expected = 'at least'
+                if 'daily_build' in expected_version[1]:
+                    expected += ' build %s' % expected_version[1]['daily_build']
+                if 'release' in expected_version[1]:
+                    if 'daily_build' in expected_version[1]:
+                        expected += ' or'
+                    expected += ' release %s' % expected_version[1]['release']
+            else:
+                expected = expected_version
+            output = "unexpected agent version %s (should be %s), " % (agent_version, expected)
             status = exit_spec.get("wrong_version", 1)
         elif agent_min_version and agent_version < agent_min_version:
             output = "old plugin version %s (should be at least %s), " % (agent_version, agent_min_version)
@@ -1006,6 +1029,9 @@ def do_check(hostname, ipaddress, only_check_types = None):
                 (run_time, run_time, times[0], times[1], times[2], times[3])
     else:
         output += "execution time %.1f sec|execution_time=%.3f\n" % (run_time, run_time)
+
+    if record_inline_snmp_stats and has_inline_snmp and use_inline_snmp:
+        save_snmp_stats()
 
     if opt_keepalive:
         global total_check_output
@@ -1398,6 +1424,78 @@ def username():
 def i_am_root():
     return os.getuid() == 0
 
+# Parses versions of Check_MK and converts them into comparable integers.
+# This does not handle daily build numbers, only official release numbers.
+# 1.2.4p1   -> 01020450001
+# 1.2.4     -> 01020450000
+# 1.2.4b1   -> 01020420100
+# 1.2.3i1p1 -> 01020310101
+# 1.2.3i1   -> 01020310100
+def parse_version(v):
+    def extract_number(s):
+        number = ''
+        for i, c in enumerate(s):
+            try:
+                int(c)
+                number += c
+            except ValueError:
+                s = s[i:]
+                return number and int(number) or 0, s
+        return number and int(number) or 0, ''
+
+    major, minor, rest = v.split('.')
+    sub, rest = extract_number(rest)
+
+    if not rest:
+        val = 50000
+    elif rest[0] == 'p':
+        num, rest = extract_number(rest[1:])
+        val = 50000 + num
+    elif rest[0] == 'i':
+        num, rest = extract_number(rest[1:])
+        val = 10000 + num*100
+
+        if rest and rest[0] == 'p':
+            num, rest = extract_number(rest[1:])
+            val += num
+    elif rest[0] == 'b':
+        num, rest = extract_number(rest[1:])
+        val = 20000 + num*100
+
+    return int('%02d%02d%02d%05d' % (int(major), int(minor), sub, val))
+
+def is_expected_agent_version(agent_version, expected_version):
+    try:
+        if agent_version in [ '(unknown)', None, 'None' ]:
+            return False
+
+        if type(expected_version) == str and expected_version != agent_version:
+            return False
+
+        elif type(expected_version) == tuple and expected_version[0] == 'at_least':
+            is_daily_build = len(agent_version) == 10 or '-' in agent_version
+
+            spec = expected_version[1]
+            if is_daily_build and 'daily_build' in spec:
+                expected = int(spec['daily_build'].replace('.', ''))
+                if len(agent_version) == 10: # master build
+                    agent = int(agent_version.replace('.', ''))
+
+                else: # branch build (e.g. 1.2.4-2014.06.01)
+                    agent = int(agent_version.split('-')[1].replace('.', ''))
+
+                if agent < expected:
+                    return False
+
+            elif 'release' in spec:
+                if parse_version(agent_version) < parse_version(spec['release']):
+                    return False
+
+        return True
+    except Exception, e:
+        raise MKGeneralException("Unable to check agent version (Agent: %s Expected: %s, Error: %s)" %
+                (agent_version, expected_version, e))
+
 # Returns the nodes of a cluster, or None if hostname is
 # not a cluster
 g_nodesof_cache = {}
@@ -1520,6 +1618,9 @@ def get_regex(pattern):
 # Names of texts usually output by checks
 nagios_state_names = ["OK", "WARN", "CRIT", "UNKNOWN"]
 
+# Symbolic representations of states
+state_markers = ["(.)", "(!)", "(!!)", "(?)"]
+
 # int() function that return 0 for strings the
 # cannot be converted to a number
 def saveint(i):
@@ -1547,17 +1648,17 @@ def get_bytes_human_readable(b, base=1024.0, bytefrac=True, unit="B"):
         b *= -1
 
     if b >= base * base * base * base:
-        return '%s%.2fT%s' % (prefix, b / base / base / base / base, unit)
+        return '%s%.2f T%s' % (prefix, b / base / base / base / base, unit)
     elif b >= base * base * base:
-        return '%s%.2fG%s' % (prefix, b / base / base / base, unit)
+        return '%s%.2f G%s' % (prefix, b / base / base / base, unit)
     elif b >= base * base:
-        return '%s%.2fM%s' % (prefix, b / base / base, unit)
+        return '%s%.2f M%s' % (prefix, b / base / base, unit)
     elif b >= base:
-        return '%s%.2fk%s' % (prefix, b / base, unit)
+        return '%s%.2f k%s' % (prefix, b / base, unit)
     elif bytefrac:
-        return '%s%.2f%s' % (prefix, b, unit)
+        return '%s%.2f %s' % (prefix, b, unit)
     else: # Omit byte fractions
-        return '%s%.0f%s' % (prefix, b, unit)
+        return '%s%.0f %s' % (prefix, b, unit)
 
 # Similar to get_bytes_human_readable, but optimized for file
 # sizes. Really only use this for files. We assume that for smaller
@@ -1566,30 +1667,30 @@ def get_bytes_human_readable(b, base=1024.0, bytefrac=True, unit="B"):
 # get_bytes_human_readable().
 def get_filesize_human_readable(size):
     if size < 4 * 1024 * 1024:
-        return "%dB" % int(size)
+        return "%d B" % int(size)
     elif size < 4 * 1024 * 1024 * 1024:
-        return "%.2fMB" % (float(size) / (1024 * 1024))
+        return "%.2f MB" % (float(size) / (1024 * 1024))
     else:
-        return "%.2fGB" % (float(size) / (1024 * 1024 * 1024))
+        return "%.2f GB" % (float(size) / (1024 * 1024 * 1024))
 
 
 def get_nic_speed_human_readable(speed):
     try:
         speedi = int(speed)
         if speedi == 10000000:
-            speed = "10MBit/s"
+            speed = "10 MBit/s"
         elif speedi == 100000000:
-            speed = "100MBit/s"
+            speed = "100 MBit/s"
         elif speedi == 1000000000:
-            speed = "1GBit/s"
+            speed = "1 GBit/s"
         elif speed < 1500:
-            speed = "%dBit/s" % speedi
+            speed = "%d Bit/s" % speedi
         elif speed < 1000000:
-            speed = "%.1fKBit/s" % (speedi / 1000.0)
+            speed = "%.1f KBit/s" % (speedi / 1000.0)
         elif speed < 1000000000:
-            speed = "%.2fMBit/s" % (speedi / 1000000.0)
+            speed = "%.2f MBit/s" % (speedi / 1000000.0)
         else:
-            speed = "%.2fGBit/s" % (speedi / 1000000000.0)
+            speed = "%.2f GBit/s" % (speedi / 1000000000.0)
     except:
         pass
     return speed

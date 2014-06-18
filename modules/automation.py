@@ -43,6 +43,9 @@ def do_automation(cmd, args):
             result = automation_delete_host(args)
         elif cmd == "notification-get-bulks":
             result = automation_get_bulks(args)
+        elif cmd == "update-dns-cache":
+            read_config_files(with_autochecks=False)
+            result = automation_update_dns_cache()
         else:
             read_config_files()
             if cmd == "try-inventory":
@@ -51,6 +54,8 @@ def do_automation(cmd, args):
                 result = automation_inventory(args)
             elif cmd == "analyse-service":
                 result = automation_analyse_service(args)
+            elif cmd == "active-check":
+                result = automation_active_check(args)
             elif cmd == "get-autochecks":
                 result = automation_get_autochecks(args)
             elif cmd == "set-autochecks":
@@ -63,6 +68,8 @@ def do_automation(cmd, args):
                 result = automation_scan_parents(args)
             elif cmd == "diag-host":
                 result = automation_diag_host(args)
+            elif cmd == "rename-host":
+                result = automation_rename_host(args)
             elif cmd == "create-snapshot":
                 result = automation_create_snapshot(args)
 	    elif cmd == "notification-replay":
@@ -678,7 +685,7 @@ def automation_delete_host(args):
         "%s/%s.*"  % (tcp_cache_dir, hostname)]:
         os.system("rm -rf '%s'" % path)
 
-def automation_restart(job="restart"):
+def automation_restart(job = "restart", use_rushd = True):
     # make sure, Nagios does not inherit any open
     # filedescriptors. This really happens, e.g. if
     # check_mk is called by WATO via Apache. Nagios inherits
@@ -693,7 +700,8 @@ def automation_restart(job="restart"):
                 pass
     else:
         objects_file = var_dir + "/core/config"
-        job = "reload" # force reload for CMC
+        if job == "restart":
+            job = "reload" # force reload for CMC
 
     # os.closerange(3, 256) --> not available in older Python versions
 
@@ -723,7 +731,10 @@ def automation_restart(job="restart"):
             if monitoring_core == "nagios":
                 create_nagios_config(file(objects_file, "w"))
             else:
-                do_create_cmc_config(opt_cmc_relfilename)
+                do_create_cmc_config(opt_cmc_relfilename, use_rushd = use_rushd)
+
+            if "do_bake_agents" in globals() and bake_agents_on_restart:
+                do_bake_agents()
 
         except Exception, e:
 	    if backup_path:
@@ -737,10 +748,7 @@ def automation_restart(job="restart"):
                 os.remove(backup_path)
             if monitoring_core != "cmc":
                 do_precompile_hostchecks()
-            if job == 'restart':
-                do_restart_core(False)
-            elif job == 'reload':
-                do_restart_core(True)
+            do_core_action(job)
         else:
             if backup_path:
                 os.rename(backup_path, objects_file)
@@ -764,7 +772,8 @@ def automation_get_configuration():
     result = {}
     for varname in variable_names:
         if varname in globals():
-            result[varname] = globals()[varname]
+            if not hasattr(globals()[varname], '__call__'):
+                result[varname] = globals()[varname]
     return result
 
 def automation_get_check_information():
@@ -878,15 +887,205 @@ def automation_diag_host(args):
     except Exception, e:
         return 1, str(e)
 
+# WATO calls this automation when a host has been renamed. We need to change
+# several file and directory names.
+def automation_rename_host(args):
+    oldname = args[0]
+    newname = args[1]
+    actions = []
+
+    # Autochecks: Here we have the problem, that these files cannot
+    # be read and written again with eval/repr, since they contain
+    # variable names that would get expanded. We does this by parsing
+    # the lines ourselves. Also we assume cleaned up autochecks files.
+    acpath = autochecksdir + "/" + oldname + ".mk"
+    if os.path.exists(acpath):
+        out = file(autochecksdir + "/" + newname + ".mk", "w")
+        for line in file(acpath):
+            if "'" + oldname + "'" in line:
+                front, tail = line.split(",", 1)
+                front = front.replace("'" + oldname + "'", "'" + newname + "'")
+                line = front + "," + tail
+            out.write(line)
+        out.close()
+        os.remove(acpath) # Remove old file
+        actions.append("autochecks")
+
+    # Reread all autochecks. This is neccessary when creating the config
+    # for the core.
+    reread_autochecks()
+
+    # At this place WATO already has changed it's configuration. All further
+    # data might be changed by the still running core. So we need to stop
+    # it now.
+    core_was_running = core_is_running()
+    if core_was_running:
+        do_core_action("stop", quiet=True)
+
+    # Rename temporary files of the host
+    for d in [ "cache", "counters" ]:
+        if rename_host_file(tmp_dir + "/" + d + "/", oldname, newname):
+            actions.append(d)
+
+    if rename_host_dir(tmp_dir + "/piggyback/", oldname, newname):
+        actions.append("piggyback-load")
+
+    # Rename piggy files *created* by the host
+    piggybase = tmp_dir + "/piggyback/"
+    if os.path.exists(piggybase):
+        for piggydir in os.listdir(piggybase):
+            if rename_host_file(piggybase + piggydir, oldname, newname):
+                actions.append("piggyback-pig")
+
+    # Logwatch
+    if rename_host_dir(logwatch_dir, oldname, newname):
+        actions.append("logwatch")
+
+    # SNMP walks
+    if rename_host_file(snmpwalks_dir, oldname, newname):
+        actions.append("snmpwalk")
+
+    # OMD-Stuff. Note: The question really is whether this should be
+    # included in Check_MK. The point is - however - that all these
+    # actions need to take place while the core is stopped.
+    if omd_root:
+        actions += omd_rename_host(oldname, newname)
+
+    # Start monitoring again. In case of CMC we need to ignore
+    # any configuration created by the CMC Rushahead daemon
+    if core_was_running:
+        global ignore_ip_lookup_failures
+        ignore_ip_lookup_failures = True # force config generation to succeed. The core *must* start.
+        automation_restart("start", use_rushd = False)
+        if monitoring_core == "cmc":
+            try:
+                os.remove(var_dir + "/core/config.rush")
+                os.remove(var_dir + "/core/config.rush.id")
+            except:
+                pass
+
+        if failed_ip_lookups:
+            actions.append("ipfail")
+
+    return actions
+
+
+def rename_host_dir(basedir, oldname, newname):
+    if os.path.exists(basedir + "/" + oldname):
+        if os.path.exists(basedir + "/" + newname):
+            shutil.rmtree(basedir + "/" + newname)
+        os.rename(basedir + "/" + oldname, basedir + "/" + newname)
+        return 1
+    return 0
+
+def rename_host_file(basedir, oldname, newname):
+    if os.path.exists(basedir + "/" + oldname):
+        if os.path.exists(basedir + "/" + newname):
+            os.remove(basedir + "/" + newname)
+        os.rename(basedir + "/" + oldname, basedir + "/" + newname)
+        return 1
+    return 0
+
+# This functions could be moved out of Check_MK.
+def omd_rename_host(oldname, newname):
+    oldregex = oldname.replace(".", "[.]")
+    newregex = newname.replace(".", "[.]")
+    actions = []
+
+    # Temporarily stop processing of performance data
+    npcd_running = os.path.exists(omd_root + "/tmp/pnp4nagios/run/npcd.pid")
+    if npcd_running:
+        os.system("omd stop npcd >/dev/null 2>&1 </dev/null")
+
+    rrdcache_running = os.path.exists(omd_root + "/tmp/run/rrdcached.sock")
+    if rrdcache_running:
+        os.system("omd stop rrdcached >/dev/null 2>&1 </dev/null")
+
+    # Fix pathnames in XML files
+    dirpath = omd_root + "/var/pnp4nagios/perfdata/" + oldname
+    os.system("sed -i 's@/perfdata/%s/@/perfdata/%s/@' %s/*.xml" % (oldname, newname, dirpath))
+
+    # RRD files
+    if rename_host_dir(rrd_path, oldname, newname):
+        actions.append("rrd")
+
+
+    # entries of rrdcached journal
+    dirpath = omd_root + "/var/rrdcached/"
+    if not os.system("sed -i 's@/perfdata/%s/@/perfdata/%s/@' "
+        "%s/var/rrdcached/rrd.journal.* 2>/dev/null" % ( oldregex, newregex, omd_root)):
+        actions.append("rrdcached")
+
+    # Spoolfiles of NPCD
+    if not os.system("sed -i 's/HOSTNAME::%s	/HOSTNAME::%s	/' "
+                     "%s/var/pnp4nagios/perfdata.dump %s/var/pnp4nagios/spool/perfdata.* 2>/dev/null" % (
+                     oldregex, newregex, omd_root, omd_root)):
+        actions.append("pnpspool")
+
+    if rrdcache_running:
+        os.system("omd start rrdcached >/dev/null 2>&1 </dev/null")
+
+    if npcd_running:
+        os.system("omd start npcd >/dev/null 2>&1 </dev/null")
+
+    # Logfiles and history files of CMC and Nagios. Problem
+    # here: the exact place of the hostname varies between the
+    # various log entry lines
+    sed_commands = r'''
+s/(INITIAL|CURRENT) (HOST|SERVICE) STATE: %(old)s;/\1 \2 STATE: %(new)s;/
+s/(HOST|SERVICE) (DOWNTIME |FLAPPING |)ALERT: %(old)s;/\1 \2ALERT: %(new)s;/
+s/PASSIVE (HOST|SERVICE) CHECK: %(old)s;/PASSIVE \1 CHECK: %(new)s;/
+s/(HOST|SERVICE) NOTIFICATION: ([^;]+);%(old)s;/\1 NOTIFICATION: \2;%(new)s;/
+''' % { "old" : oldregex, "new" : newregex }
+    patterns = [
+        "var/check_mk/core/history",
+        "var/check_mk/core/archive/*",
+        "var/nagios/nagios.log",
+        "var/nagios/archive/*",
+    ]
+    one_matched = False
+    for pattern in patterns:
+        command = "sed -ri --file=/dev/fd/0 %s/%s >/dev/null 2>&1" % (omd_root, pattern)
+        p = os.popen(command, "w")
+        p.write(sed_commands)
+        if not p.close():
+            one_matched = True
+    if one_matched:
+        actions.append("history")
+
+    # State retention (important for Downtimes, Acknowledgements, etc.)
+    if monitoring_core == "nagios":
+        if not os.system("sed -ri 's/^host_name=%s$/host_name=%s/' %s/var/nagios/retention.dat" % (
+                    oldregex, newregex, omd_root)):
+            actions.append("retention")
+
+    else: # CMC
+        # Create a file "renamed_hosts" with the information about the
+        # renaming of the hosts. The core will honor this file when it
+        # reads the status file with the saved state.
+        file(var_dir + "/core/renamed_hosts", "w").write("%s\n%s\n" % (oldname, newname))
+        actions.append("retention")
+
+    # NagVis maps
+    if not os.system("sed -i 's/^[[:space:]]*host_name=%s[[:space:]]*$/host_name=%s/' "
+                     "%s/etc/nagvis/maps/*.cfg 2>/dev/null" % (
+                     oldregex, newregex, omd_root)):
+        actions.append("nagvis")
+
+    return actions
+
+
+
 def automation_create_snapshot(args):
     try:
         import tarfile, time, cStringIO, shutil, subprocess, thread, traceback, threading
+        from hashlib import sha256
         the_data = sys.stdin.read()
         data = eval(the_data)
 
         snapshot_name = data["snapshot_name"]
         snapshot_dir  = var_dir + "/wato/snapshots"
-        work_dir       = snapshot_dir + "/workdir"
+        work_dir       = snapshot_dir + "/workdir/%s" % snapshot_name
         if not os.path.exists(work_dir):
             os.makedirs(work_dir)
 
@@ -901,6 +1100,15 @@ def automation_create_snapshot(args):
         file(filename_target, "w").close()
         file(filename_status, "w").close()
 
+        def wipe_directory(path):
+            for entry in os.listdir(path):
+                if entry not in [ '.', '..' ]:
+                    p = path + "/" + entry
+                    if os.path.isdir(p):
+                        shutil.rmtree(p)
+                    else:
+                        os.remove(p)
+
         lock_status_file = threading.Lock()
         def update_status_file(domain = None, infotext = None):
             lock_status_file.acquire()
@@ -912,13 +1120,13 @@ def automation_create_snapshot(args):
                 status_list = list(statusinfo.items())
                 status_list.sort()
                 for status in status_list:
-                    statusfile.write("%s:%s\n" % status)
+                    statusfile.write("%s.tar.gz:%s\n" % status)
             lock_status_file.release()
 
         # Set initial status info
         statusinfo = {}
         for name in data.get("domains", {}).keys():
-            statusinfo[name] = "TODO"
+            statusinfo[name] = "TODO:0"
         update_status_file()
 
         if not data.get("wait"):
@@ -941,13 +1149,10 @@ def automation_create_snapshot(args):
 
         # Save pid of working process.
         file(filename_pid, "w").write("%d" % os.getpid())
-        tar_in_progress = tarfile.open(filename_work, "w")
 
         def cleanup():
-            for filename in [filename_work, filename_status,
-                             filename_pid, filename_subtar]:
-                if filename and os.path.exists(filename):
-                    os.unlink(filename)
+            wipe_directory(work_dir)
+            os.rmdir(work_dir)
 
         def check_should_abort():
             if not os.path.exists(filename_target):
@@ -967,11 +1172,30 @@ def automation_create_snapshot(args):
             while current_domain != None:
                 try:
                     if current_domain:
-                        if os.path.exists(filename_subtar):
-                            update_status_file(current_domain, "Processing / Size: %d" % os.stat(filename_subtar).st_size)
+                        if os.path.exists(path_subtar):
+                            update_status_file(current_domain, "Processing:%d" % os.stat(path_subtar).st_size)
                 except:
                     pass
-                time.sleep(0.1)
+                time.sleep(seconds)
+
+        def snapshot_secret():
+            path = default_config_dir + '/snapshot.secret'
+            try:
+                return file(path).read()
+            except IOError:
+                # create a secret during first use
+                try:
+                    s = os.urandom(256)
+                except NotImplementedError:
+                    s = sha256(time.time())
+                file(path, 'w').write(s)
+                return s
+
+        #
+        # Initialize the snapshot tar file and populate with initial information
+        #
+
+        tar_in_progress = tarfile.open(filename_work, "w")
 
         # Add comment to tar file
         if data.get("comment"):
@@ -993,34 +1217,71 @@ def automation_create_snapshot(args):
         # Close tar in progress, all other files are included via command line tar
         tar_in_progress.close()
 
+        #
         # Process domains (sorted)
+        #
+
         subtar_update_thread = thread.start_new_thread(update_subtar_size, (1,))
         domains = map(lambda x: x, data.get("domains").items())
         domains.sort()
 
+        subtar_info = {}
         for name, info in domains:
             current_domain = name # Set name for update size thread
-            paths  = info["paths"]
-            prefix = info.get("prefix","")
+            prefix          = info.get("prefix","")
+            exclude_options = ""
+            for entry in info.get("exclude", []):
+                exclude_options += "--exclude=%s " % entry
+
             check_should_abort()
 
-            paths = map(lambda x: x[1] == "" and "." or x[1], paths)
-
-            # Create tar.gz subtar
             filename_subtar = "%s.tar.gz" % name
-            command = "cd %s ; tar czf %s --ignore-failed-read --force-local -C %s %s" %  (work_dir, filename_subtar, prefix, " ".join(paths))
-            proc = subprocess.Popen(command, shell=True)
-            proc.wait()
+            path_subtar = "%s/%s" % (work_dir, filename_subtar)
 
-            subtar_size   = os.stat("%s/%s" % (work_dir, filename_subtar)).st_size
+            if info.get("backup_command"):
+                command = info.get("backup_command") % {
+                    "prefix"      : prefix,
+                    "path_subtar" : path_subtar,
+                    "work_dir"    : work_dir
+                }
+            else:
+                paths = map(lambda x: x[1] == "" and "." or x[1], info.get("paths", []))
+                command = "tar czf %s --ignore-failed-read --force-local %s -C %s %s" % \
+                                        (path_subtar, exclude_options, prefix, " ".join(paths))
+
+            proc = subprocess.Popen(command, shell=True, stdin = None,
+                                    stdout = subprocess.PIPE, stderr = subprocess.PIPE, cwd = prefix)
+            stdout, stderr = proc.communicate()
+            exit_code      = proc.wait()
+            # Allow exit codes 0 and 1 (files changed during backup)
+            if exit_code not in [0, 1]:
+                raise MKAutomationError("Error while creating backup of %s (Exit Code %d) - %s.\n%s" % (current_domain, exit_code, stderr, command))
+
+            subtar_size   = os.stat(path_subtar).st_size
+            subtar_hash   = sha256(file(path_subtar).read()).hexdigest()
+            subtar_signed = sha256(subtar_hash + snapshot_secret()).hexdigest()
+            subtar_info[filename_subtar] = (subtar_hash, subtar_signed)
 
             # Append tar.gz subtar to snapshot
-            command = "cd %s ; tar --append --file=%s %s ; rm %s" % (work_dir, filename_work, filename_subtar, filename_subtar)
-            proc = subprocess.Popen(command, shell=True)
-            proc.wait()
+            command = "tar --append --file=%s %s ; rm %s" % \
+                    (filename_work, filename_subtar, filename_subtar)
+            proc = subprocess.Popen(command, shell=True, cwd = work_dir)
+            proc.communicate()
+            exit_code = proc.wait()
+            if exit_code != 0:
+                raise MKAutomationError("Error on adding backup domain %s to tarfile" % current_domain)
 
             current_domain = ""
-            update_status_file(name, "Finished / Size: %d" % subtar_size)
+            update_status_file(name, "Finished:%d" % subtar_size)
+
+        # Now add the info file which contains hashes and signed hashes for
+        # each of the subtars
+        info = ''.join([ '%s %s %s\n' % (k, v[0], v[1]) for k, v in subtar_info.items() ]) + '\n'
+        tar_in_progress = tarfile.open(filename_work, "a")
+        tarinfo      = get_basic_tarinfo("checksums")
+        tarinfo.size = len(info)
+        tar_in_progress.addfile(tarinfo, cStringIO.StringIO(info))
+        tar_in_progress.close()
 
         current_domain = None
 
@@ -1028,7 +1289,9 @@ def automation_create_snapshot(args):
         cleanup()
 
     except Exception, e:
+        cleanup()
         raise MKAutomationError(str(e))
+
 
 def automation_notification_replay(args):
     nr = args[0]
@@ -1041,3 +1304,85 @@ def automation_notification_analyse(args):
 def automation_get_bulks(args):
     only_ripe = args[0] == "1"
     return find_bulks(only_ripe)
+
+def automation_active_check(args):
+    hostname, plugin, item = args
+    actchecks = []
+    needed_commands = []
+
+    if plugin == "custom":
+        custchecks = host_extra_conf(hostname, custom_checks)
+        for entry in custchecks:
+            if entry["service_description"] == item:
+                command_line = replace_core_macros(hostname, entry.get("command_line", ""))
+                if command_line:
+                    command_line = autodetect_plugin(command_line)
+                    return execute_check_plugin(command_line)
+    else:
+        rules = active_checks.get(plugin)
+        if rules:
+            entries = host_extra_conf(hostname, rules)
+            if entries:
+                act_info = active_check_info[plugin]
+                for params in entries:
+                    description = act_info["service_description"](params).replace('$HOSTNAME$', hostname)
+                    if description == item:
+                        args = act_info["argument_function"](params)
+                        command_line = replace_core_macros(hostname, act_info["command_line"].replace("$ARG1$", args))
+                        return execute_check_plugin(command_line)
+
+
+def load_resource_file(macros):
+    try:
+        for line in file(omd_root + "/etc/nagios/resource.cfg"):
+            line = line.strip()
+            if not line or line[0] == '#':
+                continue
+            varname, value = line.split('=', 1)
+            macros[varname] = value
+    except:
+        if opt_debug:
+            raise
+
+# Simulate replacing some of the more important macros of hosts. We
+# cannot use dynamic macros, of course. Note: this will not work
+# without OMD, since we do not know the value of $USER1$ and $USER2$
+# here. We could read the Nagios resource.cfg file, but we do not
+# know for sure the place of that either.
+def replace_core_macros(hostname, commandline):
+    macros  = {
+        "$HOSTNAME$"    : hostname,
+        "$HOSTADDRESS$" : lookup_ipaddress(hostname),
+    }
+    load_resource_file(macros)
+    for varname, value in macros.items():
+        commandline = commandline.replace(varname, value)
+    return commandline
+
+
+def execute_check_plugin(commandline):
+    try:
+        p = os.popen(commandline + " 2>&1")
+        output = p.read().strip()
+        ret = p.close()
+        if not ret:
+            status = 0
+        else:
+            if ret & 0xff == 0:
+                status = ret / 256
+            else:
+                status = 3
+        if status < 0 or  status > 3:
+            status = 3
+        output = output.split("|",1)[0] # Drop performance data
+        return status, output
+
+    except Exception, e:
+        if opt_debug:
+            raise
+        return 3, "UNKNOWN - Cannot execute command: %s" % e
+
+
+def automation_update_dns_cache():
+    return do_update_dns_cache()
+

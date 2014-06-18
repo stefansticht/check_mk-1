@@ -242,6 +242,43 @@ register_configvar(group,
             default_value = False),
     domain = "multisite")
 
+
+def wato_host_tag_group_choices():
+    choices = []
+    for entry in config.wato_host_tags:
+        tgid = entry[0]
+        topic, tit = parse_hosttag_title(entry[1])
+        choices.append((tgid, tit))
+    return choices
+
+
+register_configvar(group,
+    "virtual_host_trees",
+    ListOf(
+        Tuple(
+            elements = [
+                TextUnicode(
+                    title = _("Title of the tree"),
+                    allow_empty = False,
+                ),
+                DualListChoice(
+                    allow_empty = False,
+                    custom_order = True,
+                    choices = wato_host_tag_group_choices,
+                )
+            ]
+        ),
+        add_label = _("Create new virtual host tree configuration"),
+        title = _("Virtual Host Trees"),
+        help = _("Here you can define tree configurations for the snapin <i>Virtual Host-Trees</i>. "
+                 "These trees organize your host based on their values in certain host tag groups. "
+                 "Each host tag group you select will create one level in the tree."),
+    ),
+    domain = "multisite",
+)
+
+
+
 register_configvar(group,
     "reschedule_timeout",
     Float(title = _("Timeout for rescheduling checks in Multisite"),
@@ -460,6 +497,17 @@ register_configvar(group,
 
 
 register_configvar(group,
+    "wato_upload_insecure_snapshots",
+    Checkbox(title = _("Allow upload of insecure WATO snapshots"),
+             label = _("upload insecure snapshots"),
+             help = _("When enabled, insecure snapshots are allowed. Please keep in mind that the upload "
+                      "of unverified snapshots represent a security risk, since the content of a snapshot is executed "
+                      "during runtime. Any manipulations in the content - either willingly or unwillingly (XSS attack) "
+                      "- pose a serious security risk."),
+             default_value = False),
+    domain = "multisite")
+
+register_configvar(group,
     "wato_hide_hosttags",
     Checkbox(title = _("Hide hosttags in WATO folder view"),
              label = _("hide hosttags"),
@@ -499,7 +547,7 @@ register_configvar(group,
     domain = "multisite")
 
 #.
-#   .--User Mgmt-----------------------------------------------------------.
+#   .--User Management-----------------------------------------------------.
 #   |          _   _                 __  __                 _              |
 #   |         | | | |___  ___ _ __  |  \/  | __ _ _ __ ___ | |_            |
 #   |         | | | / __|/ _ \ '__| | |\/| |/ _` | '_ ` _ \| __|           |
@@ -618,8 +666,9 @@ register_configvar(group,
                           "the selection e.g. the attribute names used in LDAP queries will "
                           "be altered."),
                 choices = [
-                    ("ad",       _("Active Directory")),
-                    ("openldap", _("OpenLDAP")),
+                    ("ad",                 _("Active Directory")),
+                    ("openldap",           _("OpenLDAP")),
+                    ("389directoryserver", _("389 Directory Server")),
                 ],
             )),
             ("bind", Tuple(
@@ -1077,6 +1126,21 @@ register_configvar(group,
                  "should increase the performance of SNMP checks in a significant way. The inline "
                  "SNMP mode is a feature which improves the performance for large installations and "
                  "only available via our subscription."),
+        default_value = False
+    ),
+    need_restart = True
+)
+
+register_configvar(group,
+    "record_inline_snmp_stats",
+    Checkbox(
+        title = _("Record statistics of Inline SNMP"),
+        label = _("Enable recording of Inline SNMP statistics"),
+        help = _("When you have enabled Inline SNMP, you can use this flag to enable recording of "
+                 "some performance related values. The recorded values are stored in a single file "
+                 "at <tt>var/check_mk/snmp.stats</tt>.<br><br>"
+                 "<i>Please note:</i> Only enable this for a short period, because it will "
+                 "decrease the performance of your monitoring."),
         default_value = False
     ),
     need_restart = True
@@ -2099,7 +2163,7 @@ register_rule(group,
 
 register_rule(group,
     "bulkwalk_hosts",
-    title = _("Hosts using bulk walk (and SNMP v2c)"),
+    title = _("Hosts using SNMP bulk walk (enforces SNMP v2c)"),
     help = _("Most SNMP hosts support SNMP version 2c. However, Check_MK defaults to version 1, "
              "in order to support as many devices as possible. Please use this ruleset in order "
              "to configure SNMP v2c for as many hosts as possible. That version has two advantages: "
@@ -2119,7 +2183,7 @@ register_rule(group,
 
 register_rule(group,
     "snmpv2c_hosts",
-    title = _("Hosts using SNMP v2c (and no bulk walk)"),
+    title = _("Hosts using SNMP v2c"),
     help = _("There exist a few devices out there that behave very badly when using SNMP bulk walk. "
              "If you want to use SNMP v2c on those devices, nevertheless, then use this rule set. "
              "One reason is enabling 64 bit counters."))
@@ -2222,18 +2286,40 @@ register_rule(group,
 
 register_rule(group,
     "check_mk_agent_target_versions",
-    OptionalDropdownChoice(
-        title = _("Check for correct version of Check_MK agent"),
-        help = _("If you want to make sure all of your Check_MK agents are running"
-                 " one specific version, you may set it by this rule. Agents running "
-                 " some different version return a none ok state then"),
-        choices = [
-           ("ignore", _("Ignore the version")),
-           ("site",   _("Same version as the monitoring site")),
-           ],
-        otherlabel    = _("Specific version"),
-        explicit      = TextAscii(allow_empty = False),
-        default_value = "ignore",
+    Transform(
+        CascadingDropdown(
+            title = _("Check for correct version of Check_MK agent"),
+            help = _("If you want to make sure all of your Check_MK agents are running"
+                     " one specific version, you may set it by this rule. Agents running "
+                     " some different version return a none ok state then"),
+            choices = [
+                ("ignore",   _("Ignore the version")),
+                ("site",     _("Same version as the monitoring site")),
+                ("specific", _("Specific version"),
+                    TextAscii(
+                        allow_empty = False,
+                    )
+                ),
+                ("at_least", _("At least"),
+                    Dictionary(
+                        elements = [
+                            ('release', TextAscii(
+                                title = _('Official Release version'),
+                                allow_empty = False,
+                            )),
+                            ('daily_build', TextAscii(
+                                title = _('Daily build'),
+                                allow_empty = False,
+                            )),
+                        ]
+                    ),
+                ),
+            ],
+            default_value = "ignore",
+        ),
+        # In the past, this was a OptionalDropdownChoice() which values could be strings:
+        # ignore, site or a custom string representing a version number.
+        forth = lambda x: type(x) == str and x not in [ "ignore", "site" ] and ("specific", x) or x
     )
 )
 

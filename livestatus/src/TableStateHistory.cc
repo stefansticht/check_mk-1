@@ -41,7 +41,6 @@
 #include "auth.h"
 #include "Store.h"
 #include "LogEntry.h"
-#include "TableStateHistory.h"
 
 #ifdef CMC
 #include "Host.h"
@@ -49,75 +48,14 @@
 #include "Timeperiod.h"
 #endif
 
+#include "TableStateHistory.h"
+#include "HostServiceState.h"
+
 int g_disable_statehist_filtering = 0;
 
 
 
-struct HostServiceState;
-typedef vector<HostServiceState*> HostServices;
-
-typedef void* HostServiceKey;
-
-struct HostServiceState {
-    bool    _is_host;
-    time_t  _time;
-    int     _lineno;
-    time_t  _from;
-    time_t  _until;
-
-    time_t  _duration;
-    double  _duration_part;
-
-    // Do not change order within this block!
-    // These durations will be bzero'd
-    time_t  _duration_state_UNMONITORED;
-    double  _duration_part_UNMONITORED;
-    time_t  _duration_state_OK;
-    double  _duration_part_OK;
-    time_t  _duration_state_WARNING;
-    double  _duration_part_WARNING;
-    time_t  _duration_state_CRITICAL;
-    double  _duration_part_CRITICAL;
-    time_t  _duration_state_UNKNOWN;
-    double  _duration_part_UNKNOWN;
-
-    // State information
-    int     _host_down;      // used if service
-    int     _state;             // -1/0/1/2/3
-    int     _in_notification_period;
-    int     _in_service_period;
-    int     _in_downtime;
-    int     _in_host_downtime;
-    int     _is_flapping;
-
-    // Service information
-    HostServices _services;
-
-    // Absent state handling
-    bool    _may_no_longer_exist;
-    bool    _has_vanished;
-    time_t  _last_known_time;
-
-
-    const char  *_debug_info;
-    // Pointer to dynamically allocated strings (strdup) that live here.
-    // These pointers are 0, if there is no output (e.g. downtime)
-    char        *_log_output;
-    char        *_notification_period;  // may be "": -> no period known, we assume "always"
-    char        *_service_period;  // may be "": -> no period known, we assume "always"
-    host        *_host;
-    service     *_service;
-    const char  *_host_name;            // Fallback if host no longer exists
-    const char  *_service_description;  // Fallback if service no longer exists
-
-    HostServiceState() { bzero(this, sizeof(HostServiceState)); }
-    ~HostServiceState();
-    void debug_me(const char *loginfo, ...);
-};
-
 extern Store *g_store;
-
-#define CLASSMASK_STATEHIST 0xC6
 
 // Debugging logging is hard if debug messages are logged themselves...
 void debug_statehist(const char *loginfo, ...)
@@ -169,82 +107,81 @@ const char *getCustomVariable(customvariablesmember *cvm, const char *name)
 }
 #endif
 
-HostServiceState::~HostServiceState()
-{
-    if (_log_output != 0)
-        free(_log_output);
-};
-
 TableStateHistory::TableStateHistory()
 {
+    TableStateHistory::addColumns(this);
+}
+
+void TableStateHistory::addColumns(Table *table)
+{
     HostServiceState *ref = 0;
-    addColumn(new OffsetTimeColumn("time",
+    table->addColumn(new OffsetTimeColumn("time",
             "Time of the log event (seconds since 1/1/1970)", (char *)&(ref->_time) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("lineno",
+    table->addColumn(new OffsetIntColumn("lineno",
             "The number of the line in the log file", (char *)&(ref->_lineno) - (char *)ref, -1));
-    addColumn(new OffsetTimeColumn("from",
+    table->addColumn(new OffsetTimeColumn("from",
             "Start time of state (seconds since 1/1/1970)", (char *)&(ref->_from) - (char *)ref, -1));
-    addColumn(new OffsetTimeColumn("until",
+    table->addColumn(new OffsetTimeColumn("until",
             "End time of state (seconds since 1/1/1970)", (char *)&(ref->_until) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("duration",
+    table->addColumn(new OffsetIntColumn("duration",
             "Duration of state (until - from)", (char *)&(ref->_duration) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part",
+    table->addColumn(new OffsetDoubleColumn("duration_part",
             "Duration part in regard to the query timeframe", (char *)(&ref->_duration_part) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("state",
+    table->addColumn(new OffsetIntColumn("state",
             "The state of the host or service in question - OK(0) / WARNING(1) / CRITICAL(2) / UNKNOWN(3) / UNMONITORED(-1)", (char *)&(ref->_state) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("host_down",
+    table->addColumn(new OffsetIntColumn("host_down",
             "Shows if the host of this service is down", (char *)&(ref->_host_down) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("in_downtime",
+    table->addColumn(new OffsetIntColumn("in_downtime",
             "Shows if the host or service is in downtime", (char *)&(ref->_in_downtime) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("in_host_downtime",
+    table->addColumn(new OffsetIntColumn("in_host_downtime",
             "Shows if the host of this service is in downtime", (char *)&(ref->_in_host_downtime) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("is_flapping",
+    table->addColumn(new OffsetIntColumn("is_flapping",
             "Shows if the host or service is flapping", (char *)&(ref->_is_flapping) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("in_notification_period",
+    table->addColumn(new OffsetIntColumn("in_notification_period",
             "Shows if the host or service is within its notification period", (char *)&(ref->_in_notification_period) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("notification_period",
+    table->addColumn(new OffsetStringColumn("notification_period",
             "The notification period of the host or service in question", (char *)&(ref->_notification_period) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("in_service_period",
+    table->addColumn(new OffsetIntColumn("in_service_period",
             "Shows if the host or service is within its service period", (char *)&(ref->_in_service_period) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("service_period",
+    table->addColumn(new OffsetStringColumn("service_period",
             "The service period of the host or service in question", (char *)&(ref->_service_period) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("debug_info",
+    table->addColumn(new OffsetStringColumn("debug_info",
             "Debug information", (char *)&(ref->_debug_info) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("host_name",
+    table->addColumn(new OffsetStringColumn("host_name",
             "Host name", (char *)&(ref->_host_name) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("service_description",
+    table->addColumn(new OffsetStringColumn("service_description",
             "Description of the service", (char *)&(ref->_service_description) - (char *)ref, -1));
-    addColumn(new OffsetStringColumn("log_output",
+    table->addColumn(new OffsetStringColumn("log_output",
             "Logfile output relevant for this state", (char *)&(ref->_log_output) - (char *)ref, -1));
-    addColumn(new OffsetIntColumn("duration_ok",
+    table->addColumn(new OffsetIntColumn("duration_ok",
             "OK duration of state ( until - from )", (char *)&(ref->_duration_state_OK) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part_ok",
+    table->addColumn(new OffsetDoubleColumn("duration_part_ok",
             "OK duration part in regard to the query timeframe", (char *)(&ref->_duration_part_OK) - (char *)ref, -1));
 
-    addColumn(new OffsetIntColumn("duration_warning",
+    table->addColumn(new OffsetIntColumn("duration_warning",
             "WARNING duration of state (until - from)", (char *)&(ref->_duration_state_WARNING) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part_warning",
+    table->addColumn(new OffsetDoubleColumn("duration_part_warning",
             "WARNING duration part in regard to the query timeframe", (char *)(&ref->_duration_part_WARNING) - (char *)ref, -1));
 
-    addColumn(new OffsetIntColumn("duration_critical",
+    table->addColumn(new OffsetIntColumn("duration_critical",
             "CRITICAL duration of state (until - from)", (char *)&(ref->_duration_state_CRITICAL) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part_critical",
+    table->addColumn(new OffsetDoubleColumn("duration_part_critical",
             "CRITICAL duration part in regard to the query timeframe", (char *)(&ref->_duration_part_CRITICAL) - (char *)ref, -1));
 
-    addColumn(new OffsetIntColumn("duration_unknown",
+    table->addColumn(new OffsetIntColumn("duration_unknown",
             "UNKNOWN duration of state (until - from)", (char *)&(ref->_duration_state_UNKNOWN) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part_unknown",
+    table->addColumn(new OffsetDoubleColumn("duration_part_unknown",
             "UNKNOWN duration part in regard to the query timeframe", (char *)(&ref->_duration_part_UNKNOWN) - (char *)ref, -1));
 
-    addColumn(new OffsetIntColumn("duration_unmonitored",
+    table->addColumn(new OffsetIntColumn("duration_unmonitored",
             "UNMONITORED duration of state (until - from)", (char *)&(ref->_duration_state_UNMONITORED) - (char *)ref, -1));
-    addColumn(new OffsetDoubleColumn("duration_part_unmonitored",
+    table->addColumn(new OffsetDoubleColumn("duration_part_unmonitored",
             "UNMONITORED duration part in regard to the query timeframe", (char *)(&ref->_duration_part_UNMONITORED) - (char *)ref, -1));
 
 
     // join host and service tables
-    g_table_hosts->addColumns(this, "current_host_", (char *)&(ref->_host)    - (char *)ref);
-    g_table_services->addColumns(this, "current_service_", (char *)&(ref->_service) - (char *)ref, false /* no hosts table */);
+    g_table_hosts->addColumns(table, "current_host_", (char *)&(ref->_host)    - (char *)ref);
+    g_table_services->addColumns(table, "current_service_", (char *)&(ref->_service) - (char *)ref, false /* no hosts table */);
 }
 
 LogEntry *TableStateHistory::getPreviousLogentry()
@@ -316,6 +253,9 @@ void TableStateHistory::answerQuery(Query *query)
 
     g_store->logCache()->lockLogCache();
     g_store->logCache()->logCachePreChecks();
+
+    // This flag might be set to true by the return value of processDataset(...)
+    _abort_query = false;
 
     // Keep track of the historic state of services/hosts here
     typedef map<HostServiceKey, HostServiceState*> state_info_t;
@@ -389,6 +329,9 @@ void TableStateHistory::answerQuery(Query *query)
 
     while (0 != (entry = getNextLogentry()))
     {
+        if (_abort_query)
+            break;
+
         if (entry->_time >= _until) {
             getPreviousLogentry();
             break;
@@ -527,6 +470,11 @@ void TableStateHistory::answerQuery(Query *query)
                 else
                     state->_notification_period = (char *)"";
 
+                // If for some reason the notification period is missing set a default
+                if (state->_notification_period == NULL) {
+                     state->_notification_period = (char *)"";
+                }
+
                 // Same for service period. For Nagios this is a bit different, since this
                 // is no native field but just a custom variable
                 if (state->_service != 0)
@@ -598,8 +546,16 @@ void TableStateHistory::answerQuery(Query *query)
             char *save_ptr;
             char *buffer   = strdup(entry->_options);
             char *tp_name  = strtok_r(buffer, ";", &save_ptr);
-            strtok_r(NULL, ";", &save_ptr);
             char *tp_state = strtok_r(NULL, ";", &save_ptr);
+            if (tp_state)
+                tp_state = strtok_r(NULL, ";", &save_ptr);
+
+            if (tp_state == NULL) {
+                // This line is broken...
+                logger(LOG_WARNING, "Error: Invalid syntax of TIMEPERIOD TRANSITION: %s", entry->_complete);
+                free(buffer);
+                break;
+            }
 
             _notification_periods[tp_name] = atoi(tp_state);
             state_info_t::iterator it_hst = state_info.begin();
@@ -632,31 +588,33 @@ void TableStateHistory::answerQuery(Query *query)
 
     // Create final reports
     state_info_t::iterator it_hst = state_info.begin();
-    while (it_hst != state_info.end())
-    {
-        HostServiceState* hst = it_hst->second;
+    if (!_abort_query) {
+        while (it_hst != state_info.end())
+        {
+            HostServiceState* hst = it_hst->second;
 
-        // No trace since the last two nagios startup -> host/service has vanished
-        if (hst->_may_no_longer_exist) {
-            // Log last known state up to nagios restart
-            hst->_time  = hst->_last_known_time;
-            hst->_until = hst->_last_known_time;
-            process(query, hst);
+            // No trace since the last two nagios startup -> host/service has vanished
+            if (hst->_may_no_longer_exist) {
+                // Log last known state up to nagios restart
+                hst->_time  = hst->_last_known_time;
+                hst->_until = hst->_last_known_time;
+                process(query, hst);
 
-            // Set absent state
-            hst->_state = -1;
+                // Set absent state
+                hst->_state = -1;
+                hst->_until = hst->_time;
+                hst->_debug_info = "UNMONITORED";
+                if (hst->_log_output)
+                    free(hst->_log_output);
+                hst->_log_output = 0;
+            }
+
+            hst->_time  = _until - 1;
             hst->_until = hst->_time;
-            hst->_debug_info = "UNMONITORED";
-            if (hst->_log_output)
-                free(hst->_log_output);
-            hst->_log_output = 0;
+
+            process(query, hst);
+            it_hst++;
         }
-
-        hst->_time  = _until - 1;
-        hst->_until = hst->_time;
-
-        process(query, hst);
-        it_hst++;
     }
 
     // Cleanup !
@@ -665,6 +623,8 @@ void TableStateHistory::answerQuery(Query *query)
         delete it_hst->second;
         it_hst++;
     }
+    state_info.clear();
+    object_blacklist.clear();
 
     g_store->logCache()->unlockLogCache();
 }
@@ -884,7 +844,8 @@ inline void TableStateHistory::process(Query *query, HostServiceState *hs_state)
     }
 
     // if (hs_state->_duration > 0)
-    query->processDataset(hs_state);
+    _abort_query = !query->processDataset(hs_state);
+
     hs_state->_from = hs_state->_until;
 };
 

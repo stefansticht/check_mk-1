@@ -450,7 +450,7 @@ def page_add_snapin():
         snapin = sidebar_snapins[name]
         title = snapin["title"]
         description = snapin.get("description", "")
-        transid = html.fresh_transid()
+        transid = html.get_transid()
         url = 'sidebar_add_snapin.py?name=%s&_transid=%s&pos=top' % (name, transid)
         html.write('<div class=snapinadder '
                    'onmouseover="this.style.cursor=\'pointer\';" '
@@ -513,6 +513,7 @@ def ajax_speedometer():
         title = _("No performance data: ") + str(e)
 
     html.write(repr([scheduled_rate, program_start, percentage, last_perc, str(title)]))
+
 
 def ajax_switch_masterstate():
     site = html.var("site")
@@ -641,6 +642,21 @@ def page_edit_bookmark():
     html.end_form()
 
     html.footer()
+
+def ajax_tag_tree():
+    newconf = int(html.var("conf"))
+    tree_conf = config.load_user_file("virtual_host_tree", {"tree": 0, "cwd": {}})
+    if type(tree_conf) == int:
+        tree_conf = {"cwd":{}} # convert from old style
+    tree_conf["tree"] = newconf
+    config.save_user_file("virtual_host_tree", tree_conf)
+
+def ajax_tag_tree_enter():
+    path = html.var("path") and html.var("path").split("|") or []
+    tree_conf = config.load_user_file("virtual_host_tree", {"tree": 0, "cwd": {}})
+    tree_conf["cwd"][tree_conf["tree"]] = path
+    config.save_user_file("virtual_host_tree", tree_conf)
+
 
 #.
 #   .--Quicksearch---------------------------------------------------------.

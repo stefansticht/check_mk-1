@@ -6,7 +6,7 @@
 ' to a new inventorized service.
 '
 ' Author: Lars Michelsen <lm@mathias-kettner.de>, 2011-03-21
-' Editor: Patrick Schlüter <ps@pdv-systeme.de>, 2011-08-21
+' Editor: Patrick SchlÃ¼ter <ps@pdv-systeme.de>, 2011-08-21
 '
 ' Updated by Phil Randal, 2012-09-21, to cache results using a randomised check interval
 ' of 16 to 24 hours
@@ -15,7 +15,9 @@
 ' some issues, so I went for a simpler solution using only one script
 '
 ' Updated by Bastian Kuhn, 2014-03-03: Removed all caching functions cause the current agent
-' has a native caching support. Make shure that you activate caching for this script in check_mk.ini
+' has a native caching support. Make sure that you activate caching for this script in check_mk.ini
+' 
+' 2014-04-17: Fix by Stefan Kick to handle errors. Payed by Adaptron.
 ' -----------------------------------------------------------------------------------------
 
 Option Explicit
@@ -39,9 +41,6 @@ end function
 Dim result, reboot, numImp, numOpt, important, opti
 Dim updtSearcher, colDownloads, objEntry
 
-Dim objFSO, stdout 
-Set objFSO = WScript.CreateObject("Scripting.FileSystemObject")
-Set stdout = objFSO.GetStandardStream(1)
 
 Dim WSHShell
 Set WSHShell = CreateObject("WScript.Shell")
@@ -50,7 +49,7 @@ Dim RebootTime
 Dim RegPath
 
 If CreateObject("Microsoft.Update.AutoUpdate").DetectNow <> 0 Then
-    stdout.WriteLine("<<<windows_updates>>>")
+    WScript.Echo "<<<windows_updates>>>"
     WScript.Quit()
 End If
 
@@ -67,7 +66,18 @@ If CreateObject("Microsoft.Update.SystemInfo").RebootRequired Then
     reboot = 1
 End If
 
+On Error Resume Next
+
 Set result = updtSearcher.Search("IsInstalled = 0 and IsHidden = 0")
+
+If Err.Number <> 0 then
+        WScript.Echo "<<<windows_updates>>>"
+        Wscript.Echo "x x x"
+        Wscript.Echo "There was an error getting update information. Maybe Windows update is not activated. Error Number: " & Err.Number
+        WScript.Quit()
+End If
+
+
 Set colDownloads = result.Updates
 For Each objEntry in colDownloads
 
@@ -76,22 +86,22 @@ For Each objEntry in colDownloads
            important = objEntry.Title
        else
            important = important & "; " & objEntry.Title
-	   End If
-		    numImp = numImp + 1
+    End If
+        numImp = numImp + 1
     Else
-	    If numOpt = 0 Then
+        If numOpt = 0 Then
             opti = objEntry.Title
         Else
             opti = opti & "; " & objEntry.Title
-	    End If
-	    numOpt = numOpt + 1
+        End If
+        numOpt = numOpt + 1
     End If
 
 Next
 
-    stdout.WriteLine("<<<windows_updates>>>")
-    stdout.WriteLine(reboot & " " & numImp & " " & numOpt)
-    stdout.WriteLine(important)
-    stdout.WriteLine(opti)
-    stdout.WriteLine(RebootTime)
+WScript.Echo "<<<windows_updates>>>"
+WScript.Echo reboot & " " & numImp & " " & numOpt
+WScript.Echo important
+WScript.Echo opti
+WScript.Echo RebootTime
 WScript.Quit()

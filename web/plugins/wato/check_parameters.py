@@ -222,9 +222,9 @@ _if_porttype_choices = [
   "fcipLink(224)" ), ("225", "rpr(225)" ), ("226", "qam(226)" ), ("227", "lmp(227)" ), ("228",
   "cblVectaStar(228)" ), ("229", "docsCableMCmtsDownstream(229)" ), ("230", "adsl2(230)" ), ]
 
-register_rule(group + '/' + subgroup_networking,
+register_rule(group + '/' + subgroup_inventory,
     varname   = "inventory_if_rules",
-    title     = _("Network interface and switch port Inventory"),
+    title     = _("Network Interface and Switch Port Inventory"),
     valuespec = Dictionary(
         elements = [
          ("use_desc", Checkbox(
@@ -253,6 +253,16 @@ register_rule(group + '/' + subgroup_networking,
               columns = 3,
               toggle_all = True,
               default_value = [ '6', '32', '62', '117' ]
+        )),
+        ("rmon", Checkbox(
+              title = _("Collect RMON statistics data"),
+              help = _("If you enable this option, for every RMON capable switch port an additional service will "
+                       "be created which is always OK and collects RMON data. This will give you detailed information "
+                       "about the distribution of packet sizes transferred over the port. Note: currently "
+                       "this extra RMON check does not honor the inventory settings for switch ports. In a future "
+                       "version of Check_MK RMON data may be added to the normal interface service and not add "
+                       "an additional service."),
+              label = _("Create extra service with RMON statistics data (if available for the device)"),
         )),
         ],
         help = _('This rule can be used to control the inventory for network ports. '
@@ -368,8 +378,8 @@ register_rule(group + '/' + subgroup_inventory,
               Tuple(
                 title = _("Levels on CPU utilization"),
                 elements = [
-                   Percentage(title = _("Warning if above"), default_value = 90),
-                   Percentage(title = _("Critical if above"), default_value = 98),
+                   Percentage(title = _("Warning if above"),  default_value = 90, maxvalue = 10000),
+                   Percentage(title = _("Critical if above"), default_value = 98, maxvalue = 10000),
                 ],
             )),
             ( "cpu_average",
@@ -423,7 +433,7 @@ register_rule(group + '/' + subgroup_inventory,
 
 register_rule(group + '/' + subgroup_inventory,
     varname   = "inventory_sap_values",
-    title     = _('SAP Single Value Inventory'),
+    title     = _('SAP R/3 Single Value Inventory'),
     valuespec = Dictionary(
         elements = [
             ('match', Alternative(
@@ -564,7 +574,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_storage,
     "brocade_fcport",
-    _("Brocade FC FibreChannel ports"),
+    _("Brocade FibreChannel ports"),
     Dictionary(
         elements = [
             ("bw",
@@ -1105,7 +1115,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_os,
     "memory_pagefile_win",
-    _("Memory, pagefile and swap levels for Windows"),
+    _("Memory and pagefile levels for Windows"),
     Dictionary(
         elements = [
             ( "memory",
@@ -1127,7 +1137,7 @@ register_check_parameters(
                                      Filesize(title = _("Critical if less than")),
                                 ]
                             ),
-                            # Note: Memory values lesser 1MB will not work
+                            # Note: Filesize values lesser 1MB will not work
                             # -> need hide option in filesize valuespec
                             back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
                             forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
@@ -1153,40 +1163,13 @@ register_check_parameters(
                                      Filesize(title = _("Critical if less than")),
                                 ]
                             ),
-                            # Note: Memory values lesser 1MB will not work
+                            # Note: Filesize values lesser 1MB will not work
                             # -> need hide option in filesize valuespec
                             back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
                             forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
                         )
                    ],
                    default_value = (50.0, 70.0))
-            ),
-            ( "swap",
-               Alternative(
-                   title = _("Swap Levels"),
-                   elements = [
-                       Tuple(
-                           title = _("Swap usage in percent"),
-                           elements = [
-                               Percentage(title = _("Warning if above")),
-                               Percentage(title = _("Critical if above")),
-                           ]
-                       ),
-                       Transform(
-                            Tuple(
-                                title = _("Absolute free swap"),
-                                elements = [
-                                     Filesize(title = _("Warning if less than")),
-                                     Filesize(title = _("Critical if less than")),
-                                ]
-                            ),
-                            # Note: Memory values lesser 1MB will not work
-                            # -> need hide option in filesize valuespec
-                            back  = lambda x: (x[0] / 1024 / 1024, x[1] / 1024 / 1024),
-                            forth = lambda x: (x[0] * 1024 * 1024, x[1] * 1024 * 1024)
-                        )
-                   ],
-                   default_value = (70.0, 80.0))
             ),
             ("average",
                 Integer (
@@ -1226,6 +1209,32 @@ register_check_parameters(
     TextAscii(
         title = _("Apache Server"),
         help  = _("A string-combination of servername and port, e.g. 127.0.0.1:5000.")
+    ),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_applications,
+    "nginx_status",
+    ("Nginx Status"),
+    Dictionary(
+        elements = [
+            ( "active_connections",
+              Tuple(
+                  title = _("Active Connections"),
+                  help = _("You can configure upper thresholds for the currently active "
+                           "connections handled by the web server."),
+                  elements = [
+                      Integer(title = _("Warning if above"),  unit = _("connections")),
+                      Integer(title = _("Critical if above"), unit = _("connections"))
+                  ]
+              )
+            )
+        ]
+    ),
+    TextAscii(
+        title = _("Nginx Server"),
+        help  = _("A string-combination of servername and port, e.g. 127.0.0.1:80.")
     ),
     "first"
 )
@@ -1291,6 +1300,28 @@ register_check_parameters(
     ),
     TextAscii( title = _("IP-Address of Tunnel Endpoint")),
     "first"
+)
+
+register_check_parameters(
+    subgroup_networking,
+    "lsnat",
+    _("Enterasys LSNAT Bindings"),
+    Dictionary(
+        elements = [
+                ( "current_bindings",
+                    Tuple(
+                        title = _("Number of current LSNAT bindings"),
+                              elements = [
+                                Integer(title = _("Warning if above"),  size = 10, unit=_("bindings")),
+                                Integer(title = _("Critical if above"), size = 10, unit=_("bindings")),
+                              ]
+                   )
+                ),
+        ],
+        optional_keys = False,
+    ),
+    None,
+    "dict"
 )
 
 register_check_parameters(
@@ -1728,7 +1759,13 @@ filesystem_elements = [
            elements = [
                Integer(title = _("Warning if below"), unit = _("hours"), default_value = 12,),
                Integer(title = _("Critical if below"), unit = _("hours"), default_value = 6, ),
-           ])),
+            ])),
+    ( "trend_showtimeleft",
+            FixedValue(True, title = _("Display timeleft in check output"), totext = "",
+                       help = _("Normally the timeleft until disk full is only displayed when "
+                                "the configured levels have been breached. If you set this option "
+                                "the check always reports this information"))
+    ),
     ( "trend_perfdata",
       Checkbox(
           title = _("Trend performance data"),
@@ -1761,8 +1798,8 @@ register_check_parameters(
                 title = _("Provisioning Levels"),
                 help = _("Configure thresholds for overprovisioning of datastores."),
                 elements = [
-                  Percentage(title = _("Warning at overprovisioning of")),
-                  Percentage(title = _("Critical at overprovisioning of")),
+                  Percentage(title = _("Warning at overprovisioning of"), maxvalue = None),
+                  Percentage(title = _("Critical at overprovisioning of"), maxvalue = None),
                 ]
             )),
         ],
@@ -1899,7 +1936,7 @@ register_check_parameters(
                )),
              ( "traffic",
                Alternative(
-                   title = _("Used bandwidth (traffic)"),
+                   title = _("Used bandwidth (maximum traffic)"),
                    help = _("Settings levels on the used bandwidth is optional. If you do set "
                             "levels you might also consider using an averaging."),
                    elements = [
@@ -1916,6 +1953,29 @@ register_check_parameters(
                            elements = [
                                Integer(title = _("Warning if above"), label = _("bits / bytes per second")),
                                Integer(title = _("Critical if above"), label = _("bits / bytes per second")),
+                           ]
+                        )
+                   ])
+               ),
+             ( "traffic_minimum",
+               Alternative(
+                   title = _("Used bandwidth (minimum traffic)"),
+                   help = _("Settings levels on the used bandwidth is optional. If you do set "
+                            "levels you might also consider using an averaging."),
+                   elements = [
+                       Tuple(
+                           title = _("Percentual levels (in relation to port speed)"),
+                           elements = [
+                               Percentage(title = _("Warning if below"), label = _("% of port speed")),
+                               Percentage(title = _("Critical if below"), label = _("% of port speed")),
+                           ]
+                       ),
+                       Tuple(
+                           title = _("Absolute levels in bits or bytes per second"),
+                           help = _("Depending on the measurement unit (defaults to byte) the absolute levels are set in bit or byte"),
+                           elements = [
+                               Integer(title = _("Warning if below"), label = _("bits / bytes per second")),
+                               Integer(title = _("Critical if below"), label = _("bits / bytes per second")),
                            ]
                         )
                    ])
@@ -2035,6 +2095,21 @@ register_check_parameters(
 
 register_check_parameters(
     subgroup_os,
+    "innovaphone_mem",
+    _("Innovaphone Memory Usage"),
+    Tuple(
+       title = _("Specify levels in percentage of total RAM"),
+       elements = [
+          Percentage(title = _("Warning at a usage of"), unit = _("% of RAM") ),
+          Percentage(title = _("Critical at a usage of"), unit = _("% of RAM") ),
+       ]
+    ),
+    None,
+    "first"
+)
+
+register_check_parameters(
+    subgroup_os,
     "cisco_mem",
     _("Cisco Memory Usage"),
     Alternative(
@@ -2042,8 +2117,8 @@ register_check_parameters(
             Tuple(
                 title = _("Specify levels in percentage of total RAM"),
                 elements = [
-                  Percentage(title = _("Warning at a usage of"), label = _("% of RAM"), maxvalue = None),
-                  Percentage(title = _("Critical at a usage of"), label = _("% of RAM"), maxvalue = None)
+                  Percentage(title = _("Warning at a usage of"), unit = _("% of RAM"), maxvalue = None),
+                  Percentage(title = _("Critical at a usage of"), unit = _("% of RAM"), maxvalue = None)
                 ]
             ),
             Tuple(
@@ -2062,6 +2137,31 @@ register_check_parameters(
     None
 )
 
+register_check_parameters(
+    subgroup_os,
+    "general_flash_usage",
+    _("Flash Space Usage"),
+    Alternative(
+        elements = [
+            Tuple(
+                title = _("Specify levels in percentage of total Flash"),
+                elements = [
+                  Percentage(title = _("Warning at a usage of"), label = _("% of Flash"), maxvalue = None),
+                  Percentage(title = _("Critical at a usage of"), label = _("% of Flash"), maxvalue = None)
+                ]
+            ),
+            Tuple(
+                title = _("Specify levels in absolute usage values"),
+                elements = [
+                  Integer(title = _("Warning if above"), unit = _("MB")),
+                  Integer(title = _("Critical if above"), unit = _("MB"))
+                ]
+            ),
+        ]
+    ),
+    None,
+    None
+)
 register_check_parameters(
     subgroup_os,
     "cisco_supervisor_mem",
@@ -2214,7 +2314,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_os,
     "vm_guest_tools",
-    _("Virtual machine guest tools status"),
+    _("Virtual machine (for example ESX) guest tools status"),
      Dictionary(
          optional_keys = False,
          elements = [
@@ -2250,7 +2350,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_os,
     "vm_heartbeat",
-    _("Virtual machine heartbeat status"),
+    _("Virtual machine (for example ESX) heartbeat status"),
      Dictionary(
          optional_keys = False,
          elements = [
@@ -2370,15 +2470,30 @@ register_check_parameters(
     "dict",
 )
 
+def transform_printer_supply(l):
+    if len(l) == 2:
+        return l[0], l[1], False
+    return l
+
 register_check_parameters(
     subgroup_printing,
     "printer_supply",
     _("Printer cardridge levels"),
-    Tuple(
-          help = _("Levels for printer cardridges."),
-          elements = [
-              Float(title = _("Warning remaining")),
-              Float(title = _("Critical remaining"))]
+    Transform(
+        Tuple(
+              kelp = _("Levels for printer cardridges."),
+              elements = [
+                  Float(title = _("Warning remaining")),
+                  Float(title = _("Critical remaining")),
+                  Checkbox(
+                        title = _("Upturn toner levels" ),
+                        help = _ ("Some Printers (eg. Konica for Drum Cartdiges) returning the available"
+                                  " fuel instead of what is left. In this case it's possible"
+                                  " to upturn the levels to handle this behavior"
+                                 )
+                        ),]
+             ),
+             forth = transform_printer_supply,
     ),
     TextAscii(
         title = _("cardridge specification"),
@@ -3310,7 +3425,7 @@ register_check_parameters(
 register_check_parameters(
     subgroup_virt,
     "vm_state",
-    _("Overall state of a virtual machine"),
+    _("Overall state of a virtual machine (for example ESX VMs)"),
     None,
     None, None
 )
@@ -3360,6 +3475,25 @@ register_check_parameters(
     "first"
 )
 
+register_rule(
+    "checkparams/" + subgroup_storage,
+    varname   = "inventory_multipath_rules",
+    title     = _("Linux Multipath Inventory"),
+    valuespec = Dictionary(
+        elements = [
+            ("use_alias", Checkbox(
+                     title = _("Use the multipath alias as service name, if one is set"),
+                         label = _("use alias"),
+                         help = _("If a multipath device has an alias then you can use that for specifying "
+                                  "the device instead of the UUID. The alias will then be part of the service "
+                                  "description. The UUID will be output in the pluging outpout."))
+            ),
+        ],
+        help = _('This rule controls the inventory of Multipath devices on Linux.'),
+    ),
+    match = 'dict',
+)
+
 register_check_parameters(
      subgroup_storage,
     "multipath_count",
@@ -3375,21 +3509,26 @@ register_check_parameters(
                     Dictionary(
                         title = _("Custom settings"),
                         elements = [ (element,
-                                      Tuple(
-                                          title = description,
-                                          elements = [
-                                              Integer(title = _("Warning if more than")),
-                                              Integer(title = _("Critical if more than")),
-                                          ]
-                                      )
-                                     ) for (element, description) in [
-                                             ("active",   _("Active paths")),
-                                             ("dead",     _("Dead paths")),
-                                             ("disabled", _("Disabled paths")),
-                                             ("standby",  _("Standby paths")),
-                                             ("unknown",  _("Unknown paths"))
-                                            ]
-                                    ]
+                                      Transform(
+                                            Tuple(
+                                                title = description,
+                                                elements = [
+                                                    Integer(title = _("Critical if less than")),
+                                                    Integer(title = _("Warning if less than")),
+                                                    Integer(title = _("Warning if more than")),
+                                                    Integer(title = _("Critical if more than")),
+                                                ]
+                                            ),
+                                            forth = lambda x: len(x) == 2 and (0, 0, x[0], x[1]) or x
+                                         )
+                                         ) for (element, description) in [
+                                                 ("active",   _("Active paths")),
+                                                 ("dead",     _("Dead paths")),
+                                                 ("disabled", _("Disabled paths")),
+                                                 ("standby",  _("Standby paths")),
+                                                 ("unknown",  _("Unknown paths"))
+                                                ]
+                                        ]
                         ),
                     ]
     ),
@@ -3415,6 +3554,91 @@ register_check_parameters(
     TextAscii(
         title = _("WWID of the LUN")),
     "first"
+)
+
+register_check_parameters(
+    subgroup_storage,
+    "drbd",
+    _("DRBD roles and diskstates"),
+    Dictionary(
+        elements = [
+            ( "roles",
+              Alternative(
+                  title = _("Roles"),
+                  elements = [
+                        FixedValue(None, totext = "", title = _("Do not monitor")),
+                        ListOf(
+                          Tuple(
+                              orientation = "horizontal",
+                              elements = [
+                                  DropdownChoice(
+                                      title = _("DRBD shows up as"),
+                                      default_value = "running",
+                                      choices = [
+                                          ( "primary_secondary",   _("Primary / Secondary")   ),
+                                          ( "primary_primary",     _("Primary / Primary")     ),
+                                          ( "secondary_primary",   _("Secondary / Primary")   ),
+                                          ( "secondary_secondary", _("Secondary / Secondary") )
+                                      ]
+                                  ),
+                                  MonitoringState(
+                                      title = _("Resulting state"),
+                                  ),
+                              ],
+                              default_value = ( "ignore",  0)
+                          ),
+                          title = _("Set roles"),
+                          add_label = _("Add role rule")
+                        )
+                    ]
+                )
+            ),
+            ( "diskstates",
+                Alternative(
+                    title = _("Diskstates"),
+                    elements = [
+                            FixedValue(None, totext = "", title = _("Do not monitor")),
+                            ListOf(
+                                Tuple(
+                                    elements = [
+                                    DropdownChoice(
+                                        title = _("Diskstate"),
+                                        choices = [
+                                              ( "primary_Diskless",       _("Primary - Diskless") ),
+                                              ( "primary_Attaching",      _("Primary - Attaching") ),
+                                              ( "primary_Failed",         _("Primary - Failed") ),
+                                              ( "primary_Negotiating",    _("Primary - Negotiating") ),
+                                              ( "primary_Inconsistent",   _("Primary - Inconsistent") ),
+                                              ( "primary_Outdated",       _("Primary - Outdated") ),
+                                              ( "primary_DUnknown",       _("Primary - DUnknown") ),
+                                              ( "primary_Consistent",     _("Primary - Consistent") ),
+                                              ( "primary_UpToDate",       _("Primary - UpToDate") ),
+                                              ( "secondary_Diskless",     _("Secondary - Diskless") ),
+                                              ( "secondary_Attaching",    _("Secondary - Attaching") ),
+                                              ( "secondary_Failed",       _("Secondary - Failed") ),
+                                              ( "secondary_Negotiating",  _("Secondary - Negotiating") ),
+                                              ( "secondary_Inconsistent", _("Secondary - Inconsistent") ),
+                                              ( "secondary_Outdated",     _("Secondary - Outdated") ),
+                                              ( "secondary_DUnknown",     _("Secondary - DUnknown") ),
+                                              ( "secondary_Consistent",   _("Secondary - Consistent") ),
+                                              ( "secondary_UpToDate",     _("Secondary - UpToDate") ),
+                                        ]
+                                    ),
+                                    MonitoringState( title = _("Resulting state") )
+                                    ],
+                                    orientation = "horizontal",
+                                ),
+                                title     = _("Set diskstates"),
+                                add_label = _("Add diskstate rule")
+                            )
+                    ]
+                ),
+            )
+        ]
+    ),
+    TextAscii( title = _("DRBD device") ),
+    "first",
+    True,
 )
 
 register_check_parameters(
@@ -3873,6 +4097,53 @@ register_check_parameters(
         title = _("Sensor ID"),
         help = _("The identificator of the thermal sensor.")),
     "first"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "temperature_trends",
+    _("Temperature trends for devices with builtin levels"),
+    Dictionary(
+        title = _("Temperature Trend Analysis"),
+        help = _("This rule enables and configures a trend analysis and corresponding limits for devices, "
+                 "which have their own limits configured on the device. It will only work for supported "
+                 "checks, right now the adva_fsp_temp check"),
+        elements = [
+            (  "trend_range",
+               Optional(
+                   Integer(
+                       title = _("Time range for temperature trend computation"),
+                       default_value = 30,
+                       minvalue = 5,
+                       unit= _("minutes")),
+                   title = _("Trend computation"),
+                   label = _("Enable trend computation")
+                )
+            ),
+            (  "trend_c",
+               Tuple(
+                   title = _("Levels on trends in degrees Celsius per time range"),
+                   elements = [
+                       Integer(title = _("Warning if above"), unit = _("C / range"), default_value = 5),
+                       Integer(title = _("Critical if above"), unit = _("C / range"), default_value = 10)
+                   ]
+                )
+            ),
+            (  "trend_timeleft",
+               Tuple(
+                   title = _("Levels on the time left until limit is reached"),
+                   elements = [
+                       Integer(title = _("Warning if below"), unit = _("minutes"), default_value = 240,),
+                       Integer(title = _("Critical if below"), unit = _("minutes"), default_value = 120, ),
+                    ]
+                )
+            ),
+        ]
+    ),
+    TextAscii(
+        title = _("Sensor ID"),
+        help = _("The identifier of the thermal sensor.")),
+    "dict"
 )
 
 register_check_parameters(
@@ -4489,6 +4760,21 @@ register_check_parameters(
     "first"
 )
 
+register_check_parameters(
+   subgroup_applications,
+   "antivir_update_age",
+   _("Age of last AntiVirus update"),
+   Tuple(
+       title = _("Age of last AntiVirus update"),
+           elements = [
+               Age(title = _("Warning level for time since last update")),
+               Age(title = _("Critical level for time since last update")),
+           ]
+   ),
+   None,
+   "first"
+)
+
 register_check_parameters(subgroup_applications,
     "logwatch_ec",
     _('Logwatch Event Console Forwarding'),
@@ -4714,8 +5000,8 @@ register_check_parameters(
                   Tuple(
                     title = _("Levels on CPU utilization"),
                     elements = [
-                       Percentage(title = _("Warning if above"), default_value = 90),
-                       Percentage(title = _("Critical if above"), default_value = 98),
+                       Percentage(title = _("Warning if above"),  default_value = 90, maxvalue = 10000),
+                       Percentage(title = _("Critical if above"), default_value = 98, maxvalue = 10000),
                     ],
                 )),
                 ( "cpu_average",
@@ -4783,4 +5069,89 @@ register_check_parameters(
     _("Zypper Updates"),
     None,
     None, None,
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "airflow_deviation",
+    _("Airflow Deviation in Percent"),
+    Tuple(
+        help = _("Levels for Airflow Deviation measured at airflow sensors "),
+        elements = [
+            Float(title = _("critical if below or equal"), unit = u"%", default_value = -20),
+            Float(title = _("warning if below or equal"),  unit = u"%", default_value = -20),
+            Float(title = _("warning if above or equal"),  unit = u"%", default_value = 20),
+            Float(title = _("critical if above or equal"), unit = u"%", default_value = 20),
+        ]),
+    TextAscii(
+        title = _("Detector ID"),
+        help = _("The identifier of the detector.")),
+    "first"
+)
+
+register_check_parameters(
+    subgroup_applications,
+    "citrix_licenses",
+    _("Number of used Citrix licenses"),
+    Alternative(
+        style = "dropdown",
+        default_value = None,
+        elements = [
+              Tuple(
+                  title = _("Absolute Levels for unused licenses"),
+                  elements = [
+                      Integer(title = _("Warning at"), default_value = 5, unit = _("unused licenses")),
+                      Integer(title = _("Critical at"), default_value = 0, unit = _("unused licenses")),
+                  ]
+              ),
+              Tuple(
+                  title = _("Percentual Levels for unused licenses"),
+                  elements = [
+                      Percentage(title = _("Warning at"), default_value = 10.0),
+                      Percentage(title = _("Critical at"), default_value = 0),
+                  ]
+             ),
+             FixedValue(
+                 None,
+                 totext = _("critical if all are used"),
+                 title = _("Go critical if all licenses are used"),
+             ),
+        ]
+    ),
+    TextAscii(
+       title = _("ID of the license, e.g. <tt>PVSD_STD_CCS</tt>"),
+       allow_empty = False,
+    ),
+    "dict"
+)
+
+register_check_parameters(
+    subgroup_networking,
+    "adva_ifs",
+    _("Adva Optical Transport Laser Power"),
+    Dictionary(
+        elements = [
+            ( "min_output_power",
+              Tuple(
+                  title = _("Sending Power"),
+                  elements = [
+                      Float(title = _("warning if below"), unit = "dBm", default_value = None),
+                      Float(title = _("critical if below"), unit = "dBm", default_value = None),
+                  ])
+            ),
+            ( "min_input_power",
+              Tuple(
+                  title = _("Received Power"),
+                  elements = [
+                      Float(title = _("warning if below"), unit = "dBm", default_value = None),
+                      Float(title = _("critical if below"), unit = "dBm", default_value = None),
+                  ])
+            ),
+        ]
+    ),
+    TextAscii(
+       title = _("Interface"),
+       allow_empty = False,
+    ),
+    "dict"
 )

@@ -235,6 +235,18 @@ class Filter:
     def heading_info(self, infoname):
         return None
 
+def unset_all_filtervars():
+    for f in multisite_filters.values():
+        for varname in f.htmlvars:
+            html.del_var(varname)
+
+def get_all_filtervars():
+    filtervars = {}
+    for f in multisite_filters.values():
+        for varname in f.htmlvars:
+            if html.has_var(varname):
+                filtervars[varname] = html.var(varname)
+    return filtervars
 
 # Load all views - users or builtins
 def load_views():
@@ -308,7 +320,7 @@ def declare_custom_view_permissions():
                 views = eval(file(path).read())
                 for name, view in views.items():
                     if view["public"] and not config.permission_exists("view." + name):
-                        config.declare_permission("view." + name, view["title"], 
+                        config.declare_permission("view." + name, view["title"],
                                     view["description"], ['admin','user','guest'])
         except:
             if config.debug:
@@ -406,6 +418,7 @@ def page_edit_views(msg=None):
             save_views(config.user_id)
             html.reload_sidebar()
         elif c == False:
+            html.footer()
             return
 
     if html.var('mode') == 'create':
@@ -480,10 +493,10 @@ def page_edit_views(msg=None):
             html.write('<td>')
             title = view['title']
             if not view["hidden"]:
-                html.write("<a href=\"view.py?view_name=%s\">%s</a>" % (viewname, title))
+                html.write("<a href=\"view.py?view_name=%s\">%s</a>" % (viewname, html.attrencode(title)))
             else:
-                html.write(title)
-            html.help(view['description'])
+                html.write(html.attrencode(title))
+            html.help(html.attrencode(view['description']))
             html.write("</td>")
 
             # Datasource
@@ -1176,7 +1189,15 @@ def page_view():
         raise MKGeneralException(_("Missing the variable view_name in the URL."))
     view = html.available_views.get(view_name)
     if not view:
-        raise MKGeneralException(("No view defined with the name '%s'.") % html.attrencode(view_name))
+        raise MKGeneralException(_("No view defined with the name '%s'.") % html.attrencode(view_name))
+
+    if config.may("reporting.instant"):
+        if html.var("instant_report"):
+            import reporting
+            reporting.instant_report()
+            return
+
+        html.add_status_icon("report", _("Export as PDF (instant report)"), html.makeuri([("instant_report", "1")]))
 
     show_view(view, True, True, True)
 
@@ -1293,6 +1314,10 @@ def prepare_display_options():
 # is about.
 def show_view(view, show_heading = False, show_buttons = True,
               show_footer = True, render_function = None, only_count=False):
+    if html.var("mode") == "availability" and html.has_var("av_aggr_name") and html.var("timeline"):
+        bi.page_timeline()
+        return
+
     display_options = prepare_display_options()
 
     # User can override the layout settings via HTML variables (buttons)
@@ -1354,8 +1379,10 @@ def show_view(view, show_heading = False, show_buttons = True,
     if not datasource.get('ignore_limit', False):
         limit = get_limit()
 
-
-    if html.var("mode") == "availability":
+    # Fork to availability view. We just need the filter headers, since we do not query the normal
+    # hosts and service table, but "statehist". This is *not* true for BI availability, though (see later)
+    if html.var("mode") == "availability" and (
+          "aggr" not in datasource["infos"] or html.var("timeline_aggr")):
         return render_availability(view, datasource, filterheaders, display_options, only_sites, limit)
 
     query = filterheaders + view.get("add_headers", "")
@@ -1400,6 +1427,10 @@ def show_view(view, show_heading = False, show_buttons = True,
 
     # Add idkey columns, needed for identifying the row
     columns += datasource["idkeys"]
+
+    # BI availability needs aggr_tree
+    if html.var("mode") == "availability" and "aggr" in datasource["infos"]:
+        columns = [ "aggr_tree", "aggr_name", "aggr_group" ]
 
     # Make column list unique and remove (implicit) site column
     colset = set(columns)
@@ -1448,6 +1479,10 @@ def show_view(view, show_heading = False, show_buttons = True,
     # Apply non-Livestatus filters
     for filter in all_active_filters:
         rows = filter.filter_table(rows)
+
+    if html.var("mode") == "availability":
+        render_bi_availability(view_title(view), rows)
+        return
 
     # TODO: Use livestatus Stats: instead of fetching rows!
     if only_count:
@@ -1523,7 +1558,7 @@ def render_view(view, rows, datasource, group_painters, painters,
                        # Show link to availability. This exists only for plain hosts
                        # and services table. The grouping tables have columns that statehist
                        # is missing. That way some of the filters might fail.
-                       datasource["table"] in [ "hosts", "services"] )
+                       datasource["table"] in [ "hosts", "services", ] or "aggr" in datasource["infos"])
 
     # User errors in filters
     html.show_user_errors()
@@ -2701,8 +2736,11 @@ def get_painter_option(name):
     return opt.get("value", opt['valuespec'].default_value())
 
 def get_host_tags(row):
-    if "host_custom_variables" in row:
+    if type(row.get("host_custom_variables")) == dict:
         return row["host_custom_variables"].get("TAGS", "")
+
+    if type(row.get("host_custom_variable_names")) != list:
+        return ""
 
     for name, val in zip(row["host_custom_variable_names"],
                          row["host_custom_variable_values"]):

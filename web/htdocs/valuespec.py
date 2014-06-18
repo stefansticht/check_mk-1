@@ -176,7 +176,7 @@ class Age(ValueSpec):
         html.write("<div>")
         if self._label:
             html.write(self._label + " ")
-        html.number_input(varprefix+'_days', days, 2)
+        html.number_input(varprefix+'_days', days, 3)
         html.write(" %s " % _("days"))
         html.number_input(varprefix+'_hours', hours, 2)
         html.write(" %s " % _("hours"))
@@ -241,7 +241,10 @@ class Integer(ValueSpec):
             style = "text-align: right;"
         else:
             style = ""
-        html.number_input(varprefix, self._display_format % convfunc(value), size = self._size, style = style)
+        if value == "": # This is needed for ListOfIntegers
+            html.text_input(varprefix, "", "number", size = self._size, style = style)
+        else:
+            html.number_input(varprefix, self._display_format % convfunc(value), size = self._size, style = style)
         if self._unit:
             html.write("&nbsp;")
             html.write(self._unit)
@@ -571,9 +574,13 @@ class TextAreaUnicode(TextUnicode):
         self._cols = kwargs.get("cols", 60)
         self._rows = kwargs.get("rows", 20)  # Allowed: "auto" -> Auto resizing
         self._minrows = kwargs.get("minrows", 0) # Minimum number of initial rows when "auto"
+        self._monospaced = kwargs.get("monospaced", False) # select TT font
 
     def value_to_text(self, value):
-        return "<pre class=ve_textarea>%s</pre>" % value
+        if self._monospaced:
+            return "<pre class=ve_textarea>%s</pre>" % html.attrencode(value)
+        else:
+            return html.attrencode(value).replace("\n", "<br>")
 
     def render_input(self, varprefix, value):
         if value == None:
@@ -590,12 +597,18 @@ class TextAreaUnicode(TextUnicode):
             attrs = {}
             rows = self._rows
 
+        if self._monospaced:
+            attrs["class"] = "tt"
+
         html.text_area(varprefix, value, rows=rows, cols=self._cols, attrs = attrs)
 
 
     # Overridded because we do not want to strip() here and remove '\r'
     def from_html_vars(self, varprefix):
-        return html.var_utf8(varprefix, "").replace('\r', '')
+        text = html.var_utf8(varprefix, "").replace('\r', '')
+        if text and not text.endswith("\n"):
+            text += "\n" # force newline at end
+        return text
 
 # A variant of TextAscii() that validates a path to a filename that
 # lies in an existing directory.
@@ -693,10 +706,12 @@ class ListOfStrings(ValueSpec):
     def from_html_vars(self, vp):
         value = []
         nr = 0
-        while html.has_var(vp + "_%d" % nr):
-            s = html.var(vp + "_%d" % nr).strip()
-            if s:
-                value.append(s)
+        while True:
+            varname = vp + "_%d" % nr
+            if not html.has_var(varname):
+                break
+            if html.var(varname, "").strip():
+                value.append(self._valuespec.from_html_vars(varname))
             nr += 1
         return value
 
@@ -718,6 +733,20 @@ class ListOfStrings(ValueSpec):
             for nr, s in enumerate(value):
                 self._valuespec.validate_value(s, vp + "_%d" % nr)
         ValueSpec.custom_validate(self, value, vp)
+
+class ListOfIntegers(ListOfStrings):
+    def __init__(self, **kwargs):
+        int_args = {}
+        for key in [ "minvalue", "maxvalue" ]:
+            if key in kwargs:
+                int_args[key] = kwargs[key]
+        int_args["display_format"] = "%s"
+        int_args["convfunc"] = lambda x: x != "" and saveint(x) or ""
+        int_args["minvalue"] = 17
+        int_args["default_value"] = 34
+        valuespec = Integer(**int_args)
+        kwargs["valuespec"] = valuespec
+        ListOfStrings.__init__(self, **kwargs)
 
 # Generic list-of-valuespec ValueSpec with Javascript-based
 # add/delete/move
@@ -1327,20 +1356,36 @@ class MultiSelect(ListChoice):
 # Implements a choice of items which is realized with
 # two ListChoices select fields. One contains all available
 # items and one contains all selected items.
+# Optionally you can have the user influance the order of
+# the entries by simply clicking them in a certain order.
+# If that feature is not being used, then the original order
+# of the elements is always being kept.
 class DualListChoice(ListChoice):
     def __init__(self, **kwargs):
         ListChoice.__init__(self, **kwargs)
         self._autoheight = kwargs.get("autoheight", True)
+        self._custom_order = kwargs.get("custom_order", False)
 
     def render_input(self, varprefix, value):
         self.load_elements()
         selected   = []
         unselected = []
-        for e in self._elements:
-            if e[0] in value:
-                selected.append(e)
-            else:
-                unselected.append(e)
+        if self._custom_order:
+            edict = dict(self._elements)
+            allowed_keys = edict.keys()
+            for v in value:
+                if v in allowed_keys:
+                    selected.append((v, edict[v]))
+            for v in allowed_keys:
+                if v not in value:
+                    unselected.append((v, edict[v]))
+        else:
+            for e in self._elements:
+                if e[0] in value:
+                    selected.append(e)
+                else:
+                    unselected.append(e)
+
 
         html.write('<table><tr><td>')
         html.write(_('Available:'))
@@ -1349,11 +1394,12 @@ class DualListChoice(ListChoice):
         html.write('</td></tr><tr><td>')
         html.sorted_select(varprefix + '_unselected', unselected,
                            attrs = {'size': 5, 'style': self._autoheight and 'height:auto' or ''},
-                           onchange = 'vs_duallist_switch(this, \'%s\');' % varprefix)
+                           onchange = 'vs_duallist_switch(this, \'%s\', %d);' % (varprefix, self._custom_order and 1 or 0))
         html.write('</td><td>')
-        html.sorted_select(varprefix + '_selected', selected,
+        func = self._custom_order and html.select or html.sorted_select
+        func(varprefix + '_selected', selected,
                            attrs = {'size': 5, 'style': self._autoheight and 'height:auto' or '', 'multiple': 'multiple'},
-                           onchange = 'vs_duallist_switch(this, \'%s\');' % varprefix)
+                           onchange = 'vs_duallist_switch(this, \'%s\', 1);' % varprefix)
         html.write('</td></tr></table>')
         html.hidden_field(varprefix, '|'.join([k for k, v in selected]), id = varprefix, add_var = True)
 
@@ -1361,9 +1407,16 @@ class DualListChoice(ListChoice):
         self.load_elements()
         selected = html.var(varprefix, '').split('|')
         value = []
-        for key, title in self._elements:
-            if key in selected:
-                value.append(key)
+        if self._custom_order:
+            edict = dict(self._elements)
+            allowed_keys = edict.keys()
+            for v in selected:
+                if v in allowed_keys:
+                    value.append(v)
+        else:
+            for key, title in self._elements:
+                if key in selected:
+                    value.append(key)
         return value
 
 # A type-save dropdown choice with one extra field that

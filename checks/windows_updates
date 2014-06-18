@@ -47,6 +47,9 @@ def inventory_windows_updates(info):
 def check_windows_updates(_unused, params, info):
     if info and len(info[0]) == 3:
         status = 0
+        # Workarround to return errors from the plugin
+        if info[0][0] == 'x':
+            return 2, ' '.join(info[1])
         reboot_required, num_imp, num_opt = map(saveint, info[0])
         imp_warn, imp_crit, opt_warn, opt_crit = params[0:4]
         if len(params) == 7:
@@ -98,15 +101,22 @@ def check_windows_updates(_unused, params, info):
             hour, minute, second = map(int, time.split(":"))
             force_date = datetime.datetime( year, month, day, hour, minute, second)
             now = datetime.datetime.now()
-            diff_warn = datetime.timedelta(seconds=force_warn)
-            diff_crit = datetime.timedelta(seconds=force_crit)
             nix = datetime.timedelta(seconds=0)
+            # check if force_date is in the future
             if force_date - now > nix:
+                if force_crit:
+                    diff_crit = datetime.timedelta(seconds=force_crit)
+                else:
+                    diff_crit = None
+                if force_warn:
+                    diff_warn = datetime.timedelta(seconds=force_warn)
+                else:
+                    diff_warn = None
                 sym = ""
-                if diff_crit > force_date - now:
+                if diff_crit and diff_crit > force_date - now:
                     status = 2
                     sym = "(!!)"
-                elif diff_warn > force_date - now:
+                elif diff_warn and diff_warn > force_date - now:
                     if status < 1:
                         status = 1
                     sym = "(!)"

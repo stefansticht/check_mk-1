@@ -24,6 +24,65 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+# Hints:
+# There are several modes for displaying data
+# 1. Availability table
+# 2. Timeline view with chronological events of one object
+# There are two types of data sources
+# a. Hosts/Services (identified by site, host and service)
+# b. BI aggregates (identified by aggr_groups and aggr_name)
+# The code flow for these four combinations is different
+#
+# 1a) availability of hosts/services
+#  Here the logic of show_view is used for creating the
+#  filter headers. But these are being reused for the statehist
+#  table instead of the original hosts/services table! This is
+#  done in get_availability_data().
+#
+#  - htdocs/views.py:show_view()
+#  - plugins/views/availability.py:render_availability()
+#    - plugins/views/availability.py:get_availability_data()
+#    - plugins/views/availability.py:do_render_availability()
+#      - plugins/views/availability.py:render_availability_table()
+#
+# 2a) timeline of hosts/services
+#  It is much the same as for 1a), just that in get_availability_data()
+#  an additional filter is being added for selecting just one host/serivce.
+#
+#  - htdocs/views.py:show_view()
+#  - plugins/views/availability.py:render_availability()
+#    - plugins/views/availability.py:get_availability_data()
+#    - plugins/views/availability.py:do_render_availability()
+#      - plugins/views/availability.py:render_timeline()
+#
+# 1b) availability of bi aggregates
+#  In order to use the filter logic of the aggr datasource, we
+#  also start in show_view(). But this time we let the actual
+#  rows being computed - just we make sure that only the two
+#  columns aggr_name, aggr_group and aggr_tree are being fetched. The
+#  other columns won't be displayed. We just need the correct
+#  result set. With that we fork into render_bi_availability().
+#  This computes the historic states of the aggregate by using
+#  data from hosts/services from state_hist.
+#
+#  - htdocs/views.py:show_view()
+#    - plugins/views/availability.py:render_bi_availability()
+#      - plugins/views/availability.py:get_bi_timeline()
+#      - plugins/views/availability.py:do_render_availability()
+#        - plugins/views/availability.py:render_availability_table()
+#
+# 2b) timeline of bi aggregates
+#  In this case we do not need any logic from the view, since
+#  we just diplay one element - which is identified by aggr_group
+#  and aggr_name. We immediately fork to page_timeline()
+#
+#  - htdocs/views.py:show_view() (jumps immediately to page_timeline)
+#    - htdocs/bi.py:page_timeline()
+#      - plugins/views/availability.py:render_bi_availability()
+#        - plugins/views/availability.py:do_render_availability()
+#          - plugins/views/availability.py:render_timeline()
+
+
 import table
 from valuespec import *
 
@@ -47,10 +106,15 @@ def render_availability(view, datasource, filterheaders, display_options,
         tl_site = html.var("timeline_site")
         tl_host = html.var("timeline_host")
         tl_service = html.var("timeline_service")
-        title = _("Timeline of") + " " + tl_host
-        if tl_service:
-            title += ", " + tl_service
-        timeline = (tl_site, tl_host, tl_service)
+        tl_aggr = html.var("timeline_aggr")
+        if tl_aggr:
+            title = _("Timeline of") + " " + tl_aggr
+            timeline = (tl_aggr, None, None)
+        else:
+            title = _("Timeline of") + " " + tl_host
+            if tl_service:
+                title += ", " + tl_service
+            timeline = (tl_site, tl_host, tl_service)
 
     else:
         title = _("Availability: ") + view_title(view)
@@ -60,9 +124,7 @@ def render_availability(view, datasource, filterheaders, display_options,
 
     if html.output_format == "csv_export":
         do_csv = True
-        html.req.content_type = "text/csv; charset=UTF-8"
-        filename = '%s-%s.csv' % (title, time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(time.time())))
-        html.req.headers_out['Content-Disposition'] = 'Attachment; filename=%s' % filename
+        av_output_csv_mimetype(title)
     else:
         do_csv = False
 
@@ -87,22 +149,38 @@ def render_availability(view, datasource, filterheaders, display_options,
         if timeline:
             html.context_button(_("Availability"), html.makeuri([("timeline", "")]), "availability")
             history_url = history_url_of(tl_site, tl_host, tl_service, range[0], range[1])
-            html.context_button(_("History"), history_url, "history")
+            if not tl_aggr: # No history for BI aggregate timeline
+                html.context_button(_("History"), history_url, "history")
         html.end_context_buttons()
 
     if not do_csv:
         html.write(avoptions_html)
 
     if not html.has_user_errors():
-        rows = get_availability_data(datasource, filterheaders, range, only_sites,
-                                     limit, timeline, timeline or avoptions["show_timeline"], avoptions)
-        what = "service" in datasource["infos"] and "service" or "host"
+        if timeline and tl_aggr:
+            if not html.has_var("aggr_group"):
+                raise MKGeneralException("Missing GET variable <tt>aggr_group</tt>")
+            aggr_group = html.var("aggr_group")
+            tree = bi.get_bi_tree(aggr_group, tl_aggr)
+            rows = [{ "aggr_tree" : tree , "aggr_group" : aggr_group}]
+            what = "bi"
+        else:
+            rows = get_availability_data(datasource, filterheaders, range, only_sites,
+                                         limit, timeline, timeline or avoptions["show_timeline"], avoptions)
+            what = "service" in datasource["infos"] and "service" or "host"
         do_render_availability(rows, what, avoptions, timeline, "")
 
     if 'Z' in display_options:
         html.bottom_footer()
     if 'H' in display_options:
         html.body_end()
+
+def av_output_csv_mimetype(title):
+    html.req.content_type = "text/csv; charset=UTF-8"
+    filename = '%s-%s.csv' % (title, time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(time.time())))
+    if type(filename) == unicode:
+        filename = filename.encode("utf-8")
+    html.req.headers_out['Content-Disposition'] = 'Attachment; filename="%s"' % filename
 
 avoption_entries = [
   # Time range selection
@@ -497,7 +575,7 @@ def render_availability_options():
 
 def get_availability_data(datasource, filterheaders, range, only_sites, limit, single_object, include_output, avoptions):
     has_service = "service" in datasource["infos"]
-    av_filter = "Filter: time >= %d\nFilter: time <= %d\n" % range
+    av_filter = "Filter: time >= %d\nFilter: time < %d\n" % range
     if single_object:
         tl_site, tl_host, tl_service = single_object
         av_filter += "Filter: host_name = %s\nFilter: service_description = %s\n" % (
@@ -649,7 +727,7 @@ def do_render_availability(rows, what, avoptions, timeline, timewarpcode):
                         consider = False
                     else:
                         s = "in_downtime"
-                elif span["host_down"] and avoptions["consider"]["host_down"]:
+                elif what != "host" and span["host_down"] and avoptions["consider"]["host_down"]:
                     s = "host_down"
                 elif span["is_flapping"] and avoptions["consider"]["flapping"]:
                     s = "flapping"
@@ -761,7 +839,7 @@ def render_timeline(timeline_rows, from_time, until_time, considered_duration,
 
     # Render graphical representation
     # Make sure that each cell is visible, if possible
-    min_percentage = min(100.0 / len(timeline_rows), style == "inline" and 0.1 or 0.5)
+    min_percentage = min(100.0 / len(timeline_rows), style == "inline" and 0.0 or 0.5)
     rest_percentage = 100 - len(timeline_rows) * min_percentage
     html.write('<div class="timelinerange %s">' % style)
     if style == "standalone":
@@ -770,6 +848,19 @@ def render_timeline(timeline_rows, from_time, until_time, considered_duration,
 
     html.write('<table class="timeline %s">' % style)
     html.write('<tr class=timeline>')
+    chaos_begin = None
+    chaos_end = None
+    chaos_count = 0
+    chaos_width = 0
+
+    def output_chaos_period(chaos_begin, chaos_end, chaos_count, chaos_width):
+        title = _("%d chaotic state changes from %s until %s (%s)") % (
+            chaos_count,
+            render_date(chaos_begin), render_date(chaos_end),
+            render_number(chaos_end - chaos_begin, considered_duration))
+        html.write('<td style="width: %.3f%%" title="%s" class="chaos"></td>' % (
+                   max(0.2, chaos_width), html.attrencode(title)))
+
     for row_nr, (row, state_id) in enumerate(timeline_rows):
         for sid, css, sname, help in availability_columns:
             if sid == state_id:
@@ -779,10 +870,25 @@ def render_timeline(timeline_rows, from_time, until_time, considered_duration,
                     help and help or sname)
                 if row["log_output"]:
                     title += " - " + row["log_output"]
-                width = min_percentage + rest_percentage * row["duration"] / considered_duration
+                width = rest_percentage * row["duration"] / considered_duration
+                if style == "inline" and width < 0.05:
+                    if not chaos_begin:
+                        chaos_begin = row["from"]
+                    chaos_width += width
+                    chaos_count += 1
+                    chaos_end = row["until"]
+                    continue
+                elif chaos_begin and chaos_count > 1:
+                    output_chaos_period(chaos_begin, chaos_end, chaos_count, chaos_width)
+                    chaos_begin = None
+                    chaos_count = 0
+                    chaos_width = 0
+                    continue
+
+                width += min_percentage
                 html.write('<td onmouseover="timeline_hover(%d, 1);" onmouseout="timeline_hover(%d, 0);" '
-                           'style="width: %.1f%%" title="%s" class="%s"></td>' % (
-                           row_nr, row_nr, width, title, css))
+                           'style="width: %.3f%%" title="%s" class="%s"></td>' % (
+                           row_nr, row_nr, width, html.attrencode(title), css))
     html.write('</tr></table>')
 
     if style == "inline":
@@ -799,7 +905,10 @@ def render_timeline(timeline_rows, from_time, until_time, considered_duration,
         table.cell(_("Links"), css="buttons")
         if what == "bi":
             url = html.makeuri([("timewarp", str(int(row["from"])))])
-            html.icon_button(url, _("Time warp - show BI aggregate during this time period"), "timewarp")
+            if html.var("timewarp") and int(html.var("timewarp")) == int(row["from"]):
+                html.disabled_icon_button("timewarp_off")
+            else:
+                html.icon_button(url, _("Time warp - show BI aggregate during this time period"), "timewarp")
         else:
             url = html.makeuri([("anno_site", tl_site),
                                 ("anno_host", tl_host),
@@ -814,6 +923,9 @@ def render_timeline(timeline_rows, from_time, until_time, considered_duration,
         for sid, css, sname, help in availability_columns:
             if sid == state_id:
                 table.cell(_("State"), sname, css=css + " state narrow")
+                break
+        else:
+            table.cell(_("State"), "(%s/%s)" % (sid,sname))
         table.cell(_("Additional information"), row["log_output"])
 
     table.end()
@@ -1100,7 +1212,7 @@ def render_availability_group(group_title, range_title, group_id, availability, 
     do_csv = html.output_format == "csv_export"
 
     availability.sort()
-    show_summary = what != "bi" and avoptions.get("summary")
+    show_summary = avoptions.get("summary")
     summary = {}
     summary_counts = {}
     table.begin("av_items", group_title, css="availability",
@@ -1115,18 +1227,22 @@ def render_availability_group(group_title, range_title, group_id, availability, 
                    ("timeline_site", site),
                    ("timeline_host", host),
                    ("timeline_service", service)])
+        else:
+            timeline_url = html.makeuri([("timeline", "yes"), ("av_aggr_name", service), ("av_aggr_group", host)])
 
-            if not "omit_buttons" in labelling and not do_csv:
-                table.cell("", css="buttons")
+
+        if not "omit_buttons" in labelling and not do_csv:
+            table.cell("", css="buttons")
+            if what != "bi":
                 history_url = history_url_of(site, host, service, from_time, until_time)
                 html.icon_button(history_url, _("Event History"), "history")
                 html.icon_button(timeline_url, _("Timeline"), "timeline")
-        else:
-            timeline_url = html.makeuri([("timeline", "1")])
+            else:
+                html.icon_button(timeline_url, _("Timeline"), "timeline")
 
         host_url = "view.py?" + html.urlencode_vars([("view_name", "hoststatus"), ("site", site), ("host", host)])
         if what == "bi":
-            bi_url = "view.py?" + html.urlencode_vars([("view_name", "aggr_single"), ("aggr_name", service)])
+            bi_url = "view.py?" + html.urlencode_vars([("view_name", "aggr_single"), ("aggr_group", host), ("aggr_name", service)])
             table.cell(_("Aggregate"), '<a href="%s">%s</a>' % (bi_url, service))
             availability_columns = bi_availability_columns
         else:
@@ -1252,68 +1368,109 @@ def check_av_levels(number, av_levels, considered_duration):
 
 
 
-# Render availability of an BI aggregate. This is currently
+# Render availability of a BI aggregate. This is currently
 # no view and does not support display options
-def render_bi_availability(tree):
-    reqhosts = tree["reqhosts"]
-    timeline = html.var("timeline")
-    title = _("Availability of ") + tree["title"]
-    html.body_start(title, stylesheets=["pages","views","status", "bi"], javascripts=['bi'])
-    html.top_heading(title)
-    html.begin_context_buttons()
-    togglebutton("avoptions", False, "painteroptions", _("Configure details of the report"))
-    html.context_button(_("Status View"), "view.py?" +
-            html.urlencode_vars([("view_name", "aggr_single"),
-              ("aggr_name", tree["title"])]), "showbi")
-    if timeline:
-        html.context_button(_("Availability"), html.makeuri([("timeline", "")]), "availability")
-    else:
-        html.context_button(_("Timeline"), html.makeuri([("timeline", "1")]), "timeline")
-    html.end_context_buttons()
+def render_bi_availability(title, aggr_rows):
+    html.add_status_icon("download_csv", _("Export as CSV"), html.makeuri([("output_format", "csv_export")]))
 
+    timeline = html.var("timeline")
+    if timeline:
+        title = _("Timeline of ") + title
+    else:
+        title = _("Availability of ") + title
+    if html.output_format != "csv_export":
+        html.body_start(title, stylesheets=["pages","views","status", "bi"], javascripts=['bi'])
+        html.top_heading(title)
+        html.begin_context_buttons()
+        togglebutton("avoptions", False, "painteroptions", _("Configure details of the report"))
+        html.context_button(_("Status View"), html.makeuri([("mode", "status")]), "status")
+        if timeline:
+            html.context_button(_("Availability"), html.makeuri([("timeline", "")]), "availability")
+        elif len(aggr_rows) == 1:
+            aggr_name = aggr_rows[0]["aggr_name"]
+            aggr_group = aggr_rows[0]["aggr_group"]
+            timeline_url = html.makeuri([("timeline", "1"), ("av_aggr_name", aggr_name), ("av_aggr_group", aggr_group)])
+            html.context_button(_("Timeline"), timeline_url, "timeline")
+        html.end_context_buttons()
+
+    html.plug()
     avoptions = render_availability_options()
+    range, range_title = avoptions["range"]
+    avoptions_html = html.drain()
+    html.unplug()
+    if html.output_format == "csv_export":
+        av_output_csv_mimetype(title)
+    else:
+        html.write(avoptions_html)
+
+    timewarpcode = ""
+
     if not html.has_user_errors():
-        try:
-            timewarp = int(html.var("timewarp"))
-        except:
-            timewarp = None
-        rows, tree_state = get_bi_timeline(tree, avoptions, timewarp)
-        if timewarp:
-            state, assumed_state, node, subtrees = tree_state
-            eff_state = state
-            if assumed_state != None:
-                eff_state = assumed_state
-            row = {
-                    "aggr_tree"            : tree,
-                    "aggr_treestate"       : tree_state,
-                    "aggr_state"           : state,          # state disregarding assumptions
-                    "aggr_assumed_state"   : assumed_state,  # is None, if there are no assumptions
-                    "aggr_effective_state" : eff_state,      # is assumed_state, if there are assumptions, else real state
-                    "aggr_name"            : node["title"],
-                    "aggr_output"          : eff_state["output"],
-                    "aggr_hosts"           : node["reqhosts"],
-                    "aggr_function"        : node["func"],
-                    "aggr_group"           : html.var("aggr_group"),
-            }
-            tdclass, htmlcode = bi.render_tree_foldable(row, boxes=False, omit_root=False,
-                                     expansion_level=bi.load_ex_level(), only_problems=False, lazy=False)
-            html.plug()
-            html.write('<h3>')
-            html.icon_button(html.makeuri([("timewarp", "")]), _("Close Timewarp"), "close")
-            timewarpcode = html.drain()
-            html.unplug()
-            timewarpcode += '%s %s</h3>' % (_("Timewarp to "), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timewarp))) + \
-                           '<table class="data table timewarp"><tr class="data odd0"><td class="%s">' % tdclass + \
-                           htmlcode + \
-                           '</td></tr></table>'
-        else:
-            timewarpcode = ""
+        rows = []
+        for aggr_row in aggr_rows:
+            tree = aggr_row["aggr_tree"]
+            reqhosts = tree["reqhosts"]
+            try:
+                timewarp = int(html.var("timewarp"))
+            except:
+                timewarp = None
+            these_rows, tree_state = get_bi_timeline(tree, aggr_row["aggr_group"], avoptions, timewarp)
+            rows += these_rows
+            if timewarp and tree_state:
+                state, assumed_state, node, subtrees = tree_state
+                eff_state = state
+                if assumed_state != None:
+                    eff_state = assumed_state
+                row = {
+                        "aggr_tree"            : tree,
+                        "aggr_treestate"       : tree_state,
+                        "aggr_state"           : state,          # state disregarding assumptions
+                        "aggr_assumed_state"   : assumed_state,  # is None, if there are no assumptions
+                        "aggr_effective_state" : eff_state,      # is assumed_state, if there are assumptions, else real state
+                        "aggr_name"            : node["title"],
+                        "aggr_output"          : eff_state["output"],
+                        "aggr_hosts"           : node["reqhosts"],
+                        "aggr_function"        : node["func"],
+                        "aggr_group"           : html.var("aggr_group"),
+                }
+                tdclass, htmlcode = bi.render_tree_foldable(row, boxes=False, omit_root=False,
+                                         expansion_level=bi.load_ex_level(), only_problems=False, lazy=False)
+                html.plug()
+                html.write('<h3>')
+
+                # render icons for back and forth
+                if int(these_rows[0]["from"]) == timewarp:
+                    html.disabled_icon_button("back_off")
+                have_forth = False
+                previous_row = None
+                for row in these_rows:
+                    if int(row["from"]) == timewarp and previous_row != None:
+                        html.icon_button(html.makeuri([("timewarp", str(int(previous_row["from"])))]), _("Jump one phase back"), "back")
+                    elif previous_row and int(previous_row["from"]) == timewarp and row != these_rows[-1]:
+                        html.icon_button(html.makeuri([("timewarp", str(int(row["from"])))]), _("Jump one phase forth"), "forth")
+                        have_forth = True
+                    previous_row = row
+                if not have_forth:
+                    html.disabled_icon_button("forth_off")
+
+                html.write(" &nbsp; ")
+                html.icon_button(html.makeuri([("timewarp", "")]), _("Close Timewarp"), "closetimewarp")
+                timewarpcode = html.drain()
+                html.unplug()
+                timewarpcode += '%s %s</h3>' % (_("Timewarp to "), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timewarp))) + \
+                               '<table class="data table timewarp"><tr class="data odd0"><td class="%s">' % tdclass + \
+                               htmlcode + \
+                               '</td></tr></table>'
+            else:
+                timewarpcode = ""
+
         do_render_availability(rows, "bi", avoptions, timeline, timewarpcode)
 
-    html.bottom_footer()
-    html.body_end()
+    if html.output_format != "csv_export":
+        html.bottom_footer()
+        html.body_end()
 
-def get_bi_timeline(tree, avoptions, timewarp):
+def get_bi_timeline(tree, aggr_group, avoptions, timewarp):
     range, range_title = avoptions["range"]
     # Get state history of all hosts and services contained in the tree.
     # In order to simplify the query, we always fetch the information for
@@ -1330,12 +1487,29 @@ def get_bi_timeline(tree, avoptions, timewarp):
     html.live.set_limit() # removes limit
     query = "GET statehist\n" + \
             "Columns: " + " ".join(columns) + "\n" +\
-            "Filter: time >= %d\nFilter: time <= %d\n" % range
+            "Filter: time >= %d\nFilter: time < %d\n" % range
 
-    for host in hosts:
+    # Create a specific filter. We really only want the services and hosts
+    # of the aggregation in question. That prevents status changes
+    # irrelevant services from introducing new phases.
+    by_host = {}
+    for site, host, service in bi.find_all_leaves(tree):
+        by_host.setdefault(host, set([])).add(service)
+
+    for host, services in by_host.items():
         query += "Filter: host_name = %s\n" % host
-    query += "Or: %d\n" % len(hosts)
+        query += "Filter: service_description = \n"
+        for service in services:
+            query += "Filter: service_description = %s\n" % service
+        query += "Or: %d\nAnd: 2\n" % (len(services) + 1)
+    if len(hosts) != 1:
+        query += "Or: %d\n" % len(hosts)
+
     data = html.live.query(query)
+    if not data:
+        return [], None
+        # raise MKGeneralException(_("No historical data available for this aggregation. Query was: <pre>%s</pre>") % query)
+
     html.live.set_prepend_site(False)
     html.live.set_only_sites(None)
     columns = ["site"] + columns
@@ -1386,7 +1560,7 @@ def get_bi_timeline(tree, avoptions, timewarp):
         "from"                   : from_time,
         "until"                  : until_time,
         "site"                   : "",
-        "host_name"              : "",
+        "host_name"              : aggr_group,
         "service_description"    : tree['title'],
         "in_notification_period" : 1,
         "in_service_period"      : 1,
@@ -1443,7 +1617,7 @@ def compute_tree_state(tree, status):
             state_output[1],
             state_output[2], # in_downtime
             False, # acknowledged
-            services_by_host[site_host]
+            services_by_host.get(site_host,[])
         ]
 
 

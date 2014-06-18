@@ -23,7 +23,7 @@
 # Boston, MA 02110-1301 USA.
 
 SHELL           = /bin/bash
-VERSION        	= 1.2.5i1
+VERSION        	= 1.2.5i4
 NAME           	= check_mk
 RPM_TOPDIR     	= rpm.topdir
 RPM_BUILDROOT  	= rpm.buildroot
@@ -249,6 +249,3 @@ setup:
 	rm -rf $(DISTNAME)
 	check_mk -R
 	/etc/init.d/apache2 reload
-
-
--include Makefile.private

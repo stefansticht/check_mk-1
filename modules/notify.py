@@ -203,11 +203,17 @@ def notify_notify(raw_context, analyse=False):
         notify_log("Got raw notification context with %s variables" % len(raw_context))
 
     # Add some further variable for the conveniance of the plugins
-    complete_raw_context(raw_context)
 
     if notification_logging >= 2:
         notify_log("Raw notification context:\n"
-                   + "\n".join(["%s=%s" % v for v in sorted(raw_context.items())]))
+                   + "\n".join(["                    %s=%s" % v for v in sorted(raw_context.items())]))
+
+    raw_keys = list(raw_context.keys())
+    complete_raw_context(raw_context)
+
+    if notification_logging >= 2:
+        notify_log("Computed variables:\n"
+                   + "\n".join(sorted(["                    %s=%s" % (k, raw_context[k]) for k in raw_context if k not in raw_keys])))
 
     # Spool notification to remote host, if this is enabled
     if notification_spool_to:
@@ -249,6 +255,10 @@ def locally_deliver_raw_context(raw_context, analyse=False):
         # Check_MK for that purpose). If we do not know that contact then we cannot use
         # flexible notifications even if they are enabled.
         contact = contacts.get(contactname)
+
+        if contact.get("disable_notifications", False):
+            notify_log("Notifications for %s are disabled in personal settings. Skipping." % contactname)
+            return
 
         # Get notification settings for the contact in question - if available.
         if contact:
@@ -360,6 +370,10 @@ def notify_keepalive():
                 sys.stdout.write("*")
                 sys.stdout.flush()
 
+
+	# Fix vor Python 2.4:
+        except SystemExit, e:
+            sys.exit(e)
         except Exception, e:
             if opt_debug:
                 raise
@@ -413,34 +427,40 @@ def notify_rulebased(raw_context, analyse=False):
             notify_log(" -> matches!")
             num_rule_matches += 1
             contacts = rbn_rule_contacts(rule, raw_context)
-            plugin = rule["notify_plugin"]
-            method = rule["notify_method"] # None: do cancel, [ str ]: plugin parameters
+
+            # Handle old-style and new-style rules
+            if "notify_method" in rule: # old-style
+                plugin = rule["notify_plugin"]
+                plugin_parameters = rule["notify_method"] # None: do cancel, [ str ]: plugin parameters
+            else:
+                plugin, plugin_parameters = rule["notify_plugin"]
+
             bulk   = rule.get("bulk")
 
-            if method == None: # cancelling
+            if plugin_parameters == None: # cancelling
                 for contact in contacts:
                     key = contact, plugin
                     if key in notifications:
-                        locked, method, bulk = notifications[key]
+                        locked, plugin_parameters, bulk = notifications[key]
                         if locked and "contact" in rule:
                             notify_log("   - cannot cancel notification of %s via %s: it is locked" % key)
                         else:
                             notify_log("   - cancelling notification of %s via %s" % key)
                             del notifications[key]
             else:
+                final_parameters = rbn_finalize_plugin_parameters(raw_context["HOSTNAME"], plugin, plugin_parameters)
                 for contact in contacts:
                     key = contact, plugin
                     plugintxt = plugin or "plain email"
                     if key in notifications:
-                        locked, method, old_bulk = notifications[key]
+                        locked, previous_parameters, old_bulk = notifications[key]
                         if locked and "contact" in rule:
                             notify_log("   - cannot modify notification of %s via %s: it is locked" % (contact, plugintxt))
                             continue
                         notify_log("   - modifying notification of %s via %s" % (contact, plugintxt))
                     else:
                         notify_log("   - adding notification of %s via %s" % (contact, plugintxt))
-                    # Hint: method is the list of plugin parameters in this case
-                    notifications[key] = ( not rule.get("allow_disable"), method, bulk )
+                    notifications[key] = ( not rule.get("allow_disable"), final_parameters, bulk )
 
             rule_info.append(("match", rule, ""))
 
@@ -491,6 +511,15 @@ def notify_rulebased(raw_context, analyse=False):
 
     analysis_info = rule_info, plugin_info
     return analysis_info
+
+def rbn_finalize_plugin_parameters(hostname, plugin, rule_parameters):
+    # Right now we are only able to finalize notification plugins with dict parameters..
+    if type(rule_parameters) == dict:
+        parameters = host_extra_conf_merged(hostname, notification_parameters.get(plugin, []))
+        parameters.update(rule_parameters)
+        return parameters
+    else:
+        return rule_parameters
 
 def add_rulebased_macros(raw_context):
     # For the rule based notifications we need the list of contacts
@@ -543,11 +572,11 @@ def rbn_add_contact_information(plugin_context, contact):
             plugin_context["CONTACT" + what.upper()] = contact.get(what, "")
         for key in contact.keys():
             if key[0] == '_':
-                plugin_context["CONTACT" + key.upper()] = contact[key]
+                plugin_context["CONTACT" + key.upper()] = unicode(contact[key])
     else:
         if contact.startswith("mailto:"): # Fake contact
-            contact_dict = { 
-                "name"  : contact[7:].split("@")[0], 
+            contact_dict = {
+                "name"  : contact[7:].split("@")[0],
                 "alias" : "Email address " + contact,
                 "email" : contact[7:],
                 "pager" : "" }
@@ -738,13 +767,13 @@ def rbn_match_servicelevel(rule, context):
 def rbn_match_host_event(rule, context):
     if "match_host_event" in rule:
         if context["WHAT"] != "HOST":
-            if "match_host_event" not in rule:
+            if "match_service_event" not in rule:
                 return "This is a service notification, but the rule just matches host events"
             else:
                 return # Let this be handled by match_service_event
         allowed_events = rule["match_host_event"]
         state          = context["HOSTSTATE"]
-        last_state     = context["LASTHOSTSTATE"]
+        last_state     = context["PREVIOUSHOSTHARDSTATE"]
         events         = { "UP" : 'r', "DOWN" : 'd', "UNREACHABLE" : 'u' }
         return rbn_match_event(context, state, last_state, events, allowed_events)
 
@@ -758,7 +787,7 @@ def rbn_match_service_event(rule, context):
                 return # Let this be handled by match_host_event
         allowed_events = rule["match_service_event"]
         state          = context["SERVICESTATE"]
-        last_state     = context["LASTSERVICESTATE"]
+        last_state     = context["PREVIOUSSERVICEHARDSTATE"]
         events         = { "OK" : 'r', "WARNING" : 'w', "CRITICAL" : 'c', "UNKNOWN" : 'u' }
         return rbn_match_event(context, state, last_state, events, allowed_events)
 
@@ -777,27 +806,42 @@ def rbn_match_event(context, state, last_state, events, allowed_events):
     else:
         event = events.get(last_state, '?') + events.get(state, '?')
 
-    if event not in allowed_events:
-        return "Event type '%s' not handled by this rule. Allowed are: %s" % (
-                event, ", ".join(allowed_events))
+    notify_log("Event type is %s" % event)
+
+    # Now go through the allowed events. Handle '?' has matching all types!
+    for allowed in allowed_events:
+        if event == allowed or \
+            event[0] == '?' and event[1] == allowed[1]:
+            return
+
+    return "Event type '%s' not handled by this rule. Allowed are: %s" % (
+            event, ", ".join(allowed_events))
 
 
 def rbn_rule_contacts(rule, context):
-    contacts = set([])
+    the_contacts = set([])
     if rule.get("contact_object"):
-        contacts.update(rbn_object_contacts(context))
+        the_contacts.update(rbn_object_contacts(context))
     if rule.get("contact_all"):
-        contacts.update(rbn_all_contacts())
+        the_contacts.update(rbn_all_contacts())
     if rule.get("contact_all_with_email"):
-        contacts.update(rbn_all_contacts(with_email=True))
+        the_contacts.update(rbn_all_contacts(with_email=True))
     if "contact_users" in rule:
-        contacts.update(rule["contact_users"])
+        the_contacts.update(rule["contact_users"])
     if "contact_groups" in rule:
-        contacts.update(rbn_groups_contacts(rule["contact_groups"]))
+        the_contacts.update(rbn_groups_contacts(rule["contact_groups"]))
     if "contact_emails" in rule:
-        contacts.update(rbn_emails_contacts(rule["contact_emails"]))
-    return contacts
+        the_contacts.update(rbn_emails_contacts(rule["contact_emails"]))
 
+    all_enabled = []
+    for contactname in the_contacts:
+        contact = contacts.get(contactname)
+        if contact and contact.get("disable_notifications", False):
+            notify_log("   - skipping contact %s: he/she has disabled notifications" % contactname)
+        else:
+            all_enabled.append(contactname)
+
+    return all_enabled
 
 def rbn_object_contacts(context):
     commasepped = context.get("CONTACTS")
@@ -836,6 +880,7 @@ def rbn_groups_contacts(groups):
 
 def rbn_emails_contacts(emails):
     return [ "mailto:" + e for e in emails ]
+
 
 #.
 #   .--Flexible-Notifications----------------------------------------------.
@@ -1101,15 +1146,45 @@ def notify_via_email(plugin_context):
 # 1: Could not send now, please retry later
 # 2: Cannot send, retry does not make sense
 
+# Add the plugin parameters to the envinroment. We have two types of parameters:
+# - list, the legacy style. This will lead to PARAMETERS_1, ...
+# - dict, the new style for scripts with WATO rule. This will lead to
+#         PARAMETER_FOO_BAR for a dict key named "foo_bar".
 def create_plugin_context(raw_context, params):
     plugin_context = {}
     plugin_context.update(raw_context) # Make a real copy
 
-    plugin_context["PARAMETERS"] = " ".join(params)
-    for nr, param in enumerate(params):
-        plugin_context["PARAMETER_%d" % (nr + 1)] = param
+    if type(params) == list:
+        plugin_context["PARAMETERS"] = " ".join(params)
+        for nr, param in enumerate(params):
+            plugin_context["PARAMETER_%d" % (nr + 1)] = param
+    else:
+        for key, value in params.items():
+            plugin_context["PARAMETER_" + key.upper()] = plugin_param_to_string(value)
     return plugin_context
 
+
+def create_bulk_parameter_context(params):
+    dict_context = create_plugin_context({}, params)
+    return [ "%s=%s\n" % (varname, value.replace("\r", "").replace("\n", "\1"))
+             for (varname, value) in dict_context.items() ]
+
+
+def plugin_param_to_string(value):
+    if type(value) in ( str, unicode ):
+        return value
+    elif type(value) in ( int, float ):
+        return str(value)
+    elif value == None:
+        return ""
+    elif value == True:
+        return "yes"
+    elif value == False:
+        return ""
+    elif type(value) in ( tuple, list ):
+        return "\t".join(value)
+    else:
+        return repr(value) # Should never happen
 
 
 def path_to_notification_script(plugin):
@@ -1154,6 +1229,8 @@ def call_notification_script(plugin, plugin_context):
     # Export complete context to have all vars in environment.
     # Existing vars are replaced, some already existing might remain
     for key in plugin_context:
+        if type(plugin_context[key]) == bool:
+            notify_log("MIST: %s=%s ist bool" % (key, plugin_context[key]))
         os.putenv('NOTIFY_' + key, plugin_context[key].encode('utf-8'))
 
     notify_log("     executing %s" % path)
@@ -1386,13 +1463,12 @@ def notify_bulk(dirname, uuids):
         if old_params == None:
             old_params = params
         elif params != old_params:
-            notify_log("     Parameters (%s) are different from previous (%s), skipping" % (
-                    ",".join(params), ",".join(old_params)))
-            unhandled_uuids.append(uuid)
+            notify_log("     Parameters are different from previous, postponing into separate bulk")
+            unhandled_uuids.append((mtime, uuid))
             continue
         bulk_context.append("\n")
         for varname, value in context.items():
-            bulk_context.append("%s=%s\n" % (varname, value))
+            bulk_context.append("%s=%s\n" % (varname, value.replace("\r", "").replace("\n", "\1")))
 
         # Do not forget to add this to the monitoring log. We create
         # a single entry for each notification contained in the bulk.
@@ -1400,10 +1476,7 @@ def notify_bulk(dirname, uuids):
         plugin_name = "bulk " + (plugin or "plain email")
         core_notification_log(plugin_name, context)
 
-    parameter_context = [ "PARAMETERS=" + " ".join(old_params) + "\n" ]
-    for nr, param in enumerate(old_params):
-        parameter_context.append("PARAMETER_%d=%s\n" % (nr + 1, param))
-
+    parameter_context = create_bulk_parameter_context(old_params)
     context_text = "".join(parameter_context + bulk_context)
     call_bulk_notification_script(plugin, context_text)
 
@@ -1484,16 +1557,59 @@ def complete_raw_context(raw_context):
                                     urlencode('view.py?view_name=service&host=%s&service=%s' %
                                                  (raw_context['HOSTNAME'], raw_context['SERVICEDESC']))
 
-    # Relative Timestamps for host/service state changes
-    if 'LASTHOSTSTATECHANGE' in raw_context:
-        raw_context['LASTHOSTSTATECHANGE_REL'] = get_readable_rel_date(raw_context['LASTHOSTSTATECHANGE'])
-    if raw_context['WHAT'] != 'HOST' and 'LASTSERVICESTATECHANGE' in raw_context:
-        raw_context['LASTSERVICESTATECHANGE_REL'] = get_readable_rel_date(raw_context['LASTSERVICESTATECHANGE'])
+    # Relative Timestamps for several macros
+    for macro in [ 'LASTHOSTSTATECHANGE', 'LASTSERVICESTATECHANGE', 'LASTHOSTUP', 'LASTSERVICEOK' ]:
+        if macro in raw_context:
+            raw_context[macro + '_REL'] = get_readable_rel_date(raw_context[macro])
+
 
     # Rule based notifications enabled? We might need to complete a few macros
     contact = raw_context.get("CONTACTNAME")
     if not contact or contact == "check-mk-notify":
         add_rulebased_macros(raw_context)
+
+    # For custom notifications the number is set to 0 by the core (Nagios and CMC). We force at least
+    # number 1 here, so that rules with conditions on numbers do not fail (the minimum is 1 here)
+    for what in [ "HOST", "SERVICE" ]:
+        key = what + "NOTIFICATIONNUMBER"
+        if key in raw_context and  raw_context[key] == "0":
+            raw_context[key] = "1"
+
+    # Add the previous hard state. This is neccessary for notification rules that depend on certain transitions,
+    # like OK -> WARN (but not CRIT -> WARN). The CMC sends PREVIOUSHOSTHARDSTATE and PREVIOUSSERVICEHARDSTATE.
+    # Nagios does not have this information and we try to deduct this.
+    if "PREVIOUSHOSTHARDSTATE" not in raw_context:
+        prev_state = raw_context["LASTHOSTSTATE"]
+        # When the attempts are > 1 then the last state could be identical with
+        # the current one, e.g. both critical. In that case we assume the
+        # previous hard state to be OK.
+        if prev_state == raw_context["HOSTSTATE"]:
+            prev_state = "UP"
+        elif "HOSTATTEMPT" not in raw_context or \
+            ("HOSTATTEMPT" in raw_context and raw_context["HOSTATTEMPT"] != "1"):
+            # Here We do not know. The transition might be OK -> WARN -> CRIT and
+            # the initial OK is completely lost. We use the artificial state "?"
+            # here, which matches all states and makes sure that when in doubt a
+            # notification is being sent out.
+            prev_state = "?"
+            notify_log("Previous host hard state not known. Allowing all states.")
+        raw_context["PREVIOUSHOSTHARDSTATE"] = prev_state
+
+    # Same for services
+    if raw_context["WHAT"] == "SERVICE" and "PREVIOUSSERVICEHARDSTATE" not in raw_context:
+        prev_state = raw_context["LASTSERVICESTATE"]
+        if prev_state == raw_context["SERVICESTATE"]:
+            prev_state = "OK"
+        elif "SERVICEATTEMPT" not in raw_context or \
+            ("SERVICEATTEMPT" in raw_context and raw_context["SERVICEATTEMPT"] != "1"):
+            prev_state = "?"
+            notify_log("Previous service hard state not known. Allowing all states.")
+        raw_context["PREVIOUSSERVICEHARDSTATE"] = prev_state
+
+    # Add short variants for state names (at most 4 characters)
+    for key, value in raw_context.items():
+        if key.endswith("STATE"):
+            raw_context[key[:-5] + "SHORTSTATE"] = value[:4]
 
     convert_context_to_unicode(raw_context)
 

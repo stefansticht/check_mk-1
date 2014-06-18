@@ -74,6 +74,9 @@ class html:
         self.treestates = {}
         self.treestates_for_id = None
         self.caches = {}
+        self.new_transids = []
+        self.ignore_transids = False
+        self.current_transid = None
 
     RETURN = 13
     SHIFT = 16
@@ -176,7 +179,7 @@ class html:
                     enctype, onsubmit))
         self.hidden_field("filled_in", name)
         if add_transid:
-            self.hidden_field("_transid", str(self.fresh_transid()))
+            self.hidden_field("_transid", str(self.get_transid()))
         self.hidden_fields(self.global_vars)
         self.form_name = name
 
@@ -248,7 +251,7 @@ class html:
             return filename
 
     def makeactionuri(self, addvars):
-        return self.makeuri(addvars + [("_transid", self.fresh_transid())])
+        return self.makeuri(addvars + [("_transid", self.get_transid())])
 
     def makeuri_contextless(self, vars, filename=None):
         if not filename:
@@ -277,7 +280,7 @@ class html:
 
     def buttonlink(self, href, text, add_transid=False, obj_id='', style='', title='', disabled=''):
         if add_transid:
-            href += "&_transid=%s" % self.fresh_transid()
+            href += "&_transid=%s" % self.get_transid()
         if not obj_id:
             obj_id = self.some_id()
         obj_id = ' id=%s' % obj_id
@@ -324,10 +327,13 @@ class html:
                    'src="images/button_%s_lo.png" '
                    'onmouseover=\"hilite_icon(this, 1)\" '
                    'onmouseout=\"hilite_icon(this, 0)\">'
-                   '</a>' % (id, onclick, style, target, cssclass, url, help, icon))
+                   '</a>' % (id, onclick, style, target, cssclass, url, self.attrencode(help), icon))
 
     def empty_icon_button(self):
         self.write('<img class="iconbutton trans" src="images/trans.png">')
+
+    def disabled_icon_button(self, icon):
+        self.write('<img class="iconbutton" align=absmiddle src="images/icon_%s.png">' % icon)
 
     def jsbutton(self, varname, text, onclick, style=''):
         if style:
@@ -380,7 +386,7 @@ class html:
         if hover_title:
             self.write(' title="%s"' % self.attrencode(hover_title))
         if bestof:
-            self.write(' onclick="count_context_button(this); document.location=this.href; " ')
+            self.write(' onclick="count_context_button(this); " ')
         if fkey and self.keybindings_enabled:
             title += '<div class=keysym>F%d</div>' % fkey
             self.add_keybinding([html.F1 + (fkey - 1)], "document.location='%s';" % self.attrencode(url))
@@ -512,9 +518,9 @@ class html:
     def begin_radio_group(self, horizontal=False):
         if self.mobile:
             if horizontal:
-	        add = 'data-type="horizontal" '
-	    else:
-	        add = ''
+                add = 'data-type="horizontal" '
+            else:
+                add = ''
             self.write('<fieldset %s data-role="controlgroup">' % add)
 
     def end_radio_group(self):
@@ -537,7 +543,7 @@ class html:
         self.form_vars.append(varname)
 
     def begin_checkbox_group(self, horizonal=False):
-	self.begin_radio_group(horizonal)
+        self.begin_radio_group(horizonal)
 
     def end_checkbox_group(self):
         self.end_radio_group()
@@ -750,7 +756,12 @@ class html:
                    _("<a href=\"http://mathias-kettner.de\"><img src=\"images/mk_logo_small.gif\"/></a>"))
         self.write("<hr class=header>\n")
         if self.enable_debug:
-            self.write("<div class=urldebug>%s</div>" % self.makeuri([]))
+            self.dump_get_vars()
+
+    def dump_get_vars(self):
+        self.begin_foldable_container("html", "debug_vars", True, _("GET/POST variables of this page"))
+        self.debug_vars(hide_with_mouse = False)
+        self.end_foldable_container()
 
     def body_start(self, title='', **args):
         self.html_head(title, **args)
@@ -796,16 +807,20 @@ class html:
             self.javascript(self.final_javascript_code)
         self.write("</body></html>\n")
 
+        # Hopefully this is the correct place to performe some "finalization" tasks.
+        self.store_new_transids()
+
     def footer(self):
         if self.output_format == "html":
             self.bottom_footer()
             self.body_end()
 
+
     def add_status_icon(self, img, tooltip, url = None):
-	if url:
-	    self.status_icons[img] = tooltip, url
-	else:
-	    self.status_icons[img] = tooltip
+        if url:
+            self.status_icons[img] = tooltip, url
+        else:
+            self.status_icons[img] = tooltip
 
     def render_status_icons(self):
         h = '<a target="_top" href="%s"><img class=statusicon src="images/status_frameurl.png" title="%s"></a>\n' % \
@@ -819,12 +834,12 @@ class html:
                  (self.makeuri([("output_format", "csv_export")]), _("Export as CSV"))
 
         for img, tooltip in self.status_icons.items():
-	    if type(tooltip) == tuple:
-		tooltip, url = tooltip
-		h += '<a target="_top" href="%s"><img class=statusicon src="images/status_%s.png" title="%s"></a>\n' % \
-		     (url, img, tooltip)
-	    else:
-		h += '<img class=statusicon src="images/status_%s.png" title="%s">\n' % (img, tooltip)
+            if type(tooltip) == tuple:
+                tooltip, url = tooltip
+                h += '<a target="_top" href="%s"><img class=statusicon src="images/status_%s.png" title="%s"></a>\n' % \
+                     (url, img, tooltip)
+            else:
+                h += '<img class=statusicon src="images/status_%s.png" title="%s">\n' % (img, tooltip)
         return h
 
     def show_error(self, msg):
@@ -938,36 +953,70 @@ class html:
         if not self.has_var("_ajaxid"):
             self.javascript("if(parent && parent.frames[0]) parent.frames[0].location.reload();");
 
-    # Compute a (hopefully) unique transaction id
+    def set_ignore_transids(self):
+        self.ignore_transids = True
+
+    # Compute a (hopefully) unique transaction id. This is generated during rendering
+    # of a form or an action link, stored in a user specific file for later validation,
+    # sent to the users browser via HTML code, then submitted by the user together
+    # with the action (link / form) and then validated if it is a known transid. When
+    # it is a known transid, it will be used and invalidated. If the id is not known,
+    # the action will not be processed.
     def fresh_transid(self):
-        return "%d/%d" % (int(time.time()), random.getrandbits(32))
+        transid = "%d/%d" % (int(time.time()), random.getrandbits(32))
+        self.new_transids.append(transid)
+        return transid
+
+    def get_transid(self):
+        if not self.current_transid:
+            self.current_transid = self.fresh_transid()
+        return self.current_transid
 
     # Marks a transaction ID as used. This is done by saving
     # it in a user specific settings file "transids.mk". At this
     # time we remove all entries from that list that are older
-    # then one week.
-    def invalidate_transid(self, id):
-        used_ids = self.load_transids()
-        new_ids = []
-        now = time.time()
-        for used_id in used_ids:
-            timestamp, rand = used_id.split("/")
-            if now - int(timestamp) < 604800: # 7 * 24 hours
-                new_ids.append(used_id)
-        used_ids.append(id)
-        self.save_transids(used_ids)
+    # than one week.
+    def store_new_transids(self):
+        if self.new_transids:
+            valid_ids = self.load_transids(lock = True)
+            cleared_ids = []
+            now = time.time()
+            for valid_id in valid_ids:
+                timestamp, rand = valid_id.split("/")
+                if now - int(timestamp) < 86400: # one day
+                    cleared_ids.append(valid_id)
+            self.save_transids(cleared_ids + self.new_transids, unlock = True)
 
-    # Checks, if the current transaction is valid, i.e. now
-    # browser reload. The HTML variable _transid must be present.
-    # If it is empty or -1, then it's always valid (this is used
-    # for webservice calls).
+    # Remove the used transid from the list of valid ones
+    def invalidate_transid(self, used_id):
+        valid_ids = self.load_transids(lock = True)
+        try:
+            valid_ids.remove(used_id)
+        except ValueError:
+            return
+        self.save_transids(valid_ids, unlock = True)
+
+    # Checks, if the current transaction is valid, i.e. in case of
+    # browser reload a browser reload, the form submit should not
+    # be handled  a second time.. The HTML variable _transid must be present.
+    #
+    # In case of automation users (authed by _secret in URL): If it is empty
+    # or -1, then it's always valid (this is used for webservice calls).
+    # This was also possible for normal users, but has been removed to preven
+    # security related issues.
     def transaction_valid(self):
         if not self.has_var("_transid"):
             return False
+
         id = self.var("_transid")
-        if not id or id == "-1":
+        if self.ignore_transids and (not id or id == '-1'):
             return True # automation
-        timestamp, rand = id.split("/")
+
+        if '/' not in id:
+            return False
+
+        # Normal user/password auth user handling
+        timestamp, rand = id.split("/", 1)
 
         # If age is too old (one week), it is always
         # invalid:
@@ -975,8 +1024,8 @@ class html:
         if now - int(timestamp) >= 604800: # 7 * 24 hours
             return False
 
-        # Now check, if this id is not yet invalidated
-        return id not in self.load_transids()
+        # Now check, if this id is a valid one
+        return id in self.load_transids()
 
     # Checks, if the current page is a transation, i.e. something
     # that is secured by a transid (such as a submitted form)
@@ -1044,13 +1093,18 @@ class html:
             self.lowlevel_write("<pre>%s</pre>\n" % pprint.pformat(element))
 
 
-    def debug_vars(self, prefix = None):
-        self.lowlevel_write('<table onmouseover="this.style.display=\'none\';" class=debug_vars>')
+    def debug_vars(self, prefix=None, hide_with_mouse=True):
+        if hide_with_mouse:
+            hover = ' onmouseover="this.style.display=\'none\';"'
+        else:
+            hover = ""
+        self.lowlevel_write('<table %s class=debug_vars>' % hover)
         self.lowlevel_write("<tr><th colspan=2>POST / GET Variables</th></tr>")
         for name, value in sorted(self.vars.items()):
             if not prefix or name.startswith(prefix):
-                self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" % (name, value))
-        self.write("</ul>")
+                self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" %
+                    (self.attrencode(name), self.attrencode(value)))
+        self.write("</table>")
 
     def var(self, varname, deflt = None):
         return self.vars.get(varname, deflt)
@@ -1194,7 +1248,8 @@ class html:
     def begin_foldable_container(self, treename, id, isopen, title, indent=True, first=False, icon=None, fetch_url=None):
         self.folding_indent = indent
 
-        isopen = self.foldable_container_is_open(treename, id, isopen)
+        if self.user:
+            isopen = self.foldable_container_is_open(treename, id, isopen)
 
         img_num = isopen and "90" or "00"
         onclick = ' onclick="toggle_foldable_container(\'%s\', \'%s\', \'%s\')"' % (

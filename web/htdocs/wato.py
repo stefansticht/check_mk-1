@@ -106,6 +106,7 @@
 import sys, pprint, socket, re, subprocess, time, datetime,  \
        shutil, tarfile, cStringIO, math, fcntl, pickle, random
 import config, table, multitar, userdb, hooks, weblib, login
+from hashlib import sha256
 from lib import *
 from valuespec import *
 import forms
@@ -437,19 +438,6 @@ def save_folder_and_hosts(folder):
     if not folder.get(".lock_hosts"):
         save_hosts(folder)
 
-
-# Removed in version 1.2.1i2 - unused, and might cause
-# trouble when saving locked folders
-## Save a folder and all of its subfolders (recursively)
-#def save_folders(folder):
-#    save_folder(folder)
-#    for subfolder in folder[".folders"].values():
-#        save_folders(subfolder)
-#
-#
-#def save_all_folders():
-#    save_folders(g_root_folder)
-
 def folder_config_exists(dir):
     return os.path.exists(dir + "/.wato")
 
@@ -713,7 +701,9 @@ def save_hosts(folder = None):
         # precedence over the folder entries.
 
         if "contactgroups" in host:
-            use, cgs = host["contactgroups"]
+            cgconfig = convert_cgroups_from_tuple(host["contactgroups"])
+            cgs = cgconfig["groups"]
+            use = cgconfig["use"]
             if use and cgs:
                 out.write("\nhost_contactgroups += [\n")
                 for cg in cgs:
@@ -769,11 +759,10 @@ def save_hosts(folder = None):
     # If the contact groups of the host are set to be used for the monitoring,
     # we create an according rule for the folder and an according rule for
     # each host that has an explicit setting for that attribute.
-    effective_folder_attributes = effective_attributes(None, folder)
-    use, cgs = effective_folder_attributes.get("contactgroups", (False, []))
-    if use and cgs:
+    perm_groups, contact_groups = collect_folder_groups(folder)
+    if contact_groups:
         out.write("\nhost_contactgroups.append(\n"
-                  "  ( %r, [ '/' + FOLDER_PATH + '/' ], ALL_HOSTS ))\n" % cgs)
+                  "  ( %r, [ '/' + FOLDER_PATH + '/' ], ALL_HOSTS ))\n" % list(contact_groups))
 
 
     # Write information about all host attributes into special variable - even
@@ -849,6 +838,7 @@ def mode_folder(phase):
         if not g_folder.get(".lock_hosts") and config.may("wato.manage_hosts") and auth_write:
             html.context_button(_("New host"),    make_link([("mode", "newhost")]), "new")
             html.context_button(_("New cluster"), make_link([("mode", "newcluster")]), "new_cluster")
+            html.context_button(_("Bulk Import"), make_link_to([("mode", "bulk_import")], g_folder), "bulk_import")
         if config.may("wato.services"):
             html.context_button(_("Bulk Inventory"), make_link([("mode", "bulkinventory"), ("all", "1")]),
                         "inventory")
@@ -1036,8 +1026,8 @@ def check_host_permissions(hostname, exception=True, folder=None):
     if config.may("wato.all_folders"):
         return True
     host = folder[".hosts"][hostname]
-    effective = effective_attributes(host, folder)
-    use, cgs = effective.get("contactgroups", (None, []))
+    perm_groups, contact_groups = collect_host_groups(host, folder)
+
     # Get contact groups of user
     users = userdb.load_users()
     if config.user_id not in users:
@@ -1046,12 +1036,12 @@ def check_host_permissions(hostname, exception=True, folder=None):
         user_cgs = users[config.user_id].get("contactgroups",[])
 
     for c in user_cgs:
-        if c in cgs:
+        if c in perm_groups:
             return True
 
     reason = _("Sorry, you have no permission on the host '<b>%s</b>'. The host's contact "
                "groups are <b>%s</b>, your contact groups are <b>%s</b>.") % \
-               (hostname, ", ".join(cgs), ", ".join(user_cgs))
+               (hostname, ", ".join(perm_groups), ", ".join(user_cgs))
     if exception:
         raise MKAuthException(reason)
     return reason
@@ -1070,12 +1060,20 @@ def get_folder_permissions_of_users(users):
 
     users = userdb.load_users()
     for username in users.iterkeys():
-        permissions[username] = {}
+        perms = {}
         for folder_path, folder in folders.iteritems():
-            permissions[username][folder_path] = {
-                'read':  check_folder_permissions(folder, 'read', False, username, users) == True,
-                'write': check_folder_permissions(folder, 'write', False, username, users) == True,
-            }
+            readable = check_folder_permissions(folder, 'read', False, username, users) == True
+            writable = check_folder_permissions(folder, 'write', False, username, users) == True
+
+            if readable or writable:
+                perms[folder_path] = {}
+                if readable:
+                    perms[folder_path]['read'] = True
+                if writable:
+                    perms[folder_path]['write'] = True
+
+        if perms:
+            permissions[username] = perms
     return permissions
 
 def check_folder_permissions(folder, how, exception=True, user = None, users = None):
@@ -1091,8 +1089,7 @@ def check_folder_permissions(folder, how, exception=True, user = None, users = N
             return True
 
     # Get contact groups of that folder
-    effective = effective_attributes(None, folder)
-    use, cgs = effective.get("contactgroups", (None, []))
+    perm_groups, cgs = collect_folder_groups(folder)
 
     if not user:
         user = config.user_id
@@ -1106,14 +1103,14 @@ def check_folder_permissions(folder, how, exception=True, user = None, users = N
         user_cgs = users[user].get("contactgroups", [])
 
     for c in user_cgs:
-        if c in cgs:
+        if c in perm_groups:
             return True
 
     reason = _("Sorry, you have no permissions to the folder <b>%s</b>. ") % folder["title"]
-    if not cgs:
-        reason += _("The folder has no contact groups assigned to.")
+    if not perm_groups:
+        reason += _("The folder is not permitted for any contact group.")
     else:
-        reason += _("The folder's contact groups are <b>%s</b>. ") % ", ".join(cgs)
+        reason += _("The folder's permitted contact groups are <b>%s</b>. ") % ", ".join(perm_groups)
         if user_cgs:
             reason += _("Your contact groups are <b>%s</b>.") %  ", ".join(user_cgs)
         else:
@@ -1132,7 +1129,8 @@ def check_user_contactgroups(cgspec):
     if config.may("wato.all_folders"):
         return
 
-    use, cgs = cgspec
+    cgconf = convert_cgroups_from_tuple(cgspec)
+    cgs = cgconf["groups"]
     users = userdb.load_users()
     if config.user_id not in users:
         user_cgs = []
@@ -1144,6 +1142,53 @@ def check_user_contactgroups(cgspec):
               "because you are not member in that group. Your groups are: <b>%s</b>") %
                  ( c, ", ".join(user_cgs)))
 
+
+def get_folder_cgconf_from_attributes(attributes):
+    v = attributes.get("contactgroups", ( False, [] ))
+    cgconf = convert_cgroups_from_tuple(v)
+    return cgconf
+
+# Get all contact groups of a folder, while honoring recursive
+# groups and permissions. Returns a pair of
+# 1. The folders permitted groups (for WATO permissions)
+# 2. The folders contact groups (for hosts)
+def collect_folder_groups(folder, host=None):
+    perm_groups = set([])
+    host_groups = set([])
+    effective_folder_attributes = effective_attributes(host, folder)
+    cgconf = get_folder_cgconf_from_attributes(effective_folder_attributes)
+
+    # First set explicit groups
+    perm_groups.update(cgconf["groups"])
+    if cgconf["use"]:
+        host_groups.update(cgconf["groups"])
+
+    # Now consider recursion
+    if host:
+        parent = folder
+    elif ".parent" in folder:
+        parent = folder['.parent']
+    else:
+        parent = None
+
+    while parent:
+        effective_folder_attributes = effective_attributes(None, parent)
+        parconf = get_folder_cgconf_from_attributes(effective_folder_attributes)
+        parent_perm_groups, parent_host_groups = collect_folder_groups(parent)
+
+        if parconf["recurse_perms"]: # Parent gives us its permissions
+            perm_groups.update(parent_perm_groups)
+
+        if parconf["recurse_use"]:   # Parent give us its contact groups
+            host_groups.update(parent_host_groups)
+
+        parent = parent.get(".parent")
+
+    return perm_groups, host_groups
+
+
+def collect_host_groups(host, folder):
+    return collect_folder_groups(folder, host)
 
 
 def show_subfolders(folder):
@@ -1219,17 +1264,16 @@ def show_subfolders(folder):
             html.write('</div>')
 
         html.write('<div class=infos>')
-        # Show contact groups of the folder
-        effective = effective_attributes(None, entry)
-        use, cgs = effective.get("contactgroups", (None, []))
         group_info = userdb.load_group_information().get("contact", {})
-        for num, cg in enumerate(cgs):
-            cgalias = group_info.get(cg,cg)
-            html.icon(_("Contactgroup assign to this folder"), "contactgroups")
+        perm_groups, contact_groups = collect_folder_groups(entry)
+        for num, pg in enumerate(perm_groups):
+            cgalias = group_info.get(pg, pg)
+            html.icon(_("Contactgroups that have permission on this folder"), "contactgroups")
             html.write(' %s<br>' % cgalias)
-            if num > 1 and len(cgs) > 4:
-                html.write(_('<i>%d more contact groups</i><br>') % (len(cgs) - num - 1))
+            if num > 1 and len(perm_groups) > 4:
+                html.write(_('<i>%d more contact groups</i><br>') % (len(perm_groups) - num - 1))
                 break
+
 
         num_hosts = num_hosts_in(entry, recurse=True)
         if num_hosts == 1:
@@ -1336,7 +1380,7 @@ def show_hosts(folder):
             more_than_ten_items = True
 
     # Compute colspan for bulk actions
-    colspan = 5
+    colspan = 6
     for attr, topic in host_attributes:
         if attr.show_in_table():
             colspan += 1
@@ -1357,21 +1401,30 @@ def show_hosts(folder):
         html.write("<input type=button class=checkgroup name=_toggle_group"
                        " onclick=\"toggle_all_rows();\" value=\"%s\" />" % _('X'))
         html.write("</th>")
-    html.write("<th>"+_("Actions")+"</th><th>"
-               + _("Hostname") + "</th><th>"
-               + _("Auth") + "</th>")
-    if not config.wato_hide_hosttags:
-        html.write("<th>" + _("Tags") + "</th>")
+
+    for h in _("Actions"), _("Hostname"):
+        html.write("<th>%s</th>" % h)
 
     for attr, topic in host_attributes:
         if attr.show_in_table():
             html.write("<th>%s</th>" % attr.title())
+
+    for h in _("Auth"), _("Permissions"), _("Contact Groups"):
+        html.write("<th>%s</th>" % h)
+
+    if not config.wato_hide_hosttags:
+        html.write("<th>" + _("Tags") + "</th>")
 
     if not g_folder.get(".lock_hosts") and config.may("wato.edit_hosts") and config.may("wato.move_hosts"):
         html.write("<th class=right>" + _("Move To") + "</th>")
 
     html.write("</tr>\n")
     odd = "odd"
+
+    contact_group_names = userdb.load_group_information().get("contact", {})
+    def render_contact_group(c):
+        display_name = contact_group_names.get(c, c)
+        return '<a href="wato.py?mode=edit_contact_group&edit=%s">%s</a>' % (c, display_name)
 
     host_errors = validate_all_hosts(hostnames)
     rendered_hosts = []
@@ -1440,26 +1493,6 @@ def show_hosts(folder):
         html.write('</td>')
 
 
-        # Am I authorized?
-        auth = check_host_permissions(hostname, False)
-        if auth == True:
-            icon = "authok"
-            title = _("You have permission to this host.")
-        else:
-            icon = "autherr"
-            title = html.strip_tags(auth)
-        html.write('<td><img class=icon src="images/icon_%s.png" title="%s"></td>' % (icon, title))
-
-        if not config.wato_hide_hosttags:
-            # Raw tags
-            #
-            # Optimize wraps:
-            # 1. add <nobr> round the single tags to prevent wrap within tags
-            # 2. add "zero width space" (&#8203;)
-            tag_title = "|".join([ '%s' % t for t in host[".tags"] ])
-            html.write("<td title='%s' class='tag-ellipsis'>%s</td>" % (tag_title, "<b style='color: #888;'>|</b>&#8203;".join(
-                                                [ '<nobr>%s</nobr>' % t for t in host[".tags"] ])))
-
         # Show attributes
         for attr, topic in host_attributes:
             if attr.show_in_table():
@@ -1472,6 +1505,31 @@ def show_hosts(folder):
                 html.write('<td class="%s">' % tdclass)
                 html.write(tdcontent)
                 html.write("</td>\n")
+
+        # Am I authorized?
+        auth = check_host_permissions(hostname, False)
+        if auth == True:
+            icon = "authok"
+            title = _("You have permission to this host.")
+        else:
+            icon = "autherr"
+            title = html.strip_tags(auth)
+        html.write('<td><img class=icon src="images/icon_%s.png" title="%s"></td>' % (icon, title))
+
+        # Permissions and Contact groups - through complete recursion and inhertance
+        perm_groups, contact_groups = collect_host_groups(host, folder)
+        html.write("<td>%s</td>" % ", ".join(map(render_contact_group, perm_groups)))
+        html.write("<td>%s</td>" % ", ".join(map(render_contact_group, contact_groups)))
+
+        if not config.wato_hide_hosttags:
+            # Raw tags
+            #
+            # Optimize wraps:
+            # 1. add <nobr> round the single tags to prevent wrap within tags
+            # 2. add "zero width space" (&#8203;)
+            tag_title = "|".join([ '%s' % t for t in host[".tags"] ])
+            html.write("<td title='%s' class='tag-ellipsis'>%s</td>" % (tag_title, "<b style='color: #888;'>|</b>&#8203;".join(
+                                                [ '<nobr>%s</nobr>' % t for t in host[".tags"] ])))
 
         # Move to
         if not g_folder.get(".lock_hosts") and config.may("wato.edit_hosts") and config.may("wato.move_hosts"):
@@ -1799,7 +1857,8 @@ def mode_editfolder(phase, new):
             log_pending(AFFECTED, new_folder, "new-folder", _("Created new folder %s") % title)
 
         else:
-            cgs_changed = attributes.get("contactgroups") != g_folder["attributes"].get("contactgroups")
+            cgs_changed = get_folder_cgconf_from_attributes(attributes) != \
+                          get_folder_cgconf_from_attributes(g_folder["attributes"])
             other_changed = attributes != g_folder["attributes"] and not cgs_changed
             if other_changed:
                 check_folder_permissions(g_folder, "write")
@@ -1985,16 +2044,33 @@ def mode_edithost(phase, new, cluster):
         html.context_button(_("Folder"), make_link([("mode", "folder")]), "back")
         if not new:
             host_status_button(hostname, "hoststatus")
-        if not new:
+
             html.context_button(_("Services"),
                   make_link([("mode", "inventory"), ("host", hostname)]), "services")
             html.context_button(_("Parameters"),
                   make_link([("mode", "object_parameters"), ("host", hostname)]), "rulesets")
+            if not g_folder.get(".lock_hosts"):
+                html.context_button(_("Rename %s") % (cluster and _("Cluster") or _("Host")),
+                  make_link([("mode", "rename_host"), ("host", hostname)]), "rename_host")
             if not cluster:
                 html.context_button(_("Diagnostic"),
                       make_link([("mode", "diag_host"), ("host", hostname)]), "diagnose")
+            html.context_button(_("Update DNS Cache"),
+                      html.makeactionuri([("_update_dns_cache", "1")]), "update")
 
     elif phase == "action":
+        if html.var("_update_dns_cache"):
+            if html.check_transaction():
+                config.need_permission("wato.update_dns_cache")
+                num_updated, failed_hosts = check_mk_automation(host[".siteid"], "update-dns-cache", [])
+                infotext = _("Successfully updated IP addresses of %d hosts.") % num_updated
+                if failed_hosts:
+                    infotext += "<br><br><b>Hostnames failed to lookup:</b> " + ", ".join(["<tt>%s</tt>" % h for h in failed_hosts])
+                return None, infotext
+            else:
+                return None
+
+
         if not new and html.var("delete"): # Delete this host
             config.need_permission("wato.manage_hosts")
             check_folder_permissions(g_folder, "write")
@@ -2020,12 +2096,7 @@ def mode_edithost(phase, new, cluster):
             config.need_permission("wato.manage_hosts")
             check_folder_permissions(g_folder, "write")
             check_user_contactgroups(host.get("contactgroups", (False, [])))
-            if not hostname:
-                raise MKUserError("host", _("Please specify a host name."))
-            elif hostname in g_folder[".hosts"]:
-                raise MKUserError("host", _("A host with this name already exists."))
-            elif not re.match("^[a-zA-Z0-9-_.]+$", hostname):
-                raise MKUserError("host", _("Invalid host name: must contain only characters, digits, dash, underscore and dot."))
+            check_new_hostname("host", hostname)
         else:
             config.need_permission("wato.edit_hosts")
 
@@ -2034,7 +2105,8 @@ def mode_edithost(phase, new, cluster):
             # permissions on the host
             old_host = dict(g_folder[".hosts"][hostname].items())
             del old_host[".tags"] # not contained in new host
-            cgs_changed = host.get("contactgroups") != old_host.get("contactgroups")
+            cgs_changed = get_folder_cgconf_from_attributes(host) != \
+                          get_folder_cgconf_from_attributes(old_host)
             other_changed = old_host != host and not cgs_changed
             if other_changed:
                 check_host_permissions(hostname)
@@ -2179,6 +2251,287 @@ def delete_host_after_confirm(delname):
     else:
         return None # browser reload
 
+def check_new_hostname(varname, hostname):
+    if not hostname:
+        raise MKUserError(varname, _("Please specify a host name."))
+    elif hostname in g_folder[".hosts"]:
+        raise MKUserError(varname, _("A host with this name already exists."))
+    elif not re.match("^[a-zA-Z0-9-_.]+$", hostname):
+        raise MKUserError(varname, _("Invalid host name: must contain only characters, digits, dash, underscore and dot."))
+
+
+#.
+#   .--Rename Host---------------------------------------------------------.
+#   |     ____                                   _   _           _         |
+#   |    |  _ \ ___ _ __   __ _ _ __ ___   ___  | | | | ___  ___| |_       |
+#   |    | |_) / _ \ '_ \ / _` | '_ ` _ \ / _ \ | |_| |/ _ \/ __| __|      |
+#   |    |  _ <  __/ | | | (_| | | | | | |  __/ |  _  | (_) \__ \ |_       |
+#   |    |_| \_\___|_| |_|\__,_|_| |_| |_|\___| |_| |_|\___/|___/\__|      |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   | Mode for renaming an existing host.                                  |
+#   '----------------------------------------------------------------------'
+
+def mode_rename_host(phase):
+    hostname = html.var("host")
+    host = g_folder[".hosts"][hostname]
+    is_cluster = ".nodes" in host
+
+    if phase == "title":
+        return _("Rename %s %s") % (is_cluster and _("Cluster") or _("Host"), hostname)
+
+    elif phase == "buttons":
+        html.context_button(_("Host Properties"), make_link([("mode", "edithost"), ("host", hostname)]), "back")
+        return
+
+    elif phase == "action":
+        if g_folder.get(".lock_hosts"):
+            raise MKGeneralException(_("This folder is locked. You cannot rename a host here."))
+
+        if parse_audit_log("pending"):
+            raise MKGeneralException(_("You cannot rename a host while you have pending changes."))
+
+        newname = html.var("newname")
+        check_new_hostname("newname", newname)
+        c = wato_confirm(_("Confirm renaming of host"),
+                         _("Are you sure you want to rename the host <b>%s</b> into <b>%s</b>? "
+                           "This involves a restart of the monitoring core!") %
+                         (hostname, newname))
+        if c:
+            # Creating pending entry. That makes the site dirty and that will force a sync of
+            # the config to that site before the automation is being done.
+            log_pending(AFFECTED, newname, "rename-host", _("Renamed host %s into %s") % (hostname, newname))
+            actions = rename_host(host, newname) # Already activates the changes!
+            log_commit_pending() # All activated by the underlying rename automation
+            html.set_var("host", newname)
+            action_txt =  "".join([ "<li>%s</li>" % a for a in actions ])
+            return "edithost", _("Renamed host <b>%s</b> into <b>%s</b> at the following places:<br><ul>%s</ul>") % (
+                                 hostname, newname, action_txt)
+        elif c == False: # not yet confirmed
+            return ""
+        return
+
+    html.help(_("The renaming of hosts is a complex operation since a host's name is being "
+               "used as a unique key in various places. It also involves stopping and starting "
+               "of the monitoring core. You cannot rename a host while you have pending changes."))
+
+    html.begin_form("rename_host", method="POST")
+    forms.header(_("Rename to host %s") % hostname)
+    forms.section(_("Current name"))
+    html.write(hostname)
+    forms.section(_("New name"))
+    html.text_input("newname", "")
+    forms.end()
+    html.set_focus("newname")
+    html.image_button("rename", _("Rename host!"), "submit")
+    html.hidden_fields()
+    html.end_form()
+
+def rename_host_in_list(thelist, oldname, newname):
+    did_rename = False
+    for nr, element in enumerate(thelist):
+        if element == oldname:
+            thelist[nr] = newname
+            did_rename = True
+    return did_rename
+
+def rename_host(host, newname):
+
+    actions = []
+
+    # 1. Fix WATO configuration itself ----------------
+
+    # Hostname itself in the current folder
+    oldname = host[".name"]
+    g_folder[".hosts"][newname] = host
+    host[".name"] = newname
+    del g_folder[".hosts"][oldname]
+    save_folder_and_hosts(g_folder)
+    mark_affected_sites_dirty(g_folder)
+    actions.append(_("The WATO folder"))
+
+    # Is this host node of a cluster?
+    all_hosts = load_all_hosts()
+    clusters = []
+    parents = []
+    for somehost in all_hosts.values():
+        if ".nodes" in somehost:
+            nodes = somehost[".nodes"]
+            if rename_host_in_list(somehost[".nodes"], oldname, newname):
+                clusters.append(somehost[".name"])
+                folder = somehost['.folder']
+                save_folder_and_hosts(folder)
+                mark_affected_sites_dirty(folder)
+
+        if somehost.get("parents"):
+            if rename_host_in_list(somehost["parents"], oldname, newname):
+                parents.append(somehost[".name"])
+                folder = somehost['.folder']
+                save_folder_and_hosts(folder)
+                mark_affected_sites_dirty(folder)
+
+    if clusters:
+        actions.append(_("The following cluster definitions: %s") % (", ".join(clusters)))
+
+    if parents:
+        actions.append(_("The parents of the following hosts: %s") % (", ".join(parents)))
+
+    # Rules that explicitely name that host (no regexes)
+    changed_rulesets = []
+    def rename_host_in_folder_rules(folder):
+        rulesets = load_rulesets(folder)
+        changed = False
+        for varname, rules in rulesets.items():
+            rulespec = g_rulespecs[varname]
+            for nr, rule in enumerate(rules):
+                value, tag_specs, host_list, item_list, rule_options = parse_rule(rulespec, rule)
+                if rename_host_in_list(host_list, oldname, newname):
+                    newrule = construct_rule(rulespec, value, tag_specs, host_list, item_list, rule_options)
+                    rules[nr] = newrule
+                    changed_rulesets.append(varname)
+                    changed = True
+        if changed:
+            save_rulesets(folder, rulesets)
+            mark_affected_sites_dirty(folder)
+
+        for subfolder in folder['.folders'].values():
+            rename_host_in_folder_rules(subfolder)
+
+    rename_host_in_folder_rules(g_root_folder)
+    if changed_rulesets:
+        unique = set(changed_rulesets)
+        for varname in unique:
+            actions.append(_("%d WATO rules in ruleset <i>%s</i>") % (
+              changed_rulesets.count(varname), g_rulespecs[varname]["title"]))
+
+    # Business Intelligence rules
+    num_bi = rename_host_in_bi(oldname, newname)
+    if num_bi:
+        actions.append(_("%d BI rules and aggregations") % num_bi)
+
+    # Now make sure that the remote site that contains that host is being
+    # synced.
+
+    # 3. Check_MK stuff ------------------------------------------------
+    # Things like autochecks, counters, etc. This has to be done via an
+    # automation, since it might have to happen on a remote site. During
+    # this automation the core will be stopped, after the renaming has
+    # taken place a new configuration will be created and the core started
+    # again.
+    ip_lookup_failed = True
+    for what in check_mk_automation(host[".siteid"], "rename-host", [oldname, newname]):
+        if what == "cache":
+            actions.append(_("Cached output of monitoring agents"))
+        elif what == "counters":
+            actions.append(_("Files with performance counters"))
+        elif what == "piggyback-load":
+            actions.append(_("Piggyback information from other host"))
+        elif what == "piggyback-pig":
+            actions.append(_("Piggyback information for other hosts"))
+        elif what == "autochecks":
+            actions.append(_("Auto-disovered services of the host"))
+        elif what == "logwatch":
+            actions.append(_("Logfile information of logwatch plugin"))
+        elif what == "snmpwalk":
+            actions.append(_("A stored SNMP walk"))
+        elif what == "rrd":
+            actions.append(_("RR databases with performance data"))
+        elif what == "rrdcached":
+            actions.append(_("RRD updates in journal of RRD Cache"))
+        elif what == "pnpspool":
+            actions.append(_("Spool files of PNP4Nagios"))
+        elif what == "nagvis":
+            actions.append(_("NagVis maps"))
+        elif what == "history":
+            actions.append(_("Monitoring history entries (events and availability)"))
+        elif what == "retention":
+            actions.append(_("The current monitoring state (including ackowledgements and downtimes)"))
+        elif what == "ipfail":
+            actions.append("<div class=error>%s</div>" % (_("<b>WARNING:</b> the IP address lookup of "
+                   "<tt>%s</tt> has failed. The core has been started by using the address <tt>0.0.0.0</tt> for the while. "
+                   "You will not be able to activate any changes until you have either updated your "
+                   "DNS or configured an explicit address for <tt>%s</tt>.") % (newname, newname)))
+
+    # Notification settings ----------------------------------------------
+    # Notification rules - both global and users' ones
+    def rename_in_notification_rules(rules):
+        num_changed = 0
+        for rule in rules:
+            for key in [ "match_hosts", "match_exclude_hosts" ]:
+                if rule.get(key):
+                    if rename_host_in_list(rule[key], oldname, newname):
+                        num_changed += 1
+        return num_changed
+
+    users = userdb.load_users(lock = True)
+    some_user_changed = False
+    for userid, user in users.items():
+        if user.get("notification_rules"):
+            rules = user["notification_rules"]
+            num_changed = rename_in_notification_rules(rules)
+            if num_changed:
+                actions.append("%d notification rules of user %s" % (num_changed, userid))
+                some_changed = True
+
+    rules = load_notification_rules()
+    num_changed = rename_in_notification_rules(rules)
+    if num_changed:
+        actions.append(_("%d global notification rules") % num_changed)
+        save_notification_rules(rules)
+
+    # Notification channels of flexible notifcations also can have host conditions
+    for userid, user in users.items():
+        method = user.get("notification_method")
+        if method and type(method) == tuple and method[0] == "flexible":
+            channels_changed = 0
+            for channel in method[1]:
+                if channel.get("only_hosts"):
+                    num_changed = rename_host_in_list(channel["only_hosts"], oldname, newname)
+                    if num_changed:
+                        channels_changed += 1
+                        some_user_changed = True
+            if channels_changed:
+                actions.append("%d flexible notification configurations of user %s" % (channels_changed, userid))
+
+    if some_user_changed:
+        userdb.save_users(users)
+
+    # State of Multisite ---------------------------------------
+    # Favorites of users and maybe other settings. We simply walk through
+    # all directories rather then through the user database. That way we
+    # are sure that also currently non-existant users are being found and
+    # also only users that really have a profile.
+    users_changed = 0
+    total_changed = 0
+    for userid in os.listdir(config.config_dir):
+        if userid[0] != '.':
+            favpath = config.config_dir + "/" + userid + "/favorites.mk"
+            if os.path.exists(favpath):
+                try:
+                    num_changed = 0
+                    favorites = eval(file(favpath).read())
+                    for nr, entry in enumerate(favorites):
+                        if entry == oldname:
+                            favorites[nr] = newname
+                            num_changed += 1
+                        elif entry.startswith(oldname + ";"):
+                            favorites[nr] = newname + ";" + entry.split(";")[1]
+                            num_changed += 1
+                    if num_changed:
+                        file(favpath, "w").write(repr(favorites) + "\n")
+                        users_changed += 1
+                        total_changed += num_changed
+                except:
+                    if config.debug:
+                        raise
+    if users_changed:
+        actions.append(_("%d favorite entries of %d users") % (total_changed, users_changed))
+
+    call_hook_hosts_changed(g_root_folder)
+    return actions
+
+
+
 #.
 #   .--Host & Services Parameters Overview pages---------------------------.
 #   |        ____                                _                         |
@@ -2288,10 +2641,13 @@ def mode_object_parameters(phase):
                     # but we need to address it anyway.
                     grouprule = "checkgroup_parameters:" + checkgroup
                     if grouprule not in g_rulespecs:
-                        rulespec = g_rulespecs["static_checks:" + checkgroup]
-                        url = make_link([('mode', 'edit_ruleset'), ('varname', "static_checks:" + checkgroup), ('host', hostname)])
-                        render_rule_reason(_("Parameters"), url, _("Determined by inventory"), None, False,
-                                   rulespec["valuespec"]._elements[2].value_to_text(serviceinfo["parameters"]))
+                        rulespec = g_rulespecs.get("static_checks:" + checkgroup)
+                        if rulespec:
+                            url = make_link([('mode', 'edit_ruleset'), ('varname', "static_checks:" + checkgroup), ('host', hostname)])
+                            render_rule_reason(_("Parameters"), url, _("Determined by inventory"), None, False,
+                                       rulespec["valuespec"]._elements[2].value_to_text(serviceinfo["parameters"]))
+                        else:
+                            render_rule_reason(_("Parameters"), None, "", "", True, _("This check is not configurable via WATO"))
 
                     else:
                         rulespec = g_rulespecs[grouprule]
@@ -2688,13 +3044,13 @@ def mode_diag_host(phase):
             html.write('<table class="data test"><tr class="data odd0">')
             html.write('<td class="icons"><div>')
             html.write('<img class="icon" id="%s_img" src="">' % ident)
-            html.write('<a href="javascript:start_host_diag_test(\'%s\', \'%s\');">'
+            html.write('<a href="javascript:start_host_diag_test(\'%s\', \'%s\', \'%s\');">'
                        '<img class="icon retry" id="%s_retry" src="images/icon_retry_disabled.gif" title="%s"></a>' %
-                        (ident, hostname, ident, _('Retry this test')))
+                        (ident, hostname, html.fresh_transid(), ident, _('Retry this test')))
             html.write('</div></td>')
             html.write('<td><div class="log" id="%s_log"></div>' % ident)
             html.write('</tr></table>')
-            html.javascript('start_host_diag_test("%s", "%s")' % (ident, hostname))
+            html.javascript('start_host_diag_test("%s", "%s", "%s")' % (ident, hostname, html.fresh_transid()))
 
     html.write('</td></tr></table>')
     html.write('</div>')
@@ -2903,6 +3259,7 @@ def show_service_table(host, firsttime):
 
     # This option will later be switchable somehow
 
+    divid = 0
     for state_name, state_type, checkbox in [
         ( _("Available (missing) services"), "new", firsttime ),
         ( _("Already configured services"), "old", True, ),
@@ -2938,7 +3295,15 @@ def show_service_table(host, firsttime):
             table.cell(_("Checkplugin"),         ct)
             table.cell(_("Item"),                item)
             table.cell(_("Service Description"), html.attrencode(descr))
-            table.cell(_("Plugin output"),       html.attrencode(output))
+            table.cell(_("Plugin output"))
+
+            if defaults.omd_root and state_type in ( "custom", "active" ):
+                divid += 1
+                html.write("<div id='activecheck%d'><img class=icon title='%s' src='images/icon_reloading.gif'></div>" % (divid, hostname))
+                html.final_javascript("execute_active_check('%s', '%s', '%s', '%s', 'activecheck%d');" % (
+                     host[".siteid"] or '', hostname, ct, item.replace("'", "\'"), divid))
+            else:
+                html.write(html.attrencode(output))
 
             # Icon for Rule editor, Check parameters
             varname = None
@@ -3011,6 +3376,16 @@ def show_service_table(host, firsttime):
 
     table.end()
     html.end_form()
+
+
+def ajax_execute_check():
+    site      = html.var("site")
+    hostname  = html.var("host")
+    checktype = html.var("checktype")
+    item      = html.var("item")
+    status, output = check_mk_automation(site, "active-check", [ hostname, checktype, item ])
+    statename = nagios_short_state_names.get(status, "UNKN")
+    html.write("%d\n%s\n%s" % (status, statename, output))
 
 
 #.
@@ -3237,7 +3612,115 @@ def create_target_folder_from_aliaspath(aliaspath):
 
     return folder
 
+#.
+#   .--Bulk Import---------------------------------------------------------.
+#   |       ____        _ _      ___                            _          |
+#   |      | __ ) _   _| | | __ |_ _|_ __ ___  _ __   ___  _ __| |_        |
+#   |      |  _ \| | | | | |/ /  | || '_ ` _ \| '_ \ / _ \| '__| __|       |
+#   |      | |_) | |_| | |   <   | || | | | | | |_) | (_) | |  | |_        |
+#   |      |____/ \__,_|_|_|\_\ |___|_| |_| |_| .__/ \___/|_|   \__|       |
+#   |                                         |_|                          |
+#   +----------------------------------------------------------------------+
+#   | Realizes a simple page with a single textbox which one can insert    |
+#   | several hostnames, separated by different chars and submit it to     |
+#   | create these hosts in the current folder.                            |
+#   '----------------------------------------------------------------------'
 
+def mode_bulk_import(phase):
+    if phase == "title":
+        return _('Bulk Host Import')
+
+    elif phase == "buttons":
+        html.context_button(_("Folder"), make_link([("mode", "folder")]), "back")
+
+    elif phase == "action":
+        if not html.check_transaction():
+            return "folder"
+
+        attributes = collect_attributes()
+
+        config.need_permission("wato.manage_hosts")
+        check_folder_permissions(g_folder, "write")
+        check_user_contactgroups(attributes.get("contactgroups", (False, [])))
+
+        hosts = html.var('_hosts')
+        if not hosts:
+            raise MKUserError('_hosts', _('Please specify at least one hostname.'))
+
+        created  = 0
+        skipped  = 0
+        selected = []
+
+        # Split by all possible separators
+        hosts = hosts.replace(' ', ';').replace(',', ';').replace('\n', ';').replace('\r', '')
+        for hostname in hosts.split(';'):
+            if hostname in g_folder['.hosts']:
+                skipped += 1
+                continue
+            elif not re.match('^[a-zA-Z0-9-_.]+$', hostname):
+                skipped += 1
+                continue
+
+            new_host = {
+                '.name'   : hostname,
+                '.folder' : g_folder,
+            }
+            g_folder[".hosts"][hostname] = new_host
+            mark_affected_sites_dirty(g_folder, hostname)
+
+            message = _("Created new host %s.") % hostname
+            log_pending(AFFECTED, hostname, "create-host", message)
+            g_folder["num_hosts"] += 1
+            created += 1
+            selected.append('_c_%s' % hostname)
+
+        if not created:
+            return 'folder', _('No host has been imported.')
+
+        else:
+            save_folder_and_hosts(g_folder)
+            reload_hosts(g_folder)
+            call_hook_hosts_changed(g_folder)
+
+            if html.get_checkbox('_do_service_detection'):
+                # Create a new selection
+                weblib.set_rowselection('wato-folder-/'+g_folder['.path'], selected, 'set')
+                html.set_var('mode', 'bulkinventory')
+                html.set_var('show_checkboxes', '1')
+                return 'bulkinventory'
+
+            result_txt = ''
+            if skipped > 0:
+                result_txt = _('Imported %d hosts, but skipped %d hosts. Hosts might '
+                    'be skipped when they already exist or contain illegal chars.') % (created, skipped)
+            else:
+                result_txt = _('Imported %d hosts.') % created
+
+            return 'folder', result_txt
+
+    else:
+        html.begin_form("bulkimport", method = "POST")
+
+        html.write('<p>')
+        html.write(_('Using this page you can import several hosts at once into '
+            'the choosen folder. You can paste a list of hostnames, separated '
+            'by comma, semicolon, space or newlines. These hosts will then be '
+            'added to the folder using the default attributes. If some of the '
+            'host names cannot be resolved via DNS, you must manually edit '
+            'those hosts later and add explicit IP addresses.'))
+        html.write('</p>')
+        forms.header(_('Bulk Host Import'))
+        forms.section(_('Hosts'))
+        html.text_area('_hosts', cols = 70, rows = 10)
+
+        forms.section(_('Options'))
+        html.checkbox('_do_service_detection', False, label = _('Perform automatic service detection'))
+        forms.end()
+
+        html.button('_import', _('Import'))
+
+        html.hidden_fields()
+        html.end_form()
 
 #.
 #   .--Bulk-Inventory------------------------------------------------------.
@@ -3263,6 +3746,12 @@ def mode_bulk_inventory(phase):
 
     elif phase == "action":
         if html.var("_item"):
+            if not html.check_transaction():
+                html.write(repr([ 'failed', 0, 0, 0, 0, 0, 0, ]) + "\n")
+                html.write(_("Error during inventory: Maximum number of retries reached. "
+                             "You need to restart the bulk inventory"))
+                return ""
+
             how = html.var("how")
             try:
                 site_id, folderpath, hostnamesstring = html.var("_item").split("|")
@@ -4503,13 +4992,13 @@ def mode_changelog(phase):
 def foreign_changes():
     changes = {}
     for t, linkinfo, user, action, text in parse_audit_log("pending"):
-        if user != config.user_id:
+        if user != '-' and user != config.user_id:
             changes.setdefault(user, 0)
             changes[user] += 1
     return changes
 
 
-def log_entry(linkinfo, action, message, logfilename):
+def log_entry(linkinfo, action, message, logfilename, user_id = None):
     if type(message) == unicode:
         message = message.encode("utf-8")
     message = message.strip()
@@ -4524,16 +5013,21 @@ def log_entry(linkinfo, action, message, logfilename):
     else:
         link = ":" + linkinfo
 
+    if user_id == None:
+        user_id = config.user_id
+    elif user_id == '':
+        user_id = '-'
+
     log_file = log_dir + logfilename
     make_nagios_directory(log_dir)
     f = create_user_file(log_file, "ab")
-    f.write("%d %s %s %s %s\n" % (int(time.time()), link, config.user_id, action, message))
+    f.write("%d %s %s %s %s\n" % (int(time.time()), link, user_id, action, message))
 
 
-def log_audit(linkinfo, what, message):
+def log_audit(linkinfo, what, message, user_id = None):
     if config.wato_use_git:
         g_git_messages.append(message)
-    log_entry(linkinfo, what, message, "audit.log")
+    log_entry(linkinfo, what, message, "audit.log", user_id)
 
 # status is one of:
 # SYNC        -> Only sync neccessary
@@ -4544,13 +5038,13 @@ def log_audit(linkinfo, what, message):
 # LOCALRESTART-> Called after inventory. In distributed mode, affected
 #                sites have already been marked for restart. Do nothing here.
 #                In non-distributed mode mark for restart
-def log_pending(status, linkinfo, what, message):
-    log_audit(linkinfo, what, message)
+def log_pending(status, linkinfo, what, message, user_id = None):
+    log_audit(linkinfo, what, message, user_id)
     need_sidebar_reload()
 
     if not is_distributed():
         if status != SYNC:
-            log_entry(linkinfo, what, message, "pending.log")
+            log_entry(linkinfo, what, message, "pending.log", user_id)
         cmc_rush_ahead()
 
 
@@ -4558,7 +5052,7 @@ def log_pending(status, linkinfo, what, message):
     # the site is really affected. This needs to be optimized
     # in future.
     else:
-        log_entry(linkinfo, what, message, "pending.log")
+        log_entry(linkinfo, what, message, "pending.log", user_id)
         for siteid, site in config.sites.items():
 
             changes = {}
@@ -4788,12 +5282,13 @@ def render_audit_log(log, what, with_filename = False, hilite_others=False):
     even = "even"
     for t, linkinfo, user, action, text in log:
         even = even == "even" and "odd" or "even"
-        hilite = hilite_others and config.user_id != user
+        hilite = hilite_others and user != '-' and config.user_id != user
         htmlcode += '<tr class="data %s%d">' % (even, hilite and 2 or 0)
         htmlcode += '<td class=nobreak>%s</td>' % render_linkinfo(linkinfo)
         htmlcode += '<td class=nobreak>%s</td>' % fmt_date(float(t))
         htmlcode += '<td class=nobreak>%s</td>' % fmt_time(float(t))
         htmlcode += '<td class=nobreak>'
+        user = user == '-' and ('<i>%s</i>' % _('internal')) or user
         if hilite:
             htmlcode += '<img class=icon src="images/icon_foreign_changes.png" title="%s">' \
                      % _("This change has been made by another user")
@@ -4889,7 +5384,7 @@ def check_mk_local_automation(command, args=[], indata=""):
                     "<li>Retry this operation</li></ol>\n" %
                     (html.apache_user(), sudoline))
 
-    if command == 'restart':
+    if command in [ 'restart', 'reload' ]:
         try:
             call_hook_pre_activate_changes()
         except Exception, e:
@@ -4904,7 +5399,7 @@ def check_mk_local_automation(command, args=[], indata=""):
         # if config.debug:
         #     html.write("<div class=message>Running <tt>%s</tt></div>\n" % " ".join(cmd))
         p = subprocess.Popen(cmd,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
     except Exception, e:
         if commandargs[0] == 'sudo':
             raise MKGeneralException("Cannot execute <tt>%s</tt>: %s<br /><br >%s" % (commandargs[0], e, sudo_msg))
@@ -4923,7 +5418,7 @@ def check_mk_local_automation(command, args=[], indata=""):
 
 
     # On successful "restart" command execute the activate changes hook
-    if command == 'restart':
+    if command in [ 'restart', 'reload' ]:
         call_hook_activate_changes()
 
     try:
@@ -4992,8 +5487,16 @@ def interactive_progress(items, title, stats, finishvars, timewait, success_stat
     finish_url = make_link([("mode", "folder")] + finishvars)
     term_url = make_link([("mode", "folder")] + termvars)
 
-    html.javascript(('progress_scheduler("%s", "%s", 50, %s, "%s", %s, %s, "%s", "' + _("FINISHED.") + '");') %
-                     (html.var('mode'), base_url, json_items, finish_url,
+    # Reserve a certain amount of transids for the progress scheduler
+    # Each json item requires one transid. Additionally, each "Retry failed hosts" eats
+    # up another one. We reserve 20 additional transids for the retry function
+    # Note: The "retry option" ignores the bulk size
+    transids = []
+    for i in range(len(items) + 20):
+        transids.append(html.fresh_transid())
+    json_transids = '[ %s ]' % ',\n'.join([ "'" + h + "'" for h in transids])
+    html.javascript(('progress_scheduler("%s", "%s", 50, %s, %s, "%s", %s, %s, "%s", "' + _("FINISHED.") + '");') %
+                     (html.var('mode'), base_url, json_items, json_transids, finish_url,
                       success_stats, fail_stats, term_url))
 
 
@@ -5387,6 +5890,19 @@ class HostSelectionAttribute(Attribute):
         return hostname and hostname or None
 
 
+# Convert old tuple representation to new dict representation of
+# folder's group settings
+def convert_cgroups_from_tuple(value):
+    if type(value) == dict:
+        return value
+    else:
+        return {
+            "groups"        : value[1],
+            "recurse_perms" : False,
+            "use"           : value[0],
+            "recurse_use"   : False,
+        }
+
 # Attribute needed for folder permissions
 class ContactGroupsAttribute(Attribute):
     # The constructor stores name and title. If those are
@@ -5406,34 +5922,47 @@ class ContactGroupsAttribute(Attribute):
         self._loaded_at = None
 
     def paint(self, value, hostname):
+        value = convert_cgroups_from_tuple(value)
+
         texts = []
-        use, cgs = value
         self.load_data()
         items = self._contactgroups.items()
         items.sort(cmp = lambda a,b: cmp(a[1], b[1]))
         for name, alias in items:
-            if name in cgs:
+            if name in value["groups"]:
                 display_name = alias and alias or name
                 texts.append('<a href="wato.py?mode=edit_contact_group&edit=%s">%s</a>' % (name, display_name))
         result = ", ".join(texts)
-        if texts and use:
+        if texts and value["use"]:
             result += "<span title='%s'><b>*</b></span>" % \
                   _("These contact groups are also used in the monitoring configuration.")
         return "", result
 
     def render_input(self, value):
+        value = convert_cgroups_from_tuple(value)
+
+        # If we're just editing a host, then some of the checkboxes will be missing.
+        # This condition is not very clean, but there is no other way to savely determine
+        # the context.
+        is_host = not not html.var("host")
+
         # Only show contact groups I'm currently in and contact
         # groups already listed here.
-        use, cgs = value
         self.load_data()
         items = self._contactgroups.items()
         items.sort(cmp = lambda a,b: cmp(a[1], b[1]))
         for name, alias in items:
-            html.checkbox(self._name + "_" + name, name in cgs)
+            html.checkbox(self._name + "_n_" + name, name in value["groups"])
             html.write(' <a href="%s">%s</a><br>' % (make_link([("mode", "edit_contact_group"), ("edit", name)]), alias and alias or name))
         html.write("<hr>")
-        html.checkbox(self._name + "_use", use)
-        html.write( " " + _("Add these contact groups to the host's contact groups in the monitoring configuration"))
+        if is_host:
+            html.checkbox(self._name + "_use", value["use"], label = _("Add these contact groups the host"))
+        else:
+            html.checkbox(self._name + "_recurse_perms", value["recurse_perms"], label = _("Give these groups also <b>permission on all subfolders</b>"))
+            html.write("<hr>")
+            html.checkbox(self._name + "_use", value["use"], label = _("Add these groups as <b>contacts</b> to all hosts in this folder"))
+            html.write("<br>")
+            html.checkbox(self._name + "_recurse_use", value["recurse_use"], label = _("Add these groups as <b>contacts in all subfolders</b>"))
 
     def load_data(self):
         # Make cache valid only during this HTTP request
@@ -5447,13 +5976,19 @@ class ContactGroupsAttribute(Attribute):
         cgs = []
         self.load_data()
         for name in self._contactgroups:
-            if html.get_checkbox(self._name + "_" + name):
+            if html.get_checkbox(self._name + "_n_" + name):
                 cgs.append(name)
-        return html.get_checkbox(self._name + "_use"), cgs
+        return {
+            "groups"        : cgs,
+            "recurse_perms" : html.get_checkbox(self._name + "_recurse_perms"),
+            "use"           : html.get_checkbox(self._name + "_use"),
+            "recurse_use"   : html.get_checkbox(self._name + "_recurse_use"),
+        }
 
     def filter_matches(self, crit, value, hostname):
+        value = convert_cgroups_from_tuple(value)
         for c in crit[1]:
-            if c in value[1]:
+            if c in value["groups"]:
                 return True
         return False
 
@@ -5898,14 +6433,31 @@ def effective_attributes(host, folder):
 #   '----------------------------------------------------------------------'
 
 # Returns status information for snapshots or snapshots in progress
-def get_snapshot_status(snapshot):
+def get_snapshot_status(snapshot, validate_checksums = False):
     if type(snapshot) == tuple:
         name, file_stream = snapshot
     else:
         name = snapshot
         file_stream = None
 
-    status = {}
+    # Defaults of available keys
+    status = {
+        "name"            : "",
+        "total_size"      : 0,
+        "type"            : None,
+        "files"           : {},
+        "comment"         : "",
+        "created_by"      : "",
+        "broken"          : False,
+        "progress_status" : "",
+    }
+
+    def access_snapshot(handler):
+        if file_stream:
+            file_stream.seek(0)
+            return handler(file_stream)
+        else:
+            return handler(snapshot_dir + name)
 
     def check_size():
         if file_stream:
@@ -5928,11 +6480,7 @@ def get_snapshot_status(snapshot):
             raise MKGeneralException(_("Invalid snapshot (incorrect file extension)"))
 
     def check_content():
-        if file_stream:
-            file_stream.seek(0)
-            status["files"] = multitar.list_tar_content(file_stream)
-        else:
-            status["files"] = multitar.list_tar_content(snapshot_dir + name)
+        status["files"] = access_snapshot(multitar.list_tar_content)
 
         if status.get("type") == "legacy":
             allowed_files = map(lambda x: "%s.tar" % x[1], backup_paths)
@@ -5942,12 +6490,63 @@ def get_snapshot_status(snapshot):
         else: # new snapshots
             for entry in ["comment", "created_by", "type"]:
                 if entry in status["files"]:
-                    if file_stream:
-                        status[entry] = multitar.get_file_content(file_stream, entry)
-                    else:
-                        status[entry] = multitar.get_file_content(snapshot_dir + name, entry)
+                    status[entry] = access_snapshot(lambda x: multitar.get_file_content(x, entry))
                 else:
                     raise MKGeneralException(_("Invalid snapshot (missing file: %s)") % entry)
+
+    def snapshot_secret():
+        path = defaults.default_config_dir + '/snapshot.secret'
+        try:
+            return file(path).read()
+        except IOError:
+            return '' # validation will fail in this case
+
+    def check_checksums():
+        for f in status["files"].values():
+            f['checksum'] = None
+
+        # checksums field might contain three states:
+        # a) None  - This is a legacy snapshot, no checksum file available
+        # b) False - No or invalid checksums
+        # c) True  - Checksums successfully validated
+        if status['type'] == 'legacy':
+            status['checksums'] = None
+            return
+
+        if 'checksums' not in status['files'].keys():
+            status['checksums'] = False
+            return
+
+        # Extract all available checksums from the snapshot
+        checksums_raw = access_snapshot(lambda x: multitar.get_file_content(x, 'checksums'))
+        checksums = {}
+        for l in checksums_raw.split('\n'):
+            line = l.strip()
+            if ' ' in line:
+                parts = line.split(' ')
+                if len(parts) == 3:
+                    checksums[parts[0]] = (parts[1], parts[2])
+
+        # now loop all known backup domains and check wheter or not they request
+        # checksum validation, there is one available and it is valid
+        status['checksums'] = True
+        for domain_id, domain in backup_domains.items():
+            filename = domain_id + '.tar.gz'
+            if not domain.get('checksum', True) or filename not in status['files']:
+                continue
+
+            if filename not in checksums:
+                continue
+
+            checksum, signed = checksums[filename]
+
+            # Get hashes of file in question
+            subtar = access_snapshot(lambda x: multitar.get_file_content(x, filename))
+            subtar_hash   = sha256(subtar).hexdigest()
+            subtar_signed = sha256(subtar_hash + snapshot_secret()).hexdigest()
+
+            status['files'][filename]['checksum'] = checksum == subtar_hash and signed == subtar_signed
+            status['checksums'] &= status['files'][filename]['checksum']
 
     try:
         if len(name) > 35:
@@ -5957,26 +6556,26 @@ def get_snapshot_status(snapshot):
 
         if not file_stream:
             # Check if the snapshot build is still in progress...
-            path_status = "%s/workdir/%s.status" % (snapshot_dir, name)
-            path_pid    = "%s/workdir/%s.pid"    % (snapshot_dir, name)
+            path_status = "%s/workdir/%s/%s.status" % (snapshot_dir, name, name)
+            path_pid    = "%s/workdir/%s/%s.pid"    % (snapshot_dir, name, name)
 
             # Check if this process is still running
             if os.path.exists(path_pid):
                 if os.path.exists(path_pid) and not os.path.exists("/proc/%s" % open(path_pid).read()):
-                    status["progress_status"] = _("ERROR: Snapshot progress no longer running")
-                    raise MKGeneralException(_("Error: Process for snapshot creating is no longer running"))
+                    status["progress_status"] = _("ERROR: Snapshot progress no longer running!")
+                    raise MKGeneralException(_("Error: The process responsible for creating the snapshot is no longer running!"))
                 else:
                     status["progress_status"] = _("Snapshot build currently in progress")
 
             # Read snapshot status file (regularly updated by snapshot process)
             if os.path.exists(path_status):
-                tokens = file(path_status, "r").read().split("\n",1)
-                status["comment"] = tokens[0].split(":",1)[1]
+                lines = file(path_status, "r").readlines()
+                status["comment"] = lines[0].split(":", 1)[1]
                 file_info = {}
-                files = tokens[1].splitlines()
-                for filename in files:
-                    name, info = filename.split(":",1)
-                    file_info[name] = {"size" : info}
+                for filename in lines[1:]:
+                    name, info = filename.split(":", 1)
+                    text, size = info[:-1].split(":", 1)
+                    file_info[name] = {"size" : saveint(size), "text": text}
                 status["files"] = file_info
                 return status
 
@@ -5985,23 +6584,32 @@ def get_snapshot_status(snapshot):
         check_extension()
         check_content()
 
-    except MKGeneralException, e:
-        status["broken_text"] = e.reason
-        status["broken"]      = True
-        pass
+        if validate_checksums:
+            check_checksums()
+
     except Exception, e:
-        import traceback
-        status["broken_text"] = traceback.format_exc()
-        status["broken"]      = True
-        pass
+        if config.debug:
+            import traceback
+            status["broken_text"] = traceback.format_exc()
+            status["broken"]      = True
+        else:
+            status["broken_text"] = str(e)
+            status["broken"]      = True
     return status
 
 def mode_snapshot_detail(phase):
     snapshot_name = html.var("_snapshot_name")
-    status = get_snapshot_status(snapshot_name)
+
+    if ".." in snapshot_name or "/" in snapshot_name:
+        raise MKUserError("_snapshot_name", _("Invalid snapshot requested"))
+    if not os.path.exists(snapshot_dir + '/' + snapshot_name):
+        raise MKUserError("_snapshot_name", _("The requested snapshot does not exist"))
+
+    if phase not in ["buttons", "action"]:
+        status = get_snapshot_status(snapshot_name, validate_checksums = True)
 
     if phase == "title":
-        return _("Snapshot details of %s")  % status["name"]
+        return _("Snapshot details of %s") % html.attrencode(status["name"])
     elif phase == "buttons":
         home_button()
         html.context_button(_("Back"), make_link([("mode", "snapshot")]), "back")
@@ -6009,62 +6617,84 @@ def mode_snapshot_detail(phase):
     elif phase == "action":
         return
 
-    if status.get("info"):
-        html.write("<table><tr><th>%s</th><th>%s</th></tr>" % (_("Content"), _("Status")))
-        for token in status["info"].split("\n"):
-            pair = token.split(":",1)
-            if len(pair) == 2:
-                html.write("<tr><td>%s</td><td>%s</td></tr>" % (backup_domains.get(pair[0],{}).get("title") or pair[0], pair[1]))
-        html.write("</table>")
+    other_content = []
+
+    if status.get("broken"):
+        html.add_user_error('broken', _  ('This snapshot is broken!'))
+        html.add_user_error('broken_text', status.get("broken_text"))
+        html.show_user_errors()
+
+    html.begin_form("snapshot_details", method="POST")
+    forms.header(_("Snapshot %s") % html.attrencode(snapshot_name))
+
+    for entry in [ ("comment", _("Comment")), ("created_by", _("Created by")) ]:
+        if status.get(entry[0]):
+            forms.section(entry[1])
+            html.write(status.get(entry[0]))
+
+    forms.section(_("Content"))
+    files = status["files"]
+    if not files:
+        html.write(_("Snapshot is empty!"))
     else:
-        other_content = []
+        html.write("<table>")
+        html.write("<tr><th align='left'>%s</th>"
+                   "<th align='right'>%s</th>"
+                   "<th>%s</th></tr>" % (_("Description"), _("Size"), _("Trusted")))
 
-        if status.get("broken"):
-            html.add_user_error('broken', _  ('This snapshot is broken!'))
-            html.add_user_error('broken_text', status.get("broken_text"))
-            html.show_user_errors()
+        domains        = []
+        other_content  = []
+        for filename, values in files.items():
+            if filename in ["comment", "type", "created_by", "checksums"]:
+                continue
+            domain_key = filename[:-7]
+            if domain_key in backup_domains.keys():
+                verify_checksum = backup_domains.get('checksum', True) # is checksum check enabled here?
+                domains.append((backup_domains[domain_key]["title"], verify_checksum, filename, values))
+            else:
+                other_content.append((_("Other"), filename, values))
+        domains.sort()
 
-        html.begin_form("snapshot_details", method="POST")
-        forms.header(_("Snapshot %s") % snapshot_name)
+        for (title, verify_checksum, filename, values) in domains:
+            extra_info = ""
+            if values.get("text"):
+                extra_info = "%s - " % values["text"]
+            html.write("<tr><td>%s%s</td>"  % (extra_info, title))
+            html.write("<td align='right'>%s</td>" % fmt_bytes(values["size"]))
 
-        for entry in [ ("comment", _("Comment")), ("created_by", _("Created by")) ]:
-            if status.get(entry[0]):
-                forms.section(entry[1])
-                html.write(status.get(entry[0]))
+            html.write("<td>")
+            if verify_checksum:
+                if values['checksum'] == True:
+                    checksum_title = _('Checksum valid and signed')
+                    checksum_icon  = ''
+                elif values['checksum'] == False:
+                    checksum_title = _('Checksum invalid and not signed')
+                    checksum_icon  = 'p'
+                else:
+                    checksum_title = _('Checksum not available')
+                    checksum_icon  = 'n'
+                html.icon(checksum_title, 'snapshot_%schecksum' % checksum_icon)
+            html.write("</td>")
 
-        forms.section(_("Content"))
-        files = multitar.list_tar_content(snapshot_dir + snapshot_name)
-        if not files:
-            html.write(_("Snapshot is empty!"))
-        else:
-            html.write("<table>")
-            html.write("<tr><th align='left'>%s</th><th align='right'>%s</th></tr>" % (_("Description"), _("Size")))
-            domain_keys = files.keys()
-            domain_keys.sort()
-            for key in domain_keys:
-                if key in ["comment", "type", "created_by"]:
-                    continue
-                try:
-                    domain_id = key[:-7]
-                    if domain_id in backup_domains:
-                        html.write("<tr><td>%s</td>"  % backup_domains.get(domain_id)["title"])
-                        html.write("<td align='right'>%s</td></tr>" % fmt_bytes(files[key]["size"]))
-                    else:
-                        other_content.append(key)
-                except:
-                    other_content.append(key)
-            if other_content:
-                html.write("<tr><td>%s</td></tr>" % _("Other content"))
-                for key in other_content:
-                    html.write("<tr><td>%s</td>"  % key)
-                    html.write("<td align='right'>%s</td></tr>" % fmt_bytes(files[key]["size"]))
-            html.write("</table>")
-        forms.end()
+            html.write("</tr>")
+
+        if other_content:
+            html.write("<tr><td colspan=\"3\"><i>%s</i></td></tr>" % _("Other content"))
+            for (title, filename, values) in other_content:
+                html.write("<tr><td>%s</td>"  % html.attrencode(filename))
+                html.write("<td align='right'>%s</td>" % fmt_bytes(values["size"]))
+                html.write("<td></td>")
+                html.write("</tr>")
+        html.write("</table>")
+
+    forms.end()
+
     if snapshot_name != "uploaded_snapshot":
         delete_url = make_action_link([("mode", "snapshot"), ("_delete_file", snapshot_name)])
         html.buttonlink(delete_url, _("Delete Snapshot"))
         download_url = make_action_link([("mode", "snapshot"), ("_download_file", snapshot_name)])
         html.buttonlink(download_url, _("Download Snapshot"))
+
     if not status.get("progress_status") and not status.get("broken"):
         restore_url = make_action_link([("mode", "snapshot"), ("_restore_snapshot", snapshot_name)])
         html.buttonlink(restore_url, _("Restore Snapshot"))
@@ -6092,7 +6722,8 @@ def mode_snapshot(phase):
     # Sort domains by group
     domains_grouped = {}
     for domainname, data in backup_domains.items():
-        domains_grouped.setdefault(data.get("group","Other"), {}).update({domainname: data})
+        if not data.get("deprecated"):
+            domains_grouped.setdefault(data.get("group","Other"), {}).update({domainname: data})
     backup_groups = []
     for idx, key in enumerate(sorted(domains_grouped.keys())):
         value = domains_grouped[key]
@@ -6149,7 +6780,8 @@ def mode_snapshot(phase):
                 snapshot_data = {}
                 snapshot_name = "wato-snapshot-%s.tar" %  \
                                 time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time()))
-                snapshot_data["comment"]       = snapshot_options.get("comment") or "Snapshot created by %s" % config.user_id
+                snapshot_data["comment"]       = snapshot_options.get("comment") \
+                                                 or _("Snapshot created by %s") % config.user_id
                 snapshot_data["type"]          = "manual"
                 snapshot_data["snapshot_name"] = snapshot_name
                 snapshot_data["domains"]       = store_domains
@@ -6163,18 +6795,37 @@ def mode_snapshot(phase):
             filename      = uploaded_file[0]
 
             if ".." in filename or "/" in filename:
-                    raise MKUserError("_upload_file", _("Invalid filename %s (contains .. or /)"))
+                raise MKUserError("_upload_file", _("Invalid filename"))
             filename = os.path.basename(filename)
 
             if uploaded_file[0] == "":
                 raise MKUserError(None, _("Please select a file for upload."))
-            if html.check_transaction():
 
+            if html.check_transaction():
                 file_stream = cStringIO.StringIO(uploaded_file[2])
-                status = get_snapshot_status((filename, file_stream))
+                status = get_snapshot_status((filename, file_stream), validate_checksums = True)
 
                 if status.get("broken"):
-                    raise MKUserError("_upload_file", _("This is not a Check_MK snapshot!<br>%s") % status.get("broken_text"))
+                    raise MKUserError("_upload_file", _("This is not a Check_MK snapshot!<br>%s") % \
+                                                                            status.get("broken_text"))
+                elif not status.get("checksums") and not config.wato_upload_insecure_snapshots:
+                    if status["type"] == "legacy":
+                        raise MKUserError("_upload_file", _('The integrity of this snapshot could not be verified.<br><br>'
+                                          'You are restoring a legacy snapshot which can not be verified. The snapshot contains '
+                                          'files which contain code that will be executed during runtime of the monitoring.<br><br>'
+                                          'The upload of insecure snapshots is currently disabled in WATO. If you want to allow '
+                                          'the upload of insecure snapshots you can activate it in the Global Settings under<br>'
+                                          '<tt>Configuration GUI (WATO) -> Allow upload of insecure WATO snapshots</tt>'))
+                    else:
+                       raise MKUserError("_upload_file", _('The integrity of this snapshot could not be verified.<br><br>'
+                                          'If you restore a snapshot on the same site as where it was created, the checksum should '
+                                          'always be OK. If not, it is likely that something has been modified in the snapshot.<br>'
+                                          'When you restore the snapshot on a different site, the checksum check will always fail. '
+                                          'The snapshot contains files which contain code that will be executed during runtime '
+                                          'of the monitoring.<br><br>'
+                                          'The upload of insecure snapshots is currently disabled in WATO. If you want to allow '
+                                          'the upload of insecure snapshots you can activate it in the Global Settings under<br>'
+                                          '<tt>Configuration GUI (WATO) -> Allow upload of insecure WATO snapshots</tt>'))
                 else:
                     file(snapshot_dir + filename, "w").write(uploaded_file[2])
                     html.set_var("_snapshot_name", filename)
@@ -6209,12 +6860,30 @@ def mode_snapshot(phase):
             if snapshot_file not in snapshots:
                 raise MKUserError(None, _("Invalid file specified."))
 
-            c = wato_confirm(_("Confirm restore snapshot"),
-                             _("Are you sure you want to restore the snapshot <br><br>%s ?") %
-                                html.attrencode(snapshot_file)
-                            )
+            status = get_snapshot_status(snapshot_file, validate_checksums = True)
+
+            if status['checksums'] == True:
+                q = _("Are you sure you want to restore the snapshot %s?") % \
+                                                html.attrencode(snapshot_file)
+
+            elif status["type"] == "legacy" and status['checksums'] == None:
+                q = _('The integrity of this snapshot could not be verified.<br><br>'
+                      'You are restoring a legacy snapshot which can not be verified. The snapshot contains '
+                      'files which contain code that will be executed during runtime of the monitoring. Please '
+                      'ensure that the snapshot is a legit, not manipulated file.<br><br>'
+                      'Do you want to continue restoring the snapshot?')
+
+            else:
+                q = _('The integrity of this snapshot could not be verified.<br><br>'
+                      'If you restore a snapshot on the same site as where it was created, the checksum should '
+                      'always be OK. If not, it is likely that something has been modified in the snapshot.<br>'
+                      'When you restore the snapshot on a different site, the checksum check will always fail.<br><br>'
+                      'The snapshot contains files which contain code that will be executed during runtime '
+                      'of the monitoring. Please ensure that the snapshot is a legit, not manipulated file.<br><br>'
+                      'Do you want to <i>ignore</i> the failed integrity check and restore the snapshot?')
+
+            c = wato_confirm(_("Confirm restore snapshot"), q)
             if c:
-                status = get_snapshot_status(snapshot_file)
                 if status["type"] == "legacy":
                     multitar.extract_from_file(snapshot_dir + snapshot_file, backup_paths)
                 else:
@@ -6265,6 +6934,8 @@ def mode_snapshot(phase):
         html.begin_form("upload_form", method = "POST")
         html.upload_file("_upload_file")
         html.button("upload_button", _("Restore from file"), "submit")
+        html.hidden_fields()
+        html.end_form()
 
         table.begin("snapshots", _("Snapshots"), empty_text=_("There are no snapshots available."))
         for name in snapshots:
@@ -6292,14 +6963,11 @@ def mode_snapshot(phase):
                 html.icon( status.get("progress_status"), "timeperiods")
         table.end()
 
-        html.hidden_fields()
-        html.end_form()
-
 def get_backup_domains(modes, extra_domains = {}):
     domains = {}
     for mode in modes:
         for domain, value in backup_domains.items():
-            if mode in value:
+            if mode in value and not value.get("deprecated"):
                 domains.update({domain: value})
     domains.update(extra_domains)
     return domains
@@ -6320,6 +6988,15 @@ def do_snapshot_maintenance():
 
 
 def create_snapshot(data = {}):
+    import copy
+    def remove_functions(snapshot_data):
+        snapshot_data_copy = copy.deepcopy(snapshot_data)
+        for dom_key, dom_values in snapshot_data.items():
+            for key, value in dom_values.items():
+                if hasattr(value, '__call__'):
+                    del snapshot_data_copy[dom_key][key]
+        return snapshot_data_copy
+
     make_nagios_directory(snapshot_dir)
 
     snapshot_name = data.get("name") or "wato-snapshot-%s.tar" %  \
@@ -6329,7 +7006,7 @@ def create_snapshot(data = {}):
     snapshot_data["created_by"]    = data.get("created_by", config.user_id)
     snapshot_data["type"]          = data.get("type", "automatic")
     snapshot_data["snapshot_name"] = snapshot_name
-    snapshot_data["domains"]       = data.get("domains", get_backup_domains(["default"]))
+    snapshot_data["domains"]       = remove_functions(data.get("domains", get_backup_domains(["default"])))
     snapshot_data["wait"]          = data.get("wait", False)
 
     check_mk_local_automation("create-snapshot", [], snapshot_data)
@@ -7354,7 +8031,15 @@ def load_notification_rules():
     try:
         vars = { "notification_rules" : [] }
         execfile(filename, vars, vars)
-        return vars["notification_rules"]
+        notification_rules = vars["notification_rules"]
+        # Convert to new plugin configuration format
+        for rule in notification_rules:
+            if "notify_method" in rule:
+                method = rule["notify_method"]
+                plugin = rule["notify_plugin"]
+                del rule["notify_method"]
+                rule["notify_plugin"] = ( plugin, method )
+        return notification_rules
     except:
         if config.debug:
             raise MKGeneralException(_("Cannot read configuration file %s: %s" %
@@ -7390,7 +8075,14 @@ def vs_notification_scripts():
     return DropdownChoice(
        title = _("Notification Script"),
        choices = notification_script_choices,
-       default_value = "mail",
+       default_value = "mail"
+    )
+
+def vs_notification_methods():
+    return CascadingDropdown(
+        title = _("Notification Method"),
+        choices = notification_script_choices_with_parameters,
+        default_value = ( "mail", {} )
     )
 
 def vs_notification_rule(userid = None):
@@ -7672,27 +8364,27 @@ def vs_notification_rule(userid = None):
         [
             # Notification
             ( "notify_plugin",
-              vs_notification_scripts(),
+              vs_notification_methods(),
             ),
 
-            ( "notify_method",
-              Alternative(
-                  title = _("Parameters / Cancelling"),
-                  style = "dropdown",
-                  elements = [
-                      ListOfStrings(
-                          title = _("Call the script with the following parameters"),
-                          valuespec = TextUnicode(size = 24),
-                          orientation = "horizontal",
-                      ),
-                      FixedValue(
-                          value = None,
-                          title = _("Cancel all previous notifications with this method"),
-                          totext = "",
-                      ),
-                  ]
-              )
-            ),
+            # ( "notify_method",
+            #   Alternative(
+            #       title = _("Parameters / Cancelling"),
+            #       style = "dropdown",
+            #       elements = [
+            #           ListOfStrings(
+            #               title = _("Call the script with the following parameters"),
+            #               valuespec = TextUnicode(size = 24),
+            #               orientation = "horizontal",
+            #           ),
+            #           FixedValue(
+            #               value = None,
+            #               title = _("Cancel all previous notifications with this method"),
+            #               totext = "",
+            #           ),
+            #       ]
+            #   )
+            # ),
 
             ( "bulk",
               Dictionary(
@@ -7733,7 +8425,7 @@ def vs_notification_rule(userid = None):
         ],
         optional_keys = [ "match_folder", "match_hosttags", "match_hosts", "match_exclude_hosts",
                           "match_services", "match_exclude_services", "match_plugin_output",
-                          "match_timeperiod", "match_escalation", "match_escalation_throttle", 
+                          "match_timeperiod", "match_escalation", "match_escalation_throttle",
                           "match_sl", "match_host_event", "match_service_event",
                           "match_checktype", "bulk", "contact_users", "contact_groups", "contact_emails" ],
         headers = [
@@ -7753,13 +8445,13 @@ def vs_notification_rule(userid = None):
     )
 
 def validate_notification_rule(rule, varprefix):
-    if "bulk" in rule and rule["notify_method"] == None:
+    if "bulk" in rule and rule["notify_plugin"][1] == None:
         raise MKUserError(varprefix + "_p_bulk_USE",
              _("It does not make sense to add a bulk configuration for cancelling rules."))
 
     if "bulk" in rule:
         if rule["notify_plugin"]:
-            info = load_notification_scripts()[rule["notify_plugin"]]
+            info = load_notification_scripts()[rule["notify_plugin"][0]]
             if not info["bulk"]:
                 raise MKUserError(varprefix + "_p_notify_plugin",
                       _("The notification script %s does not allow bulking.") % info["title"])
@@ -7851,13 +8543,16 @@ def render_notification_rules(rules, userid="", show_title=False, show_buttons=T
             else:
                 html.empty_icon_button()
 
+            notify_method = rule["notify_plugin"]
+            notify_plugin = notify_method[0]
+
             table.cell(_("Type"), css="narrow")
-            if rule["notify_method"] == None:
+            if notify_method[1] == None:
                 html.icon(_("Cancel notifications for this plugin type"), "notify_cancel")
             else:
                 html.icon(_("Create a notification"), "notify_create")
 
-            table.cell(_("Plugin"), rule["notify_plugin"] or _("Plain Email"), css="narrow")
+            table.cell(_("Plugin"), notify_plugin or _("Plain Email"), css="narrow nowrap")
 
             table.cell(_("Bulk"), css="narrow")
             if "bulk" in rule:
@@ -7987,12 +8682,14 @@ def mode_notifications(phase):
              "<br><br>"
              "You can change this setting <a href=\"%s\">here</a>.") % url)
 
-    elif not current_settings.get("notification_fallback_email"):
-        url = 'wato.py?mode=edit_configvar&varname=notification_fallback_email'
-        html.show_warning(
-          _("<b>Warning</b><br><br>You haven't configured a fallback email address "
-            "in case of a problem in your notification rules. Please configure "
-            "one <a href=\"%s\">here</a>.") % url)
+    # Do not warn for missing fallback email address anymore. It might be a
+    # useful feature to not have one - after all.
+    ## elif not current_settings.get("notification_fallback_email"):
+    ##     url = 'wato.py?mode=edit_configvar&varname=notification_fallback_email'
+    ##     html.show_warning(
+    ##       _("<b>Warning</b><br><br>You haven't configured a fallback email address "
+    ##         "in case of a problem in your notification rules. Please configure "
+    ##         "one <a href=\"%s\">here</a>.") % url)
 
     if show_bulks:
         if not render_bulks(only_ripe = False): # Warn if there are unsent bulk notificatios
@@ -9222,6 +9919,12 @@ def mode_edit_site(phase):
         if not new and "secret" in old_site:
             new_site["secret"] = old_site["secret"]
 
+        # Do not forget to add those settings (e.g. "globals") that
+        # are not edited with this dialog
+        if not new:
+            for key in old_site.keys():
+                if key not in new_site:
+                    new_site[key] = old_site[key]
 
         save_sites(sites)
 
@@ -10279,11 +10982,37 @@ def notification_script_choices():
     scripts = load_notification_scripts()
 
     choices = [ (name, info["title"]) for (name, info) in scripts.items() ]
-    choices.append((None, _("Plain Text Email (using configured templates)")))
+    choices.append((None, _("ASCII Email (legacy)")))
     choices.sort(cmp = lambda a,b: cmp(a[1], b[1]))
     # Make choices localizable
     choices = [ (k, _(v)) for k, v in choices ]
     return choices
+
+
+def notification_script_choices_with_parameters():
+    choices = []
+    for script_name, title in notification_script_choices():
+        if script_name in g_notification_parameters:
+            vs = g_notification_parameters[script_name]
+        else:
+            vs = ListOfStrings(
+                 title = _("Call with the following parameters:"),
+                 valuespec = TextUnicode(size = 24),
+                 orientation = "horizontal",
+            )
+        choices.append((script_name, title,
+            Alternative(
+                style = "dropdown",
+                elements = [
+                    vs,
+                    FixedValue(None, totext = _("previous notifications of this type are cancelled"),
+                               title = _("Cancel previous notifications")),
+                ]
+            )
+        ))
+    return choices
+
+
 
 def notification_script_title(name):
     return dict(notification_script_choices()).get(name, name)
@@ -10500,8 +11229,12 @@ def mode_users(phase):
 
         return None
 
-    visible_custom_attrs = [ (name, attr) for name, attr in userdb.get_user_attributes()
-                                                    if attr.get('show_in_table', False) ]
+    visible_custom_attrs = [
+        (name, attr)
+        for name, attr
+        in userdb.get_user_attributes()
+        if attr.get('show_in_table', False)
+    ]
 
     entries = users.items()
     entries.sort(cmp = lambda a, b: cmp(a[1].get("alias", a[0]).lower(), b[1].get("alias", b[0]).lower()))
@@ -11469,6 +12202,7 @@ def group_hosttags_by_topic(hosttags):
         tags.setdefault(topic, [])
         tags[topic].append((entry[0], title) + entry[2:])
     return sorted(tags.items(), key = lambda x: x[0])
+
 
 def mode_hosttags(phase):
     if phase == "title":
@@ -13880,6 +14614,7 @@ def register_rule(group, varname, valuespec = None, title = None,
                   match = "first", optional = False, factory_default = NO_FACTORY_DEFAULT):
     if not itemname and itemtype == "service":
         itemname = _("Service")
+
     ruleset = {
         "group"           : group,
         "varname"         : varname,
@@ -13970,6 +14705,32 @@ def register_check_parameters(subgroup, checkgroup, title, valuespec, itemspec, 
         ),
         itemspec = itemspec,
         match = "all")
+
+# Registers notification parameters for a certain notification script,
+# e.g. "mail" or "sms". This will create:
+# - A WATO host rule
+# - A parametrization of the not-script also in the RBN module
+# Notification parameters are always expected to be of type Dictionary.
+# The match type will be set to "dict".
+g_notification_parameters = {}
+def register_notification_parameters(scriptname, valuespec):
+
+    script_title = notification_script_title(scriptname)
+    title = _("Parameters for %s") % script_title
+    valuespec._title = _("Call with the following parameters:")
+
+    register_rule(
+        "monconf/" + _("Notifications"),
+        "notification_parameters:" + scriptname,
+        valuespec,
+        title,
+        itemtype = None,
+        match = "dict"
+    )
+
+    g_notification_parameters[scriptname] = valuespec
+
+
 
 
 # The following function looks like a value spec and in fact
@@ -14450,10 +15211,11 @@ def page_user_profile():
         if config.may('general.edit_user_attributes'):
             for name, attr in userdb.get_user_attributes():
                 if attr['user_editable']:
-                    vs = attr['valuespec']
-                    forms.section(vs.title())
-                    vs.render_input("ua_" + name, user.get(name, vs.default_value()))
-                    html.help(vs.help())
+                    if not attr.get("permission") or config.may(attr["permission"]):
+                        vs = attr['valuespec']
+                        forms.section(vs.title())
+                        vs.render_input("ua_" + name, user.get(name, vs.default_value()))
+                        html.help(vs.help())
 
     # Save button
     forms.end()
@@ -14960,7 +15722,8 @@ def bi_called_rule(node):
             return subnode[1][0], info
     elif node[0] == "foreach_service":
         subnode = node[1][-1]
-        return subnode[1][0], _("Called for each service...")
+        if subnode[0] == 'call':
+            return subnode[1][0], _("Called for each service...")
 
 def count_bi_rule_references(aggregations, aggregation_rules, ruleid):
     aggr_refs = 0
@@ -15107,6 +15870,38 @@ def save_bi_rules(aggregations, aggregation_rules):
             out.write("aggregations.append(\n")
         out.write(replace_constants(pprint.pformat(convert_aggregation_to_bi(aggregation))))
         out.write(")\n")
+
+def rename_host_in_bi(oldname, newname):
+    renamed = 0
+    aggregations, rules = load_bi_rules()
+    for aggregation in aggregations:
+        renamed += rename_host_in_bi_aggregation(aggregation, oldname, newname)
+    for rule in rules.values():
+        renamed += rename_host_in_bi_rule(rule, oldname, newname)
+    if renamed:
+        save_bi_rules(aggregations, rules)
+    return renamed
+
+def rename_host_in_bi_aggregation(aggregation, oldname, newname):
+    node = aggregation["node"]
+    if node[0] == 'call':
+        if rename_host_in_list(aggregation["node"][1][1], oldname, newname):
+            return 1
+    return 0
+
+def rename_host_in_bi_rule(rule, oldname, newname):
+    renamed = 0
+    nodes = rule["nodes"]
+    for nr, node in enumerate(nodes):
+        if node[0] in [ "host", "service", "remaining" ]:
+            if node[1][0] == oldname:
+                nodes[nr] = (node[0], ( newname, ) + node[1][1:])
+            renamed = 1
+        elif node[0] == "call":
+            if rename_host_in_list(node[1][1], oldname, newname):
+                renamed = 1
+    return renamed
+
 
 bi_aggregation_functions = {}
 
@@ -15499,7 +16294,7 @@ def mode_bi_edit_rule(phase):
         if new:
             return _("BI - Create New Rule")
         else:
-            return _("BI - Edit Rule") + " " + ruleid
+            return _("BI - Edit Rule") + " " + html.attrencode(ruleid)
 
 
     elif phase == "buttons":
@@ -16297,7 +17092,7 @@ def make_link_to(vars, folder):
     return html.makeuri_contextless(vars)
 
 def make_action_link(vars):
-    return make_link(vars + [("_transid", html.fresh_transid())])
+    return make_link(vars + [("_transid", html.get_transid())])
 
 
 # Show confirmation dialog, send HTML-header if dialog is shown.
@@ -16445,6 +17240,8 @@ modes = {
    "editfolder"         : (["hosts" ], lambda phase: mode_editfolder(phase, False)),
    "newhost"            : (["hosts", "manage_hosts"], lambda phase: mode_edithost(phase, True, False)),
    "newcluster"         : (["hosts", "manage_hosts"], lambda phase: mode_edithost(phase, True, True)),
+   "rename_host"        : (["hosts", "manage_hosts"], lambda phase: mode_rename_host(phase)),
+   "bulk_import"        : (["hosts", "manage_hosts"], lambda phase: mode_bulk_import(phase)),
    "edithost"           : (["hosts"], lambda phase: mode_edithost(phase, False, None)),
    "parentscan"         : (["hosts"], mode_parentscan),
    "firstinventory"     : (["hosts", "services"], lambda phase: mode_inventory(phase, True)),
@@ -16505,16 +17302,16 @@ modes = {
 
 loaded_with_language = False
 def load_plugins():
-    global extra_buttons
     global loaded_with_language
     if loaded_with_language == current_language:
         return
 
     # Reset global vars
-    global extra_buttons, configured_host_tags, host_attributes
+    global extra_buttons, configured_host_tags, host_attributes, modules
     extra_buttons = []
     configured_host_tags = None
     host_attributes = []
+    modules = []
 
     load_notification_table()
 
@@ -16658,6 +17455,12 @@ def load_plugins():
            "and disabled by default. It allows you to create a number of random "
            "hosts and thus simulate larger environments."),
          [ ])
+
+    config.declare_permission("wato.update_dns_cache",
+         _("Update DNS Cache"),
+         _("Updating the DNS cache is neccessary in order to reflect IP address "
+           "changes in hosts that are configured without an explicit address."),
+         [ "admin", "user" ])
 
     config.declare_permission("wato.services",
          _("Manage services"),

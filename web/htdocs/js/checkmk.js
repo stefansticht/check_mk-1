@@ -106,6 +106,28 @@ if (!document.getElementsByClassName) {
   }
 }
 
+// Again, some IE 7 fun: The IE7 mixes up name and id attributes of objects.
+// When using getElementById() where we really only want to match objects by
+// their id, the clever IE7 also searches objects by their names, wow. crap.
+if (navigator.appVersion.indexOf("MSIE 7.") != -1)
+{
+    document._getElementById = document.getElementById;
+    document.getElementById = function(id) {
+        var e = document._getElementById(id);
+        if (e) {
+            if (e.attributes['id'].value == id)
+                return e;
+            else {
+                for (var i = 1; i < document.all[id].length; i++) {
+                    if(document.all[id][i].attributes['id'].value == id)
+                        return document.all[id][i];
+                }
+            }
+        }
+        return null;
+    };
+}
+
 function getTarget(event) {
   return event.target ? event.target : event.srcElement;
 }
@@ -216,6 +238,7 @@ function post_url(url, params) {
     }
     AJAX.send(params);
 }
+
 
 function bulkUpdateContents(ids, codes) {
     var codes = eval(codes);
@@ -1640,8 +1663,10 @@ function valuespec_cascading_change(oSelect, varprefix, count) {
 }
 
 function valuespec_textarea_resize(oArea) {
-    oArea.style.height = (oArea.scrollHeight - (/Chrome/i.test(navigator.userAgent) ? 6 : 0)) + "px";
+    oArea.style.height = 'auto';
+    oArea.style.height = oArea.scrollHeight + "px";
 }
+
 
 function valuespec_listof_add(varprefix, magic) {
   var oCountInput = document.getElementById(varprefix + "_count");
@@ -1787,7 +1812,7 @@ function vs_passwordspec_randomize(img) {
     oInput.value = password;
 }
 
-function vs_duallist_switch(field, varprefix) {
+function vs_duallist_switch(field, varprefix, keeporder) {
     if (field.id != varprefix + '_selected') {
         // The other field is the one without "_unselected" suffix
         var other_id = varprefix + '_selected';
@@ -1810,12 +1835,19 @@ function vs_duallist_switch(field, varprefix) {
     var selected = field.options[field.selectedIndex];
     field.removeChild(selected);
 
-    // Determine the correct child to insert
-    var sibling = other_field.firstChild;
-    while (sibling != null) {
-        if (sibling.nodeType == 1 && sibling.label.toLowerCase() > selected.label.toLowerCase())
-            break;
-        sibling = sibling.nextSibling
+    // Determine the correct child to insert. If keeporder is being set,
+    // then new elements will aways be appended. That way the user can
+    // create an order of his choice. This is being used if DualListChoice
+    // has the option custom_order = True
+    var sibling = false;
+
+    if (!keeporder) {
+        sibling = other_field.firstChild;
+        while (sibling != null) {
+            if (sibling.nodeType == 1 && sibling.label.toLowerCase() > selected.label.toLowerCase())
+                break;
+            sibling = sibling.nextSibling
+        }
     }
 
     if (sibling)

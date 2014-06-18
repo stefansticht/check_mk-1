@@ -9,11 +9,13 @@ components = [
    ( "ec",            "Event Console" ),
    ( "livestatus",    "Livestatus" ),
    ( "liveproxy",     "Livestatus-Proxy" ),
+   ( "inv",           "HW/SW-Inventory" ),
 ]
 
 classes = [
   ( "feature",      "New Feature",          "" ),
   ( "fix",          "Bug Fix",              "FIX" ),
+  ( "security",     "Security Fix",         "SEC" ),
   ( "incomp",       "Incompatible Change",  "" ),
 ]
 

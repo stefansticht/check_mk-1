@@ -35,6 +35,8 @@
 #include "LogCache.h"
 #include "Query.h"
 
+#define CLASSMASK_STATEHIST 0xC6
+
 class HostServiceState;
 
 class TableStateHistory : public Table
@@ -54,6 +56,9 @@ class TableStateHistory : public Table
     logfile_entries_t::iterator   _it_entries;
     LogEntry                     *_current_entry;
 
+protected:
+    bool     _abort_query;
+
 public:
     TableStateHistory();
     const char *name() { return "statehist"; }
@@ -63,6 +68,7 @@ public:
     void answerQuery(Query *query);
     Column *column(const char *colname); // override in order to handle current_
     int updateHostServiceState(Query *query, const LogEntry *entry, HostServiceState *state, const bool only_update);
+    static void addColumns(Table *);
 
 private:
     LogEntry* getPreviousLogentry();

@@ -47,7 +47,7 @@ def try_detect_servers():
         to_replace = re.compile('^.*/')
         proc = to_replace.sub('', proc)
 
-        procs = [ 'apache2', 'httpd', 'httpd2-prefork', 'httpd2-worker', 'httpd.worker' ]
+        procs = [ 'apache2', 'httpd', 'httpd2-prefork', 'httpd2-worker', 'httpd.worker', 'fcgi-pm' ]
         # the pid/proc field length is limited to 19 chars. Thus in case of
         # long PIDs, the process names are stripped of by that length.
         # Workaround this problem here
@@ -103,7 +103,8 @@ for server in servers:
         url = '%s://%s:%s/%s?auto' % (proto, address, port, page)
         # Try to fetch the status page for each server
         try:
-            fd = urllib2.urlopen(url)
+            request = urllib2.Request(url, headers={"Accept" : "text/plain"})
+            fd = urllib2.urlopen(request)
         except urllib2.URLError, e:
             if 'SSL23_GET_SERVER_HELLO:unknown protocol' in str(e):
                 # HACK: workaround misconfigurations where port 443 is used for

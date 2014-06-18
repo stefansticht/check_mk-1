@@ -40,7 +40,7 @@ register_rule(group,
                  "via SSH. The command line may contain the placeholders <tt>&lt;IP&gt;</tt> and "
                  "<tt>&lt;HOST&gt;</tt>."),
         label = _("Command line to execute"),
-	empty_text = _("Access Check_MK Agent via TCP"),
+        empty_text = _("Access Check_MK Agent via TCP"),
         size = 80,
         attrencode = True))
 
@@ -228,6 +228,73 @@ register_rule(group,
     match = 'first')
 
 register_rule(group,
+    "special_agents:ibmsvc",
+     Dictionary(
+        title = _("Check state of IBM SVC / V7000 storage systems"),
+        help = _("This rule selects the ibmsvc agent instead of the normal Check_MK Agent "
+                 "and allows monitoring of IBM SVC / V7000 storage systems by calling "
+                 "ls* commands there over SSH. "
+                 "Make sure you have SSH key authentication enabled for your monitoring user. "
+                 "That means: The user your monitoring is running under on the monitoring "
+                 "system must be able to ssh to the storage system as the user you gave below "
+                 "without password."
+                 ),
+        elements = [
+            ( "user",
+              TextAscii(
+                  title = _("IBM SVC / V7000 user name"),
+                  allow_empty = True,
+                  help = _("User name on the storage system. Read only permissions are sufficient."),
+              )
+            ),
+            ( "accept-any-hostkey",
+               Checkbox(
+                   title = _("Accept any SSH Host Key"),
+                   label = _("Accept any SSH Host Key"),
+                   default_value = False,
+                   true_label = _("True"),
+                   false_label = _("False"),
+                   help = _("Accepts any SSH Host Key presented by the storage device. "
+                            "Please note: This might be a security issue because man-in-the-middle "
+                            "attacks are not recognized! Better solution would be to add the "
+                            "SSH Host Key of the monitored storage devices to the .ssh/known_hosts "
+                            "file for the user your monitoring is running under (on OMD: the site user)"
+                   ))
+            ),
+            ( "infos",
+              Transform(
+                  ListChoice(
+                     choices = [
+                         ( "lshost",          _("Hosts Connected") ),
+                         ( "lslicense",       _("Licensing Status") ),
+                         ( "lsmdisk",         _("MDisks") ),
+                         ( "lsmdiskgrp",      _("MDisksGrps") ),
+                         ( "lsnode",          _("IO Groups") ),
+                         ( "lsnodestats",     _("Node Stats") ),
+                         ( "lssystem",        _("System Info") ),
+                         ( "lssystemstats",   _("System Stats") ),
+                         ( "lseventlog",      _("Event Log") ),
+                         ( "lsportfc",        _("FC Ports") ),
+                         ( "lsenclosure",     _("Enclosures") ),
+                         ( "lsenclosurestats", _("Enclosure Stats") ),
+                         ( "lsarray",         _("RAID Arrays") ),
+                     ],
+                     default_value = [ "lshost", "lslicense", "lsmdisk", "lsmdiskgrp", "lsnode",
+                                       "lsnodestats", "lssystem", "lssystemstats", "lsportfc",
+                                       "lsenclosure", "lsenclosurestats", "lsarray" ],
+                     allow_empty = False,
+                   ),
+                   title = _("Retrieve information about..."),
+                )
+             ),
+        ],
+        optional_keys = [ ],
+    ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
+    match = 'first')
+
+
+register_rule(group,
     "special_agents:random",
      FixedValue(
         {},
@@ -262,3 +329,25 @@ register_rule(group,
     ),
     factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
     match = 'first')
+
+
+register_rulegroup("datasource_programs",
+    _("Datasource Programs"),
+    _("Specialized agents, e.g. check via SSH, ESX vSphere, SAP R/3"))
+
+group = "datasource_programs"
+
+
+register_rule(group,
+    "special_agents:innovaphone",
+    Tuple(
+        title = _("Innovaphone Gateways"),
+        help = _( "Please specify the user and password needed to access the xml interface"),
+        elements = [
+           TextAscii(title = _("Username")),
+           Password( title = _("Password")),
+        ]
+    ),
+    factory_default = FACTORY_DEFAULT_UNUSED,
+    match = "first")
+

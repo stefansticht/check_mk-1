@@ -66,6 +66,12 @@ ldap_attr_map = {
         # group attributes
         'member':     'uniquemember',
     },
+    '389directoryserver': {
+        'user_id':    'uid',
+        'pw_changed': 'krbPasswordExpiration',
+        # group attributes
+        'member':     'uniquemember',
+    },
 }
 
 # LDAP attributes are case insensitive, we only use lower case!
@@ -77,6 +83,10 @@ ldap_filter_map = {
         'groups': '(objectclass=group)',
     },
     'openldap': {
+        'users': '(objectclass=person)',
+        'groups': '(objectclass=groupOfUniqueNames)',
+    },
+    '389directoryserver': {
         'users': '(objectclass=person)',
         'groups': '(objectclass=groupOfUniqueNames)',
     },
@@ -1004,7 +1014,8 @@ def ldap_sync(add_to_changelog, only_username):
     for user_id, user in users.items():
         if user.get('connector') == 'ldap' and user_id not in ldap_users:
             del users[user_id] # remove the user
-            wato.log_pending(wato.SYNCRESTART, None, "edit-users", _("LDAP Connector: Removed user %s" % user_id))
+            wato.log_pending(wato.SYNCRESTART, None, "edit-users",
+                _("LDAP Connector: Removed user %s" % user_id), user_id = '')
 
     for user_id, ldap_user in ldap_users.items():
         if user_id in users:
@@ -1037,7 +1048,7 @@ def ldap_sync(add_to_changelog, only_username):
 
         if mode_create:
             wato.log_pending(wato.SYNCRESTART, None, "edit-users",
-                             _("LDAP Connector: Created user %s" % user_id))
+                             _("LDAP Connector: Created user %s" % user_id), user_id = '')
         else:
             details = []
             if added:
@@ -1056,7 +1067,8 @@ def ldap_sync(add_to_changelog, only_username):
 
             if details:
                 wato.log_pending(wato.SYNCRESTART, None, "edit-users",
-                     _("LDAP Connector: Modified user %s (%s)") % (user_id, ', '.join(details)))
+                     _("LDAP Connector: Modified user %s (%s)") % (user_id, ', '.join(details)),
+                     user_id = '')
 
     duration = time.time() - start_time
     ldap_log('SYNC FINISHED - Duration: %0.3f sec' % duration)

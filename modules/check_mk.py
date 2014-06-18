@@ -243,6 +243,7 @@ max_num_processes                  = 50
 # SNMP communities and encoding
 has_inline_snmp                    = False # is set to True by inline_snmp module, when available
 use_inline_snmp                    = True
+record_inline_snmp_stats           = False
 snmp_default_community             = 'public'
 snmp_communities                   = []
 snmp_timing                        = []
@@ -344,6 +345,11 @@ check_mk_agent_target_versions       = [] # Rule for defining expected version f
 check_periods                        = []
 snmp_check_interval                  = []
 inv_exports                          = {} # Rulesets for inventory export hooks
+notification_parameters              = {} # Rulesets for parameters of notification scripts
+
+# Rulesets for agent bakery
+agent_config                         = {}
+bake_agents_on_restart               = True
 
 
 # global variables used to cache temporary values (not needed in check_mk_base)
@@ -369,7 +375,7 @@ special_agent_info                 = {}
 # Now include the other modules. They contain everything that is needed
 # at check time (and many of what is also needed at administration time).
 try:
-    modules =  [ 'check_mk_base', 'snmp', 'notify', 'prediction', 'cmc', 'inline_snmp' ]
+    modules = [ 'check_mk_base', 'snmp', 'notify', 'prediction', 'cmc', 'inline_snmp', 'agent_bakery' ]
     for module in modules:
         filename = modules_dir + "/" + module + ".py"
         if os.path.exists(filename):
@@ -645,12 +651,18 @@ def check_interval_of(hostname, checkname):
 def agent_target_version(hostname):
     agent_target_versions = host_extra_conf(hostname, check_mk_agent_target_versions)
     if len(agent_target_versions) > 0:
-        if agent_target_versions[0] == "ignore":
+        spec = agent_target_versions[0]
+        if spec == "ignore":
             return None
-        elif agent_target_versions[0] == "site":
+        elif spec == "site":
             return check_mk_version
+        elif type(spec) == str:
+            # Compatibility to old value specification format (a single version string)
+            return spec
+        elif spec[0] == 'specific':
+            return spec[1]
         else:
-            return agent_target_versions[0]
+            return spec # return the whole spec in case of an "at least version" config
 
 regex_cache = {}
 def regex(r):
@@ -1202,6 +1214,10 @@ def get_datasource_program(hostname, ipaddress):
     else:
         return programs[0].replace("<IP>", ipaddress).replace("<HOST>", hostname)
 
+# Variables needed during the renaming of hosts (see automation.py)
+ignore_ip_lookup_failures = False
+failed_ip_lookups = []
+
 # Determine the IP address of a host
 def lookup_ipaddress(hostname):
     # Quick hack, where all IP addresses are faked (--fake-dns)
@@ -1277,21 +1293,31 @@ def do_update_dns_cache():
     # Temporarily disable *use* of cache, we want to force an update
     global use_dns_cache
     use_dns_cache = False
+    updated = 0
+    failed = []
 
     if opt_verbose:
         print "Updating DNS cache..."
     for hostname in all_active_hosts() + all_active_clusters():
+        if opt_verbose:
+            sys.stdout.write("%s..." % hostname)
+            sys.stdout.flush()
         # Use intelligent logic. This prevents DNS lookups for hosts
         # with statically configured addresses, etc.
         try:
-            lookup_ipaddress(hostname)
-        except Exception, e:
+            ip = lookup_ipaddress(hostname)
             if opt_verbose:
-                print "Failed to lookup IP address of %s: %s" % (hostname, e)
+                sys.stdout.write("%s\n" % ip)
+            updated += 1
+        except Exception, e:
+            failed.append(hostname)
+            if opt_verbose:
+                sys.stdout.write("lookup failed: %s\n" % e)
             if opt_debug:
                 raise
             continue
 
+    return updated, failed
 
 def agent_port_of(hostname):
     ports = host_extra_conf(hostname, agent_ports)
@@ -1977,7 +2003,10 @@ def create_nagios_hostdefs(outfile, hostname):
         ip = lookup_ipaddress(hostname)
     except:
         if not is_clust:
-            raise MKGeneralException("Cannot determine ip address of %s. Please add to ipaddresses." % hostname)
+            if ignore_ip_lookup_failures:
+                failed_ip_lookups.append(hostname)
+            else:
+                raise MKGeneralException("Cannot determine ip address of %s. Please add to ipaddresses." % hostname)
         ip = None
 
     #   _
@@ -3282,7 +3311,7 @@ no_inventory_possible = None
                  'piggyback_max_cachefile_age',
                  'simulation_mode', 'agent_simulator', 'aggregate_check_mk', 'debug_log',
                  'check_mk_perfdata_with_times', 'livestatus_unix_socket',
-                 'has_inline_snmp', 'use_inline_snmp',
+                 'use_inline_snmp', 'record_inline_snmp_stats',
                  ]:
         output.write("%s = %r\n" % (var, globals()[var]))
 
@@ -3323,6 +3352,10 @@ no_inventory_possible = None
 
         if has_inline_snmp and use_inline_snmp:
             output.write(stripped_python_file(modules_dir + "/inline_snmp.py"))
+        else:
+            output.write("has_inline_snmp = False\n")
+    else:
+        output.write("has_inline_snmp = False\n")
 
     if agent_simulator:
         output.write(stripped_python_file(modules_dir + "/agent_simulator.py"))
@@ -3440,7 +3473,7 @@ no_inventory_possible = None
     output.write("def get_piggyback_translation(hostname):\n    return %r\n\n" % get_piggyback_translation(hostname))
 
     # Expected agent version
-    output.write("def agent_target_version(hostname):\n    return %r\n\n" % agent_target_version(hostname))
+    output.write("def agent_target_version(hostname):\n    return %r\n\n" % (agent_target_version(hostname),))
 
     # SNMP character encoding
     output.write("def get_snmp_character_encoding(hostname):\n    return %r\n\n"
@@ -4367,6 +4400,9 @@ def do_snmptranslate(walk):
         sys.stdout.write(format_string % (translation, line))
 
 def do_snmpwalk(hostnames):
+    if opt_oids and opt_extra_oids:
+        raise MKGeneralException("You cannot specify --oid and --extraoid at the same time.")
+
     if len(hostnames) == 0:
         sys.stderr.write("Please specify host names to walk on.\n")
         return
@@ -4386,10 +4422,14 @@ def do_snmpwalk_on(hostname, filename):
     ip = lookup_ipaddress(hostname)
 
     out = file(filename, "w")
-    for oid in [
+    oids_to_walk = opt_oids
+    if not opt_oids:
+        oids_to_walk = [
             ".1.3.6.1.2.1", # SNMPv2-SMI::mib-2
             ".1.3.6.1.4.1"  # SNMPv2-SMI::enterprises
-          ]:
+        ] + opt_extra_oids
+
+    for oid in oids_to_walk:
         if opt_verbose:
             sys.stdout.write("Walk on \"%s\"..." % oid)
             sys.stdout.flush()
@@ -4673,7 +4713,7 @@ def usage():
  cmk --restore BACKUPFILE.tar.gz      restore configuration and data
  cmk --flush [HOST1 HOST2...]         flush all data of some or all hosts
  cmk --donate                         Email data of configured hosts to MK
- cmk --snmpwalk HOST1 HOST2 ...       Do snmpwalk on host
+ cmk --snmpwalk HOST1 HOST2 ...       Do snmpwalk on one or more hosts
  cmk --snmptranslate HOST             Do snmptranslate on walk
  cmk --snmpget OID HOST1 HOST2 ...    Fetch single OIDs and output them
  cmk --scan-parents [HOST1 HOST2...]  autoscan parents, create conf.d/parents.mk
@@ -4683,6 +4723,7 @@ def usage():
  cmk --create-rrd [--keepalive|SPEC]  create round robin database
  cmk -i, --inventory [HOST1 HOST2...] Do a HW/SW-Inventory of some ar all hosts
  cmk --inventory-as-check HOST        Do HW/SW-Inventory, behave like check plugin
+ cmk -A, --bake-agents [H1 H2 ..]     Bake agents for hosts (no in all versions)
  cmk -V, --version                    print version
  cmk -h, --help                       print this help
 
@@ -4705,6 +4746,10 @@ OPTIONS:
   --keepalive    used by Check_MK Mirco Core: run check and --notify in continous
                  mode. Read data from stdin and von from cmd line and environment
   --cmc-file=X   relative filename for CMC config file (used by -B/-U)
+  --extraoid A   Do --snmpwalk also on this OID, in addition to mib-2 and enterprises.
+                 You can specify this option multiple times.
+  --oid A        Do --snmpwalk on this OID instead of mib-2 and enterprises.
+                 You can specify this option multiple times.
 
 NOTES:
   -I can be restricted to certain check types. Write '--checks df -I' if you
@@ -4773,7 +4818,11 @@ NOTES:
 
   --snmpwalk does a complete snmpwalk for the specified hosts both
   on the standard MIB and the enterprises MIB and stores the
-  result in the directory %s.
+  result in the directory %s. Use the option --oid one or several
+  times in order to specify alternative OIDs to walk. You need to
+  specify numeric OIDs. If you want to keep the two standard OIDS
+  .1.3.6.1.2.1  and .1.3.6.1.4.1 then use --extraoid for just adding
+  additional OIDs to walk.
 
   --snmptranslate does not contact the host again, but reuses the hosts
   walk from the directory %s.%s
@@ -4782,16 +4831,16 @@ NOTES:
   hosts's parents. It creates the file conf.d/parents.mk which
   defines gateway hosts and parent declarations.
 
-  The core can call check_mk without options and the hostname and its IP
-  address as arguments. Much faster is using precompiled host checks,
-  though.
+  -A, --bake-agents creates RPM/DEB/MSI packages with host-specific
+  monitoring agents. Note: this feature is only contained in the
+  subscription version of Check_MK.
 
 
 """ % (check_mk_configfile,
        precompiled_hostchecks_dir,
        snmpwalks_dir,
        snmpwalks_dir,
-       local_mibs_dir and ("\n  You can add further mibs to %s" % local_mibs_dir) or "",
+       local_mibs_dir and ("\n  You can add further MIBs to %s" % local_mibs_dir) or "",
        )
 
 
@@ -4804,6 +4853,13 @@ def do_create_config():
         out = file(nagios_objects_file, "w")
         create_nagios_config(out)
     sys.stdout.write(tty_ok + "\n")
+
+    if bake_agents_on_restart and 'do_bake_agents' in globals():
+        sys.stdout.write("Baking agents...")
+        sys.stdout.flush()
+        do_bake_agents()
+        sys.stdout.write(tty_ok + "\n")
+
 
 def do_output_nagios_conf(args):
     if len(args) == 0:
@@ -4852,23 +4908,35 @@ def do_check_nagiosconfig():
         return True
 
 
-def do_restart_core(only_reload):
-    action = only_reload and "load" or "start"
-    sys.stdout.write("Re%sing monitoring core..." % action)
-    sys.stdout.flush()
+# Action can be restart, reload, start or stop
+def do_core_action(action, quiet=False):
+    if not quiet:
+        sys.stdout.write("%sing monitoring core..." % action.title())
+        sys.stdout.flush()
     if monitoring_core == "nagios":
         os.putenv("CORE_NOVERIFY", "yes")
-        command = nagios_startscript + " re%s 2>&1" % action
+        command = nagios_startscript + " %s 2>&1" % action
     else:
-        command = "omd re%s cmc 2>&1" % action
+        command = "omd %s cmc 2>&1" % action
 
     process = os.popen(command, "r")
     output = process.read()
     if process.close():
-        sys.stdout.write("ERROR: %s\n" % output)
-        raise MKGeneralException("Cannot re%s the monitoring core: %s" % (action, output))
+        if not quiet:
+            sys.stdout.write("ERROR: %s\n" % output)
+        raise MKGeneralException("Cannot %s the monitoring core: %s" % (action, output))
     else:
-        sys.stdout.write(tty_ok + "\n")
+        if not quiet:
+            sys.stdout.write(tty_ok + "\n")
+
+def core_is_running():
+    if monitoring_core == "nagios":
+        command = nagios_startscript + " status >/dev/null 2>&1"
+    else:
+        command = "omd status cmc >/dev/null 2>&1"
+    code = os.system(command)
+    return not code
+
 
 def do_reload():
     do_restart(True)
@@ -4905,7 +4973,7 @@ def do_restart(only_reload = False):
                 os.remove(backup_path)
             if monitoring_core != "cmc":
                 do_precompile_hostchecks()
-            do_restart_core(only_reload)
+            do_core_action(only_reload and "reload" or "restart")
         else:
             sys.stderr.write("Nagios configuration is invalid. Rolling back.\n")
             if backup_path:
@@ -5329,7 +5397,10 @@ def copy_globals():
     global_saved = {}
     for varname, value in globals().items():
         # Some global caches are allowed to change.
-        if varname not in [ "g_service_description", "g_multihost_checks", "g_check_table_cache", "g_singlehost_checks", "total_check_outout" ] \
+        if varname not in [ "g_service_description", "g_multihost_checks",
+                            "g_check_table_cache", "g_singlehost_checks",
+                            "total_check_outout", "g_nodesof_cache",
+                            "g_initial_times" ] \
             and type(value).__name__ not in [ "function", "module", "SRE_Pattern" ]:
             global_saved[varname] = copy.copy(value)
     return global_saved
@@ -5421,6 +5492,8 @@ def do_check_keepalive():
                     sys.stderr.write("WARNING: new variable appeared: %s" % ", ".join(new_vars))
 
         except Exception, e:
+            signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
+            signal.alarm(0)
             if opt_debug:
                 raise
             total_check_output = "UNKNOWN - %s\n" % e
@@ -5804,10 +5877,11 @@ def output_profile():
 # Do option parsing and execute main function -
 # if check_mk is not called as module
 if __name__ == "__main__":
-    short_options = 'SHVLCURODMmd:Ic:nhvpXPNBil'
+    short_options = 'ASHVLCURODMmd:Ic:nhvpXPNBil'
     long_options = [ "help", "version", "verbose", "compile", "debug",
                      "list-checks", "list-hosts", "list-tag", "no-tcp", "cache",
-                     "flush", "package", "localize", "donate", "snmpwalk", "snmptranslate",
+                     "flush", "package", "localize", "donate", "snmpwalk", "oid=", "extraoid=",
+                     "snmptranslate", "bake-agents",
                      "usewalk", "scan-parents", "procs=", "automation=", "notify",
                      "snmpget=", "profile", "keepalive", "keepalive-fd=", "create-rrd",
                      "no-cache", "update", "restart", "reload", "dump", "fake-dns=",
@@ -5860,6 +5934,10 @@ if __name__ == "__main__":
             opt_keepalive_fd = int(a)
         elif o == '--usewalk':
             opt_use_snmp_walk = True
+        elif o == '--oid':
+            opt_oids.append(a)
+        elif o == '--extraoid':
+            opt_extra_oids.append(a)
         elif o == '--procs':
             max_num_processes = int(a)
         elif o == '--nowiki':
@@ -6006,6 +6084,16 @@ if __name__ == "__main__":
                 read_config_files(False, True)
                 execfile(modules_dir + "/rrd.py")
                 do_create_rrd(args)
+                done = True
+            elif o in [ '-A', '--bake-agents' ]:
+                if 'do_bake_agents' not in globals():
+                    sys.stderr.write("Agent baking is not implemented in your version of Check_MK. Sorry.\n")
+                    sys.exit(1)
+                if args:
+                    hostnames = parse_hostname_list(args, with_clusters = False)
+                else:
+                    hostnames = None
+                do_bake_agents(hostnames)
                 done = True
 
 

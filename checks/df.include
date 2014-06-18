@@ -203,7 +203,7 @@ def get_filesystem_levels(host, mountpoint, size_gb, params):
             crit_scaled *= -1
         else:
             label = 'levels at'
-        levels["levels_text"] = "(%s %.2f/%.2f%%)" % (label, warn_scaled, crit_scaled)
+        levels["levels_text"] = "(%s %.2f/%.2f %%)" % (label, warn_scaled, crit_scaled)
     else:
         if warn * mega < 0 and crit * mega < 0:
             label = 'levels at free space below'
@@ -215,7 +215,7 @@ def get_filesystem_levels(host, mountpoint, size_gb, params):
         crit_hr = get_bytes_human_readable(crit * mega)
         levels["levels_text"] = "(%s %s/%s)" % (label, warn_hr, crit_hr)
 
-    if params.get("inodes_levels"):
+    if "inodes_levels" in params:
         if type(levels["inodes_levels"]) == tuple:
             warn, crit = levels["inodes_levels"]
         else:
@@ -252,8 +252,8 @@ def df_check_filesystem_list(item, params, fslist_blocks, fslist_inodes = None):
         total_blocks_size   = 0
         total_blocks_avail  = 0
         total_inodes        = 0
-        total_inodse_avail  = 0
-        for idx, (mp, size_mb, avail_mb) in enumerate(fslist_block):
+        total_inodes_avail  = 0
+        for idx, (mp, size_mb, avail_mb) in enumerate(fslist_blocks):
             for pattern in patterns:
                 if fnmatch.fnmatch(mp, pattern):
                     count += 1
@@ -268,7 +268,7 @@ def df_check_filesystem_list(item, params, fslist_blocks, fslist_inodes = None):
         if count == 0:
             return (3, "No filesystem matching the patterns")
         else:
-            status, infotext, perfdata = df_check_filesystem_single(g_hostname, item, total_size, total_avail, params)
+            status, infotext, perfdata = df_check_filesystem_single(g_hostname, item, total_blocks_size, total_blocks_avail, total_inodes, total_inodes_avail, params)
             infotext += " (%d filesystems)" % count
             return status, infotext, perfdata
     else:
@@ -304,8 +304,13 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
     # TODO: In some future version use a fixed name as perf variable
     perf_var = mountpoint.replace(" ", "_")
     perfdata = [(perf_var, str(used_mb) + 'MB', warn_mb, crit_mb, 0, size_mb)]
-    infotext = "%.1f%% used (%.2f of %.1f GB), %s" % \
-                (used_perc, used_mb / 1024.0, size_gb, levels["levels_text"])
+
+    if size_gb < 10240:
+        infotext = "%.1f %% used (%.2f of %.2f GB), %s" % \
+                    (used_perc, used_mb / 1024.0, size_gb, levels["levels_text"])
+    else:
+        infotext = "%.1f %% used (%.2f of %.2f TB), %s" % \
+                    (used_perc, used_mb / 1024.0 / 1024.0, size_gb / 1024.0, levels["levels_text"])
 
     # Trends. The trends are computed in two steps. In the first step we
     # compute the delta to the last check, using a normal check_mk counter.
@@ -357,7 +362,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                 wa, cr = trend_mb
                 warn_perf, crit_perf = wa, cr
                 if trend >= wa:
-                    problems.append("growing too fast (levels at %s/%s per %.1fh)(!" %
+                    problems.append("growing too fast (levels at %s/%s per %.1f h)(!" %
                        ( get_bytes_human_readable(wa * MB), get_bytes_human_readable(cr * MB), range))
                     status = max(1, status)
                     if trend >= cr:
@@ -379,13 +384,46 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                 else:
                     warn_perf, crit_perf = wa, cr
                 if trend >= wa:
-                    problems.append("growing too fast (levels at %.3f%%/%.3f%% per %.1fh)(!" %
+                    problems.append("growing too fast (levels at %.3f %%/%.3f %% per %.1f h)(!" %
                        ( wa_perc, cr_perc, range))
                     status = max(1, status)
                     if trend >= cr:
                         status = 2
                         problems[-1] += "!"
                     problems[-1] += ")"
+
+
+            # compute time until filesystem is full (only for positive trend, of course)
+
+            # The start value of hours_left is negative. The pnp graph and the perfometer
+            # will interpret this as inifinite -> not growing
+            hours_left = -1
+            if trend > 0:
+                space_left = size_mb - used_mb
+                hours_left = space_left / trend * range
+                timeleft = levels.get("trend_timeleft")
+                def format_hours(hours):
+                    if hours > 4 * 7 * 24: # 4 weeks
+                        return "%0d weeks" % (hours/ (7 * 24))
+                    elif hours > 7 * 24:   # 1 week
+                        return "%0.1f weeks" % (hours/ (7 * 24))
+                    elif hours > 2 * 24:   # 2 days
+                        return "%0.1f days" % (hours/24)
+                    else:
+                        return "%d hours" % hours
+
+                if timeleft:
+                    wa, cr = timeleft
+                    if hours_left <= cr:
+                        status = 2
+                        problems.append("only %s until disk full(!!)" % format_hours(hours_left))
+                    elif hours_left <= wa:
+                        status = max(status, 1)
+                        problems.append("only %s until disk full(!)" % format_hours(hours_left))
+                    elif hours_left <= wa * 2 or levels.get("trend_showtimeleft"):
+                        problems.append("time left until disk full: %s" % format_hours(hours_left))
+                elif levels.get("trend_showtimeleft"):
+                    problems.append("time left until disk full: %s" % format_hours(hours_left))
 
             if levels.get("trend_perfdata"):
                 # New in 1.1.13i3: output trend not as MB / trend_range, but as
@@ -397,21 +435,8 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                                 crit_perf != None and (crit_perf / range_sec * H24) or None,
                                 0, size_mb / range))
 
-            # compute time until filesystem is full (only for positive trend, of course)
-            if trend > 0:
-                space_left = size_mb - used_mb
-                hours_left = space_left / trend * range
-                timeleft = levels.get("trend_timeleft")
-                if timeleft:
-                    wa, cr = timeleft
-                    if hours_left <= cr:
-                        status = 2
-                        problems.append("only %.1fh until disk full(!!)" % hours_left)
-                    elif hours_left <= wa:
-                        status = max(status, 1)
-                        problems.append("only %.1fh until disk full(!)" % hours_left)
-                    elif hours_left <= wa * 2:
-                        problems.append("time left: %.1fh" % hours_left)
+            if levels.get("trend_showtimeleft"):
+                perfdata.append(("trend_hoursleft", hours_left))
 
 
         except MKCounterWrapped:
@@ -436,6 +461,10 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
        elif used_mb >= warn_mb:
            status = max(1, status)
 
+    if problems:
+        infotext += " - %s" % ", ".join(problems)
+        problems = []
+
     # Check inode levels
     if inodes_total:
         inodes_avail_perc = 100.0 * inodes_avail / inodes_total
@@ -455,8 +484,10 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                 elif inodes_warn > inodes_avail_perc:
                     status = max(1, status)
                     problems.append("less than %.02f%% inodes available(!!)" % inodes_warn)
-        infotext += ", inodes available %dk/%0.2f%%" % (inodes_avail / 1000, inodes_avail_perc)
+        infotext += ", inodes available %dk/%0.2f %%" % (inodes_avail / 1000, inodes_avail_perc)
 
     if problems:
         infotext += " - %s" % ", ".join(problems)
+        problems = []
+
     return (status, infotext, perfdata)

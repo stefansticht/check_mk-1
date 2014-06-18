@@ -202,10 +202,45 @@ vs_mkeventd_actions = \
     )
 
 
-class RuleState(MonitoringState):
+class RuleState(CascadingDropdown):
     def __init__(self, **kwargs):
-        MonitoringState.__init__(self, **kwargs)
-        self._choices.append((-1, _("(set by syslog)")))
+        choices = [
+            ( 0, _("OK")),
+            ( 1, _("WARN")),
+            ( 2, _("CRIT")),
+            ( 3, _("UNKNOWN")),
+            (-1, _("(set by syslog)")),
+            ('text_pattern', _('(set by message text)'),
+                Dictionary(
+                    elements = [
+                        ('2', RegExpUnicode(
+                            title = _("CRIT Pattern"),
+                            help = _("When the given regular expression (infix search) matches "
+                                     "the events state is set to CRITICAL."),
+                            size = 64,
+                        )),
+                        ('1', RegExpUnicode(
+                            title = _("WARN Pattern"),
+                            help = _("When the given regular expression (infix search) matches "
+                                     "the events state is set to WARNING."),
+                            size = 64,
+                        )),
+                        ('0', RegExpUnicode(
+                            title = _("OK Pattern"),
+                            help = _("When the given regular expression (infix search) matches "
+                                     "the events state is set to OK."),
+                            size = 64,
+                        )),
+                    ],
+                    help = _('Individual patterns matching the text (which must have been matched by '
+                             'the generic "text to match pattern" before) which set the state of the '
+                             'generated event depending on the match.<br><br>'
+                             'First the CRITICAL pattern is tested, then WARNING and OK at last. '
+                             'When none of the patterns matches, the events state is set to UNKNOWN.'),
+                )
+            ),
+        ]
+        CascadingDropdown.__init__(self, choices = choices, **kwargs)
 
 vs_mkeventd_rule = Dictionary(
     title = _("Rule Properties"),
@@ -787,7 +822,7 @@ def save_mkeventd_rules(rules):
 
 def mode_mkeventd_rules(phase):
     if phase == "title":
-        return _("Rules for event corelation")
+        return _("Rules for event correlation")
 
     elif phase == "buttons":
         home_button()
@@ -966,8 +1001,15 @@ def mode_mkeventd_rules(phase):
             if rule.get("drop"):
                 table.cell(_("Priority"), _("DROP"), css="state statep")
             else:
-                txt = {0:_("OK"), 1:_("WARN"), 2:_("CRIT"), 3:_("UNKNOWN"), -1:_("(syslog)")}[rule["state"]]
-                table.cell(_("Priority"), txt,  css="state state%d" % rule["state"])
+                if type(rule['state']) == tuple:
+                    stateval = rule["state"][0]
+                else:
+                    stateval = rule["state"]
+                txt = { 0: _("OK"),   1:_("WARN"),
+                        2: _("CRIT"), 3:_("UNKNOWN"),
+                       -1: _("(syslog)"),
+                       'text_pattern':_("(set by message text)") }[stateval]
+                table.cell(_("Priority"), txt,  css="state state%s" % stateval)
 
             # Syslog priority
             if "match_priority" in rule:
@@ -1100,9 +1142,9 @@ def mode_mkeventd_edit_rule(phase):
 
         save_mkeventd_rules(rules)
         if new:
-            log_mkeventd("new-rule", _("Created new event corelation rule with id %s" % rule["id"]))
+            log_mkeventd("new-rule", _("Created new event correlation rule with id %s" % rule["id"]))
         else:
-            log_mkeventd("edit-rule", _("Modified event corelation rule %s" % rule["id"]))
+            log_mkeventd("edit-rule", _("Modified event correlation rule %s" % rule["id"]))
             # Reset hit counters of this rule
             mkeventd.query("COMMAND RESETCOUNTERS;" + rule["id"])
         return "mkeventd_rules"
@@ -1413,7 +1455,7 @@ if mkeventd_enabled:
     config.declare_permission("mkeventd.edit",
        _("Configuration of event rules"),
        _("This permission allows the creation, modification and "
-         "deletion of event corelation rules."),
+         "deletion of event correlation rules."),
          ["admin"])
 
     config.declare_permission("mkeventd.activate",
@@ -1431,7 +1473,7 @@ if mkeventd_enabled:
 
     modules.append(
       ( "mkeventd_rules",  _("Event Console"), "mkeventd", "mkeventd.edit",
-      _("Manage event classification and corelation rules for the "
+      _("Manage event classification and correlation rules for the "
         "event console")))
 
 
@@ -1644,6 +1686,19 @@ if mkeventd_enabled:
                  help = _("This option turns on logging the execution of rules. For each message received "
                           "the execution details of each rule are logged. This creates an immense "
                           "volume of logging and should never be used in productive operation."),
+                default_value = False),
+        domain = "mkeventd",
+    )
+
+    register_configvar(group,
+        "log_messages",
+        Checkbox(title = _("Syslog-like message logging"),
+                 label = _("Log all messages into syslog-like logfiles"),
+                 help = _("When this option is enabled, then <b>every</b> incoming message is being "
+                          "logged into the directory <tt>messages</tt> in the Event Consoles state "
+                          "directory. The logfile rotation is analog to that of the history logfiles. "
+                          "Please note that if you have lots of incoming messages then these "
+                          "files can get very large."),
                 default_value = False),
         domain = "mkeventd",
     )
@@ -1925,6 +1980,19 @@ register_rule(
                   totext = _("acknowledged events will not be honored"),
                  )
             ),
+            ( "less_verbose",
+              FixedValue(
+                  True,
+                  title = _("Less Verbose Output"),
+                  help = _("If enabled the check reports less information in its output.<br>"
+                           "You will see no information regarding the worst state or unacknowledged events.<br>"
+                           " For example a default output without this option <br>"
+                           "<tt>WARN - 1 events (1 unacknowledged), worst state is WARN (Last line: Incomplete Content)</tt><br>"
+                           "Output with less verbosity<br>"
+                           "<tt>WARN - 1 events (Worst line: Incomplete Content)</tt><br>"
+                            ),
+                 )
+            ),
             ( "remote",
               Alternative(
                   title = _("Access to the Event Console"),
@@ -1963,14 +2031,22 @@ register_rule(
             )
           ),
         ],
-        optional_keys = [ "application", "remote", "ignore_acknowledged", "item" ],
+        optional_keys = [ "application", "remote", "ignore_acknowledged", "less_verbose", "item" ],
     ),
     match = 'all',
 )
 
-sl_help = _("This rule set is useful if you send your monitoring notifications "
-            "into the Event Console. A service level set by this rule will be "
-            "used as the service level of the resulting event in the Event Console.")
+sl_help = _("A service level is a number that describes the business impact of a host or "
+            "service. This level can be used in rules for notifications, as a filter in "
+            "views or as a criteria in rules for the Event Console. A higher service level "
+            "is assumed to be more business critical. This ruleset allows to assign service "
+            "levels to hosts and/or services. Note: if you assign a service level to "
+            "a host with the ruleset <i>Service Level of hosts</i>, then this level is "
+            "inherited to all services that do <b>not</b> have explicitely assigned a service "
+            "with the ruleset <i>Service Level of services</i>. Assigning no service level "
+            "is equal to defining a level of 0.<br><br>The list of available service "
+            "levels is configured via a <a href='%s'>global option.</a>" %
+            "wato.py?varname=mkeventd_service_levels&mode=edit_configvar")
 
 register_rule(
     "grouping",

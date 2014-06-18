@@ -68,6 +68,13 @@ def load_all_plugins():
             pass
         except Exception:
             raise
+
+    # Load reporting plugins (only available in subscription version)
+    try:
+        reporting.load_plugins()
+    except:
+        pass
+
 __builtin__.load_all_plugins = load_all_plugins
 
 # Main entry point for all HTTP-requests (called directly by mod_apache)
@@ -97,6 +104,7 @@ def handler(req, fields = None, profiling = True):
         config.load_config() # load multisite.mk
         if html.var("debug"): # Debug flag may be set via URL
             config.debug = True
+        html.enable_debug = config.debug
         html.set_buffering(config.buffered_http_stream)
 
         # profiling can be enabled in multisite.mk
@@ -301,15 +309,15 @@ def handler(req, fields = None, profiling = True):
         html.unplug()
         apache.log_error("%s %s %s" % (req.uri, _('Internal error') + ':', e), apache.APLOG_ERR) # log in all cases
         if plain_error:
-            html.write(_("Internal error") + ": %s\n" % e)
+            html.write(_("Internal error") + ": %s\n" % html.attrencode(e))
         elif not fail_silently:
             html.header(_("Internal error"))
             if config.debug:
                 html.show_error("%s: %s<pre>%s</pre>" %
-                    (_('Internal error'), e, format_exception()))
+                    (_('Internal error'), html.attrencode(e), html.attrencode(format_exception())))
             else:
                 url = html.makeuri([("debug", "1")])
-                html.show_error("%s: %s (<a href=\"%s\">%s</a>)" % (_('Internal error') + ':', e, url, _('Retry with debug mode')))
+                html.show_error("%s: %s (<a href=\"%s\">%s</a>)" % (_('Internal error') + ':', html.attrencode(e), url, _('Retry with debug mode')))
             html.footer()
         response_code = apache.OK
 

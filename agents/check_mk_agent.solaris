@@ -92,7 +92,7 @@ function run_cached () {
 
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.5i1
+echo Version: 1.2.5i4
 echo AgentOS: solaris
 
 
@@ -129,6 +129,12 @@ then
     df -l -k -F zfs 2>/dev/null | sed 1d
 fi
 
+# ZFS arc cache
+if type mdb >/dev/null 2>&1
+then
+    echo '<<<zfs_arc_cache>>>'
+    echo "::arc" | mdb -k
+fi
 
 # Processes
 echo '<<<ps>>>'
@@ -245,6 +251,12 @@ then
            }'
 fi
 
+# Libelle Business Shadow
+if type trd >/dev/null 2>&1
+then
+    echo '<<<libelle_business_shadow:sep(58)>>>'
+    trd -s
+fi
 
 
 # MK's Remote Plugin Executor
