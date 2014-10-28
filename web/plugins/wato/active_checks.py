@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -41,8 +41,8 @@ check_icmp_params = [
    ( "loss",
      Tuple(
          title = _("Packet loss"),
-         help = _("When the percentual number of lost packets is equal or greater then "
-                  "the level, then the according state is triggered. The default for critical "
+         help = _("When the percentage of lost packets is equal or greater then "
+                  "this level, then the according state is triggered. The default for critical "
                   "is 100%. That means that the check is only critical if <b>all</b> packets "
                   "are lost."),
          elements = [
@@ -177,10 +177,17 @@ register_rule(group,
                title = _("Optional parameters"),
                elements = [
                    ( "server",
-                     TextAscii(
-                         title = _("DNS Server"),
-                         allow_empty = False,
-                         help = _("Optional DNS server you want to use for the lookup"))),
+                        Alternative(
+                            title = _("DNS Server"),
+                            elements = [
+                                FixedValue( value=None, totext=_("use local configuration"),
+                                            title = _("Use local DNS configuration of monitoring site")),
+                                TextAscii(
+                                    title = _("Specify DNS Server"),
+                                    allow_empty = False,
+                                    help = _("Optional DNS server you want to use for the lookup")),
+                             ])
+                   ),
                    ( "expected_address",
                      Transform(
                          ListOfStrings(
@@ -197,8 +204,8 @@ register_rule(group,
                          value  = True,
                          title  = _("Expect Authoritative DNS Server"),
                          totext = _("Expect Authoritative"),
-                         help   = _("Optional expect the DNS server to be authoriative"
-                                    "for the lookup ")),
+                         help   = _("Optional expect the DNS server to be authoriative "
+                                    "for the lookup")),
                    ),
                    ( "response_time",
                      Tuple(
@@ -280,7 +287,7 @@ register_rule(group,
             ( "procedure",
             Dictionary(
                 optional_keys = [ "input" ],
-                title = _("Use procedure call instead of sql statement"),
+                title = _("Use procedure call instead of SQL statement"),
                 help = _("If you activate this option, a name of a stored "
                     "procedure is used instead of an SQL statement. "
                     "The procedure should return one output variable, "
@@ -468,6 +475,44 @@ register_rule(group,
     match = 'all'
 )
 
+register_rule(group,
+    "active_checks:uniserv", Dictionary(
+        title = _("Check uniserv service"), optional_keys = False, elements = [
+            ("port",
+                Integer( title = _("Port") )),
+            ("service",
+                TextAscii( title = _("Service String"),
+                           help = _("Enter here the uniserve service name. (Has nothing to do with service description)")
+            )),
+            ("job",
+                CascadingDropdown(
+                    title = _("Mode of the Check"),
+                    help = _("Choose, whether you just want to query the version number,"
+                             " or if you want to check the response to an address query."),
+                    choices = [
+                        ("version", _("Check for Version")),
+                        ("address", _("Check for an Address"),
+                            Dictionary(
+                                title = _("Address Check mode"),
+                                optional_keys = False,
+                                elements = [
+                                    ( "street",
+                                        TextAscii( title = _("Street name"))),
+                                    ( "street_no",
+                                        Integer( title = _("Street number"))),
+                                    ( "city",
+                                        TextAscii( title = _("City name"))),
+                                    ( "search_regex",
+                                        TextAscii( title = _("Check City against Regex"),
+                                        help = _( "The city name from the response will be checked against "
+                                                  "the regular expression specified here"),
+                                        )),
+                                ]
+                        )),
+                    ]
+                )),
+
+        ]))
 
 register_rule(group,
     "active_checks:http",
@@ -478,12 +523,12 @@ register_rule(group,
                  "This plugin tests the HTTP service on the specified host. "
                  "It can test normal (HTTP) and secure (HTTPS) servers, follow "
                  "redirects, search for strings and regular expressions, check "
-                 "connection times, and report on certificate expiration times. "),
+                 "connection times, and report on certificate expiration times."),
         elements = [
             TextUnicode(
                 title = _("Name"),
-                help = _("Will be used in the service description. If the name starts with"
-                         "a caret (^) the service description will not be prefixed with HTTP." ),
+                help = _("Will be used in the service description. If the name starts with "
+                         "a caret (^), the service description will not be prefixed with HTTP." ),
                 allow_empty = False),
             Alternative(
                 title = _("Mode of the Check"),
@@ -499,7 +544,7 @@ register_rule(group,
                                  TextAscii(
                                    title = _("Name of the virtual host"),
                                    help = _("Set this in order to specify the name of the "
-                                    "virtual host for the query (using HTTP/1.1). When you "
+                                    "virtual host for the query (using HTTP/1.1). If you "
                                     "leave this empty, then the IP address of the host "
                                     "will be used instead."),
                                    allow_empty = False),
@@ -585,7 +630,7 @@ register_rule(group,
                                           title = _("Username"),
                                           size = 12,
                                           allow_empty = False),
-                                      TextAscii(
+                                      Password(
                                           title = _("Password"),
                                           size = 12,
                                           allow_empty = False),
@@ -600,7 +645,7 @@ register_rule(group,
                                           title = _("Username"),
                                           size = 12,
                                           allow_empty = False),
-                                      TextAscii(
+                                      Password(
                                           title = _("Password"),
                                           size = 12,
                                           allow_empty = False),
@@ -660,7 +705,7 @@ register_rule(group,
                               Tuple(
                                   title = _("Send HTTP POST data"),
                                   elements = [
-                                      TextAscii(
+                                      TextUnicode(
                                           title = _("HTTP POST data"),
                                           help = _("Data to send via HTTP POST method. "
                                                    "Please make sure, that the data is URL-encoded."),
@@ -691,7 +736,7 @@ register_rule(group,
                                   value = True,
                                   title = _("Don't wait for document body"),
                                   help = _("Note: this still does an HTTP GET or POST, not a HEAD."),
-                                  totext = _("dont wait for body"))
+                                  totext = _("don't wait for body"))
                             ),
                             ( "page_size",
                               Tuple(
@@ -734,9 +779,9 @@ register_rule(group,
                             ),
                             ( "cert_host",
                                 TextAscii(
-                                    title = _("Check Cerficate on diffrent IP/ DNS Name"),
-                                    help = _("For each SSL cerficate on a host, a diffrent IP address is needed. "
-                                             "Here you can specify there address if it differs from the  "
+                                    title = _("Check Cerficate on different IP / DNS Name"),
+                                    help = _("For each SSL cerficate on a host, a different IP address is needed. "
+                                             "Here, you can specify the address if it differs from the  "
                                              "address from the host primary address."),
                                 )
                             ),
@@ -805,9 +850,9 @@ register_rule(group,
                                  allow_empty = False,
                                  size = 60,
                              ),
-                             TextAscii(
+                             Password(
                                  title = _("Password"),
-                                 help = _("Password for binding, if you server requires an authentication"),
+                                 help = _("Password for binding, if your server requires an authentication"),
                                  allow_empty = False,
                                  size = 20,
                              )
@@ -817,7 +862,7 @@ register_rule(group,
                    ( "port",
                      Integer(
                        title = _("TCP Port"),
-                       help = _("Default is 389 for normal connetions and 636 for SSL connections."),
+                       help = _("Default is 389 for normal connections and 636 for SSL connections."),
                        minvalue = 1,
                        maxvalue = 65535,
                        default_value = 389)
@@ -887,7 +932,7 @@ register_rule(group,
                      TextAscii(
                          title = _("DNS Hostname or IP address"),
                          allow_empty = False,
-                         help = _("You can specify a hostname or IP address different from IP address "
+                         help = _("You can specify a hostname or IP address different from the IP address "
                                   "of the host as configured in your host properties."))),
                    ( "port",
                      TextAscii(
@@ -979,7 +1024,7 @@ register_rule(group,
                                  title = _("Username"),
                                  size = 12,
                                  allow_empty = False),
-                             TextAscii(
+                             Password(
                                  title = _("Password"),
                                  size = 12,
                                  allow_empty = False),
@@ -1090,7 +1135,7 @@ def PluginCommandLine(addhelp = ""):
                    "<li><tt>$USER1$</tt>: user macro 1 (usually path to shipped plugins)</li>"
                    "<li><tt>$USER2$</tt>: user marco 2 (usually path to your own plugins)</li>"
                    "</ul>"
-                   "If you are using OMD, then you can omit the path and just specify "
+                   "If you are using OMD, you can omit the path and just specify "
                    "the command (e.g. <tt>check_foobar</tt>). This command will be "
                    "searched first in the local plugins directory "
                    "(<tt>~/local/lib/nagios/plugins</tt>) and then in the shipped plugins "
@@ -1124,9 +1169,9 @@ register_rule(group,
             ( "command_name",
               TextAscii(
                   title = _("Internal command name"),
-                  help = _("If you want, then you can specify a name that will be used "
+                  help = _("If you want, you can specify a name that will be used "
                            "in the <tt>define command</tt> section for these checks. This "
-                           "allows you to a assign a customer PNP template for the performance "
+                           "allows you to a assign a custom PNP template for the performance "
                            "data of the checks. If you omit this, then <tt>check-mk-custom</tt> "
                            "will be used."),
                   size = 32)
@@ -1144,7 +1189,7 @@ register_rule(group,
                   help = _("Freshness checking is only useful for passive checks when the staleness feature "
                            "is not enough for you. It changes the state of a check to a configurable other state "
                            "when the check results are not arriving in time. Staleness will still grey out the "
-                           "test after the corrsponding interval. If you dont want that, you might want to adjust "
+                           "test after the corrsponding interval. If you don't want that, you might want to adjust "
                            "the staleness interval as well. The staleness interval is calculated from the normal "
                            "check interval multiplied by the staleness value in the <tt>Global Settings</tt>. "
                            "The normal check interval can be configured in a separate rule for your check."),
@@ -1181,6 +1226,64 @@ register_rule(group,
 
         ],
         required_keys = [ "service_description" ],
+    ),
+    match = 'all'
+)
+
+register_rule(group,
+    "active_checks:bi_aggr",
+    Tuple(
+        title = _("Check State of BI Aggregation"),
+        help = _("Connect to the local or a remote monitoring host, which uses Check_MK BI to aggregate "
+                 "several states to a single BI aggregation, which you want to show up as a single "
+                 "service."),
+        elements = [
+            TextAscii(
+                title = _("Base URL (OMD Site)"),
+                help = _("The base URL to the monitoring instance. For example <tt>http://<hostname>/<siteid></tt>. You can use "
+                         "macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this URL to make them be replaced by "
+                         "the hosts values."),
+                size = 60,
+                allow_empty = False
+            ),
+            TextAscii(
+                title = _("Aggregation Name"),
+                help = _("The name of the aggregation to fetch. It will be added to the service description."),
+                allow_empty = False
+            ),
+            TextAscii(
+                title = _("Username"),
+                help = _("The name of the user account to use for fetching the BI aggregation via HTTP. When "
+                         "using the cookie based authentication mode (default), this must be a user where "
+                         "authentication is set to \"Automation Secret\" based authentication."),
+                allow_empty = False
+            ),
+            Password(
+                title = _("Password"),
+                help = _("Valid automation secret or password for the user, depending on the choosen "
+                         "authentication mode."),
+                allow_empty = False
+            ),
+            Dictionary(
+                title = _("Optional parameters"),
+                elements = [
+                    ("auth_mode", DropdownChoice(
+                        title = _('Authentication Mode'),
+                        default_value = 'cookie',
+                        choices = [
+                            ('cookie', _('Form (Cookie) based')),
+                            ('basic',  _('HTTP basic')),
+                            ('digest', _('HTTP digest')),
+                        ],
+                    )),
+                    ("timeout", Integer(
+                        title = _("Seconds before connection times out"),
+                        unit = _("sec"),
+                        default_value = 60,
+                    )),
+                ]
+            ),
+        ]
     ),
     match = 'all'
 )
@@ -1248,7 +1351,7 @@ register_rule(group,
                         help = _("If there is only one form element on the requested page, you "
                                  "do not need to provide the name of that form here. But if you "
                                  "have several forms on that page, you need to provide the name "
-                                 "of the form here, to make the check able to identify the correct "
+                                 "of the form here, to enable the check to identify the correct "
                                  "form element."),
                         allow_empty = True,
                     )),
@@ -1277,15 +1380,15 @@ register_rule(group,
     Tuple(
         title = _("Check Number of Notifications per Contact"),
         help = _("Check the number of sent notifications per contact using the plugin <tt>check_notify_count</tt> "
-                 "provided with Check_MK. This plugin counts the total number of notifcations sent by the local "
+                 "provided with Check_MK. This plugin counts the total number of notifications sent by the local "
                  "monitoring core and creates graphs for each individual contact. You can configure thresholds "
-                 "on the number of notifications per contact in a defined time interval."
+                 "on the number of notifications per contact in a defined time interval. "
                  "This plugin queries livestatus to extract the notification related log entries from the "
                  "log file of your monitoring core."),
         elements = [
             TextUnicode(
                 title = _("Name"),
-                help = _("The name will be used in the service description"),
+                help = _("The name that will be used in the service description"),
                 allow_empty = False
             ),
             Integer(

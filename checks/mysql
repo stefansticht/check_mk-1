@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -142,7 +142,7 @@ def inventory_mysql_iostat(info):
 
 def check_mysql_iostat(item, params, info):
     values = parse_mysql(info)
-    line = [ None, values["Innodb_data_read"] / 512, values["Innodb_data_written"] / 512]
+    line = [ None, None, values["Innodb_data_read"] / 512, values["Innodb_data_written"] / 512]
     return check_diskstat_line(time.time(), 'innodb_io', params, line)
 
 

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -25,6 +25,7 @@
 # Boston, MA 02110-1301 USA.
 
 
+deprecated = _("Deprecated")
 #   .--Global Settings-----------------------------------------------------.
 #   |  ____ _       _           _   ____       _   _   _                   |
 #   | / ___| | ___ | |__   __ _| | / ___|  ___| |_| |_(_)_ __   __ _ ___   |
@@ -112,13 +113,13 @@ register_configvar(group,
 
 register_configvar(group,
     "enable_sounds",
-    Checkbox(title = _("Enabled sounds in views"),
+    Checkbox(title = _("Enable sounds in views"),
              label = _("enable sounds"),
              help = _("If sounds are enabled then the user will be alarmed by problems shown "
                       "in a Multisite status view if that view has been configured for sounds. "
                       "From the views shipped in with Multisite all problem views have sounds "
                       "enabled."),
-             default_value = True),
+             default_value = False),
     domain = "multisite")
 
 register_configvar(group,
@@ -244,11 +245,29 @@ register_configvar(group,
 
 
 def wato_host_tag_group_choices():
+    # We add to the choices:
+    # 1. All host tag groups with their id
+    # 2. All *topics* that:
+    #  - consist only of checkbox tags
+    #  - contain at least two entries
     choices = []
+    by_topic = {}
     for entry in config.wato_host_tags:
         tgid = entry[0]
         topic, tit = parse_hosttag_title(entry[1])
         choices.append((tgid, tit))
+        by_topic.setdefault(topic, []).append(entry)
+
+    # Now search for checkbox-only-topics
+    for topic, entries in by_topic.items():
+        for entry in entries:
+            tgid, title, tags = entry
+            if len(tags) != 1:
+                break
+        else:
+            if len(entries) > 1:
+                choices.append(("topic:" + topic, _("Topic") + ": " + topic))
+
     return choices
 
 
@@ -483,6 +502,20 @@ register_configvar(group,
     domain = "multisite"
     )
 
+register_configvar(group,
+    "wato_legacy_eval",
+    Checkbox(
+        title = _("Use unsafe legacy encoding for distributed WATO"),
+        help = _("The current implementation of WATO uses a Python module called <tt>ast</tt> for the "
+                 "communication between sites. Previous versions of Check_MK used an insecure encoding "
+                 "named <tt>pickle</tt>. Even in the current version WATO falls back to <tt>pickle</tt> "
+                 "if your Python version is not recent enough. This is at least the case for RedHat/CentOS 5.X "
+                 "and Debian 5.0. In a mixed environment you can force using the legacy <tt>pickle</tt> format "
+                 "in order to create compatibility."),
+    ),
+    domain = "multisite"
+)
+
 
 register_configvar(group,
     "wato_hide_filenames",
@@ -501,7 +534,7 @@ register_configvar(group,
     Checkbox(title = _("Allow upload of insecure WATO snapshots"),
              label = _("upload insecure snapshots"),
              help = _("When enabled, insecure snapshots are allowed. Please keep in mind that the upload "
-                      "of unverified snapshots represent a security risk, since the content of a snapshot is executed "
+                      "of unverified snapshots represents a security risk, since the content of a snapshot is executed "
                       "during runtime. Any manipulations in the content - either willingly or unwillingly (XSS attack) "
                       "- pose a serious security risk."),
              default_value = False),
@@ -520,7 +553,7 @@ register_configvar(group,
     "wato_hide_varnames",
     Checkbox(title = _("Hide names of configuration variables"),
              label = _("hide variable names"),
-             help = _("When enabled, internal configuration variable names of Check_MK are hidded "
+             help = _("When enabled, internal configuration variable names of Check_MK are hidden "
                       "from the user (for example in the rule editor)"),
              default_value = True),
     domain = "multisite")
@@ -530,7 +563,7 @@ register_configvar(group,
     "wato_hide_help_in_lists",
     Checkbox(title = _("Hide help text of rules in list views"),
              label = _("hide help text"),
-             help = _("When disabled, WATO shows the help texts of the rules also in the list views."),
+             help = _("When disabled, WATO shows the help texts of rules also in the list views."),
              default_value = True),
     domain = "multisite")
 
@@ -588,10 +621,10 @@ register_configvar(group,
                   'information are too old.'),
         default_value = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ],
         choices       = [
-            ('page',                      'During regular page processing'),
-            ('wato_users',                'When opening the users configuration page'),
-            ('wato_pre_activate_changes', 'Before activating the changed configuration'),
-            ('wato_snapshot_pushed',      'On a remote site, when it receives a new configuration'),
+            ('page',                      _('During regular page processing')),
+            ('wato_users',                _('When opening the users configuration page')),
+            ('wato_pre_activate_changes', _('Before activating the changed configuration')),
+            ('wato_snapshot_pushed',      _('On a remote site, when it receives a new configuration')),
         ],
         allow_empty   = True,
     ),
@@ -921,7 +954,7 @@ def list_roles():
 
 def list_contactgroups():
     contact_groups = userdb.load_group_information().get("contact", {})
-    entries = [ (c, contact_groups[c]) for c in contact_groups ]
+    entries = [ (c, g['alias']) for c, g in contact_groups.items() ]
     entries.sort()
     return entries
 
@@ -959,6 +992,21 @@ register_configvar(group,
         help = _("When enabled, the time of the last access is stored for each user. The last "
                  "activity is shown on the users page."),
         default_value = False
+    ),
+    domain = "multisite"
+)
+
+
+register_configvar(group,
+    "export_folder_permissions",
+    Checkbox(
+        title = _("Export WATO folder permissions"),
+        label = _("Make WATO folder permissions usable e.g. by NagVis"),
+        help = _("It is possible to create maps representing the WATO folder hierarchy within "
+                 "NagVis by naming the maps like the folders are named internally. To make the "
+                 "restriction of access to the maps as comfortable as possible, the permissions "
+                 "configured within WATO can be exported to NagVis."),
+        default_value = False,
     ),
     domain = "multisite"
 )
@@ -1044,7 +1092,7 @@ register_configvar(group,
         ),
         title = _("Log exceptions in check plugins"),
         help = _("If this option is enabled Check_MK will create a debug logfile at "
-                 "<tt>%s/chrashed-checks.log</tt>"
+                 "<tt>%s/chrashed-checks.log</tt> "
                  "containing details about failed checks (those which have the state <i>UNKNOWN "
                  "and the output UNKNOWN - invalid output from plugin</i>...) Per default no "
                  "logfile is written.") % defaults.log_dir,
@@ -1199,7 +1247,6 @@ register_configvar(group,
 
 
 
-
 _if_portstate_choices = [
                         ( '1', 'up(1)'),
                         ( '2', 'down(2)'),
@@ -1208,6 +1255,37 @@ _if_portstate_choices = [
                         ( '5', 'dormant(5)') ,
                         ( '6', 'notPresent(6)'),
                         ( '7', 'lowerLayerDown(7)'),
+                        ]
+
+_brocade_fcport_adm_choices = [
+                        ( 1, 'online(1)'),
+                        ( 2, 'offline(2)'),
+                        ( 3, 'testing(3)'),
+                        ( 4, 'faulty(4)'),
+                        ]
+
+_brocade_fcport_op_choices = [
+                        ( 0, 'unkown(0)'),
+                        ( 1, 'online(1)'),
+                        ( 2, 'offline(2)'),
+                        ( 3, 'testing(3)'),
+                        ( 4, 'faulty(4)'),
+                        ]
+
+_brocade_fcport_phy_choices = [
+                        ( 1, 'noCard(1)'),
+                        ( 2, 'noTransceiver(2)'),
+                        ( 3, 'laserFault(3)'),
+                        ( 4, 'noLight(4)'),
+                        ( 5, 'noSync(5)'),
+                        ( 6, 'inSync(6)'),
+                        ( 7, 'portFault(7)'),
+                        ( 8, 'diagFault(8)'),
+                        ( 9, 'lockRef(9)'),
+                        ( 10, 'validating(10)'),
+                        ( 11, 'invalidModule(11)'),
+                        ( 14, 'noSigDet(14)'),
+                        ( 255, 'unkown(255)'),
                         ]
 
 _if_porttype_choices = [
@@ -1290,7 +1368,7 @@ register_configvar(group,
                       "option. This will retain the old service descriptions and the old "
                       "performance data.")))
 
-register_configvar(group,
+register_configvar(deprecated,
     "if_inventory_uses_description",
     Checkbox(title = _("Use description as service name for network interface checks"),
              label = _("use description"),
@@ -1298,7 +1376,7 @@ register_configvar(group,
                       "of the port number. If no description is available then the port number is "
                       "used anyway.")))
 
-register_configvar(group,
+register_configvar(deprecated,
     "if_inventory_uses_alias",
     Checkbox(title = _("Use alias as service name for network interface checks"),
              label = _("use alias"),
@@ -1306,14 +1384,14 @@ register_configvar(group,
                       "of the port number. If no alias is available then the port number is used "
                       "anyway.")))
 
-register_configvar(group,
+register_configvar(deprecated,
    "if_inventory_portstates",
    ListChoice(title = _("Network interface port states to inventorize"),
               help = _("When doing inventory on switches or other devices with network interfaces "
                        "then only ports found in one of the configured port states will be added to the monitoring."),
               choices = _if_portstate_choices))
 
-register_configvar(group,
+register_configvar(deprecated,
    "if_inventory_porttypes",
    ListChoice(title = _("Network interface port types to inventorize"),
               help = _("When doing inventory on switches or other devices with network interfaces "
@@ -1321,7 +1399,7 @@ register_configvar(group,
               choices = _if_porttype_choices,
               columns = 3))
 
-register_configvar(group,
+register_configvar(deprecated,
     "diskstat_inventory_mode",
     DropdownChoice(
         title = _("Inventory mode for disk IO checks"),
@@ -1351,7 +1429,7 @@ register_configvar(group,
 group = _("Check configuration")
 
 
-register_configvar(group,
+register_configvar(deprecated,
     "if_inventory_monitor_state",
     Checkbox(title = _("Monitor port state of network interfaces"),
              label = _("monitor port state"),
@@ -1362,7 +1440,7 @@ register_configvar(group,
                       "by overridden on a per-host and per-port base by defining special check "
                       "parameters via a rule.")))
 
-register_configvar(group,
+register_configvar(deprecated,
     "if_inventory_monitor_speed",
     Checkbox(title = _("Monitor port speed of network interfaces"),
              label = _("monitor port speed"),
@@ -1406,7 +1484,7 @@ register_configvar(group,
         ),
     )
 
-register_configvar(group,
+register_configvar(deprecated,
     "printer_supply_default_levels",
     Tuple(
         title = _("Printer supply default levels"),
@@ -1961,10 +2039,14 @@ group = "monconf/" + _("Various")
 register_rule(group,
      "clustered_services_mapping",
      TextAscii(
-        title = _("Explicit mapping of Clustered Services"),
-        help = _( "It's possible to have overlaping nodes between multiple clusters."
-                  "With this rule the direct mapping of services from nodes to the "
-                  "favored Cluster can be done."),
+        title = _("Clustered services for overlapping clusters"),
+        label = _("Assign services to the following cluster:"),
+        help = _("It's possible to have clusters that share nodes. You could say that "
+                  "such clusters &quot;overlap&quot;. In such a case using the ruleset "
+                  "<i>Clustered services</i> is not sufficient since it would not be clear "
+                  "to which of the several possible clusters a service found on such a shared "
+                  "node should be assigned to. With this ruleset you can assign services and "
+                  "explicitely specify which cluster assign them to."),
      ),
      itemtype = "service",
      )
@@ -2183,10 +2265,11 @@ register_rule(group,
 
 register_rule(group,
     "snmpv2c_hosts",
-    title = _("Hosts using SNMP v2c"),
-    help = _("There exist a few devices out there that behave very badly when using SNMP bulk walk. "
-             "If you want to use SNMP v2c on those devices, nevertheless, then use this rule set. "
-             "One reason is enabling 64 bit counters."))
+    title = _("Legacy SNMP devices using SNMP v2c"),
+    help = _("There exist a few devices out there that behave very badly when using SNMP v2c and bulk walk. "
+             "If you want to use SNMP v2c on those devices, nevertheless, you need to configure this device as "
+             "legacy snmp device and upgrade it to SNMP v2c (without bulk walk) with this rule set. One reason is enabling 64 bit counters. "
+             "Note: This rule won't apply if the device is already configured as SNMP v2c device."))
 
 register_rule(group,
     "snmp_timing",
@@ -2253,6 +2336,11 @@ register_rule(group,
                 default_value = 2,
                 title = _("State in case of connection problems")),
             ),
+            ( "timeout",
+              MonitoringState(
+                default_value = 2,
+                title = _("State in case of a overall timeout")),
+            ),
             ( "missing_sections",
               MonitoringState(
                 default_value = 1,
@@ -2280,7 +2368,8 @@ register_rule(group,
     help = _("This ruleset specifies the total status of the Check_MK service in "
              "case of various error situations. One use case is the monitoring "
              "of hosts that are not always up. You can have Check_MK an OK status "
-             "here if the host is not reachable."),
+             "here if the host is not reachable. Note: the <i>Timeout</i> setting only works "
+             "when using the Check_MK Micro Core."),
     match = "dict",
 )
 

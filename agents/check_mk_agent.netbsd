@@ -6,7 +6,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -59,7 +59,7 @@ else
 fi
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.5i4
+echo Version: 1.2.5i6
 echo AgentOS: netbsd
 
 osver="$(uname -r)"
@@ -95,7 +95,7 @@ while [ $Z1 -lt 15 ]
   do
   BI=$( netstat -inb | egrep -v Name | grep Link | awk '{print $1" "$5}' | sed -ne $Z1$Z2 )
   PI=$( netstat -in | egrep -v Name | grep Link | awk '{print $5}' | sed -ne $Z1$Z2 )
-  EI=$( netstat -in | egrep -v Name | grep Link | awk '{print $6}' | sed -ne $Z1$Z2 )	
+  EI=$( netstat -in | egrep -v Name | grep Link | awk '{print $6}' | sed -ne $Z1$Z2 )
   FF1="0 0 0 0 0"
   BO=$( netstat -inb | egrep -v Name | grep Link | awk '{print $6}' | sed -ne $Z1$Z2 )
   PO=$( netstat -in | egrep -v Name | grep Link | awk '{print $7}' | sed -ne $Z1$Z2 )

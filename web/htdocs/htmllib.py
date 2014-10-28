@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -58,6 +58,7 @@ class html:
         self.link_target = None
         self.form_name = None
         self.form_vars = []
+        self.var_stash = []
         self.context_buttons_open = False
         self.mobile = False
         self.buffering = True
@@ -70,6 +71,7 @@ class html:
         self.keybindings_enabled = True
         self.io_error = False
         self.enable_debug = False
+        self.screenshotmode = True
         self.help_visible = False
         self.treestates = {}
         self.treestates_for_id = None
@@ -77,6 +79,12 @@ class html:
         self.new_transids = []
         self.ignore_transids = False
         self.current_transid = None
+        self.page_context = {}
+
+        # Time measurement
+        self.times            = {}
+        self.start_time       = time.time()
+        self.last_measurement = self.start_time
 
     RETURN = 13
     SHIFT = 16
@@ -84,6 +92,9 @@ class html:
     ALT = 18
     BACKSPACE = 8
     F1 = 112
+
+    def set_page_context(self, c):
+        self.page_context = c
 
     def set_buffering(self, b):
         self.buffering = b
@@ -187,8 +198,11 @@ class html:
         self.write("</form>\n")
         self.form_name = None
 
-    def form_submitted(self):
-        return self.has_var("filled_in")
+    def form_submitted(self, form_name=None):
+        if form_name:
+            return self.var("filled_in") == form_name
+        else:
+            return self.has_var("filled_in")
 
     def add_user_error(self, varname, message):
         if type(varname) == list:
@@ -244,7 +258,7 @@ class html:
             vars = [ i for i in vars if not i[0].startswith(remove_prefix) ]
         vars = vars + addvars
         if filename == None:
-            filename = self.myfile + ".py"
+            filename = self.urlencode(self.myfile) + ".py"
         if vars:
             return filename + "?" + self.urlencode_vars(vars)
         else:
@@ -416,7 +430,7 @@ class html:
                 add_style = "width: 100%; "
             else:
                 addprops += " size=\"%d\"" % (args["size"] + 1)
-                if "width:" not in args.get("style", "") and not self.mobile:
+                if not args.get('omit_css_width', False) and "width:" not in args.get("style", "") and not self.mobile:
                     add_style = "width: %d.8ex; " % args["size"]
 
         if "type" in args:
@@ -630,11 +644,11 @@ class html:
 
     def time_input(self, varname, hours, mins, submit=None):
         self.text_input(varname, "%02d:%02d" % (hours, mins), cssclass="time", size=5,
-                        submit=submit)
+                        submit=submit, omit_css_width = True)
 
     def date_input(self, varname, year, month, day, submit=None):
         self.text_input(varname, "%04d-%02d-%02d" % (year, month, day),
-                        cssclass="date", size=11, submit=submit)
+                        cssclass="date", size=10, submit=submit, omit_css_width = True)
 
     def get_datetime_input(self, varname):
         t = self.var(varname + "_time")
@@ -733,11 +747,22 @@ class html:
     def immediate_browser_redirect(self, secs, url):
         self.javascript("setReload(%s, '%s');" % (secs, url))
 
+    def body_css_classes(self):
+        body_classes = [ "main" ]
+        if self.var("_body_class"):
+            body_classes.append(self.var("_body_class"))
+        if self.screenshotmode:
+            body_classes.append("screenshotmode")
+        return " ".join(body_classes)
+
+    def body_start(self, title='', **args):
+        self.html_head(title, **args)
+        self.write('<body class="%s">' % self.body_css_classes())
+
     def header(self, title='', **args):
         if self.output_format == "html":
             if not self.header_sent:
-                self.html_head(title, **args)
-                self.write('<body class="main %s">' % self.var("_body_class", ""))
+                self.body_start(title, **args)
                 self.header_sent = True
                 if self.render_headfoot:
                     self.top_heading(title)
@@ -746,7 +771,7 @@ class html:
         self.write('<table class=header><tr><td width="*" class=heading>')
         self.write('<a href="#" onfocus="if (this.blur) this.blur();" '
                    'onclick="this.innerHTML=\'%s\'; document.location.reload();">%s</a></td>' %
-                   (_("Reloading..."), title))
+                   (_("Reloading..."), self.attrencode(title)))
 
     def top_heading_right(self):
         cssclass = self.help_visible and "active" or "passive"
@@ -762,10 +787,6 @@ class html:
         self.begin_foldable_container("html", "debug_vars", True, _("GET/POST variables of this page"))
         self.debug_vars(hide_with_mouse = False)
         self.end_foldable_container()
-
-    def body_start(self, title='', **args):
-        self.html_head(title, **args)
-        self.write('<body class="main %s">' % self.var("_body_class", ""))
 
     def bottom_focuscode(self):
         if self.focus_object:
@@ -833,6 +854,13 @@ class html:
                  '<img class=statusicon src="images/status_download_csv.png" title="%s"></a>\n' % \
                  (self.makeuri([("output_format", "csv_export")]), _("Export as CSV"))
 
+        if self.myfile == "view":
+            mode_name = self.var('mode') == "availability" and "availability" or "view"
+            h += '<div class="visualadd"><a class="visualadd" href="javascript:void(0)" ' \
+                 'onclick="toggle_add_to_visual(this, \'%s\', %s, {\'name\': \'%s\'})">' \
+                 '<img class=statusicon src="images/status_add_dashlet.png" title="%s"></a></div>\n' % \
+                 (mode_name, self.attrencode(self.page_context), self.var('view_name'), _("Add this view to..."))
+
         for img, tooltip in self.status_icons.items():
             if type(tooltip) == tuple:
                 tooltip, url = tooltip
@@ -840,6 +868,15 @@ class html:
                      (url, img, tooltip)
             else:
                 h += '<img class=statusicon src="images/status_%s.png" title="%s">\n' % (img, tooltip)
+
+        if self.times:
+            self.measure_time('body')
+            h += '<div class=execution_times>'
+            entries = self.times.items()
+            entries.sort()
+            for name, duration in entries:
+                h += "<div>%s: %.1fms</div>" % (name, duration * 1000)
+            h += '</div>'
         return h
 
     def show_error(self, msg):
@@ -894,7 +931,31 @@ class html:
     def set_focus(self, varname):
         self.focus_object = (self.form_name, varname)
 
+    def debug_vars(self, prefix=None, hide_with_mouse=True):
+        if hide_with_mouse:
+            hover = ' onmouseover="this.style.display=\'none\';"'
+        else:
+            hover = ""
+        self.lowlevel_write('<table %s class=debug_vars>' % hover)
+        self.lowlevel_write("<tr><th colspan=2>POST / GET Variables</th></tr>")
+        for name, value in sorted(self.vars.items()):
+            if not prefix or name.startswith(prefix):
+                self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" %
+                    (self.attrencode(name), self.attrencode(value)))
+        self.write("</table>")
 
+    def var(self, varname, deflt = None):
+        return self.vars.get(varname, deflt)
+
+    def has_var(self, varname):
+        return varname in self.vars
+
+    # Checks if a variable with a given prefix is present
+    def has_var_prefix(self, prefix):
+        for varname in self.vars:
+            if varname.startswith(prefix):
+                return True
+        return False
 
     def var_utf8(self, varname, deflt = None):
         val = self.vars.get(varname, deflt)
@@ -939,6 +1000,12 @@ class html:
         else:
             self.vars = dict([(k,v) for (k,v) in self.vars.iteritems() if not k.startswith(prefix)])
             self.listvars = dict([(k,v) for (k,v) in self.listvars.iteritems() if not k.startswith(prefix)])
+
+    def stash_vars(self):
+        self.var_stash.append(self.vars.copy())
+
+    def unstash_vars(self):
+        self.vars = self.var_stash.pop()
 
     def javascript(self, code):
         self.write("<script language=\"javascript\">\n%s\n</script>\n" % code)
@@ -1092,25 +1159,6 @@ class html:
         for element in x:
             self.lowlevel_write("<pre>%s</pre>\n" % pprint.pformat(element))
 
-
-    def debug_vars(self, prefix=None, hide_with_mouse=True):
-        if hide_with_mouse:
-            hover = ' onmouseover="this.style.display=\'none\';"'
-        else:
-            hover = ""
-        self.lowlevel_write('<table %s class=debug_vars>' % hover)
-        self.lowlevel_write("<tr><th colspan=2>POST / GET Variables</th></tr>")
-        for name, value in sorted(self.vars.items()):
-            if not prefix or name.startswith(prefix):
-                self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" %
-                    (self.attrencode(name), self.attrencode(value)))
-        self.write("</table>")
-
-    def var(self, varname, deflt = None):
-        return self.vars.get(varname, deflt)
-
-    def has_var(self, varname):
-        return varname in self.vars
 
     def has_cookie(self, varname):
         return varname in self.cookies
@@ -1365,3 +1413,11 @@ class html:
 
     def get_cached(self, name):
         return self.caches.get(name)
+
+    def measure_time(self, name):
+        self.times.setdefault(name, 0.0)
+        now = time.time()
+        elapsed = now - self.last_measurement
+        self.times[name] += elapsed
+        self.last_measurement = now
+

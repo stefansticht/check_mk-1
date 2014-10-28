@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -152,8 +152,6 @@ def inv_cleanup_tree(tree):
 
 
 def do_inv(hostnames):
-    if inventory_pprint_output:
-        import pprint
 
     if not os.path.exists(inventory_output_dir):
         os.makedirs(inventory_output_dir)
@@ -231,7 +229,8 @@ def do_inv_for(hostname, ipaddress):
                 raise # Otherwise simply ignore missing agent section
             continue
 
-        if info == None: # section not present
+        if not info: # section not present (None or [])
+            # Note: this also excludes existing sections without info..
             continue
 
         if opt_verbose:
@@ -244,6 +243,7 @@ def do_inv_for(hostname, ipaddress):
     inv_cleanup_tree(g_inv_tree)
 
     if inventory_pprint_output:
+        import pprint
         r = pprint.pformat(g_inv_tree)
     else:
         r = repr(g_inv_tree)

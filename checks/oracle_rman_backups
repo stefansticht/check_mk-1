@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -31,7 +31,8 @@
 def inventory_oracle_rman_backups(info):
     inventory = []
     for line in info:
-        inventory.append(("%s.%s" % (line[0], " ".join(line[5:])), {}))
+        if line[1] != "FAILURE" and " ".join(line[5:]) in ('ARCHIVELOG', 'DB FULL', 'DB INCR'):
+            inventory.append(("%s.%s" % (line[0], " ".join(line[5:])), {}))
     return inventory
 
 def check_oracle_rman_backups(item, params, info):

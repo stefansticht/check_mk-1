@@ -5,7 +5,7 @@
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 // |                                                                  |
-// | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+// | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
 // This file is part of Check_MK.
@@ -42,7 +42,7 @@
 #include "nagios.h"
 #include "livestatus.h"
 #include "downtime.h"
-#include "store.h"
+#include "store_c.h"
 #include "logger.h"
 #include "config.h"
 #include "global_counters.h"

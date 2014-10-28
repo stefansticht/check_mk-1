@@ -1,4 +1,27 @@
 #!/bin/bash
+# +------------------------------------------------------------------+
+# |             ____ _               _        __  __ _  __           |
+# |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
+# |           | |   | '_ \ / _ \/ __| |/ /   | |\/| | ' /            |
+# |           | |___| | | |  __/ (__|   <    | |  | | . \            |
+# |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
+# |                                                                  |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
+# +------------------------------------------------------------------+
+#
+# This file is part of Check_MK.
+# The official homepage is at http://mathias-kettner.de/check_mk.
+#
+# check_mk is free software;  you can redistribute it and/or modify it
+# under the  terms of the  GNU General Public License  as published by
+# the Free Software Foundation in version 2.  check_mk is  distributed
+# in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
+# out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
+# PARTICULAR PURPOSE. See the  GNU General Public License for more de-
+# ails.  You should have  received  a copy of the  GNU  General Public
+# License along with GNU Make; see the file  COPYING.  If  not,  write
+# to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
+# Boston, MA 02110-1301 USA.
 
 # Only handle always updated values, add device path and vendor/model
 if which smartctl > /dev/null 2>&1 ; then
@@ -9,7 +32,7 @@ if which smartctl > /dev/null 2>&1 ; then
     if which tw_cli > /dev/null 2>&1 ; then
 	# support for only one controller at the moment
 	TWAC=$(tw_cli show | awk 'NR < 4 { next } { print $1 }' | head -n 1)
-	
+
        # - add a trailing zero to handle case of unused slot
        #   trailing zeros are part of the device links in /dev/disk/by-id/... anyway
        # - only the last 9 chars seem to be relevant
@@ -42,7 +65,7 @@ if which smartctl > /dev/null 2>&1 ; then
             MODEL=$(smartctl -a $D | grep -i "device model" | sed -e "s/.*:[ ]*//g" -e "s/\ /_/g")
         fi
         # Excluded disk models for SAN arrays or certain RAID luns that are also not usable..
-        if [ "$MODEL" = "iSCSI_Disk" ] || ["$MODEL" = "LOGICAL_VOLUME" ]; then
+        if [ "$MODEL" = "iSCSI_Disk" -o "$MODEL" = "LOGICAL_VOLUME" ]; then
             continue
         fi
 
@@ -80,7 +103,7 @@ if which smartctl > /dev/null 2>&1 ; then
 	else
 	    CMD="smartctl -d ata -v 9,raw48 -A $D"
 	fi
-	
+
         [ -n "$CMD" ] && $CMD | grep Always | egrep -v '^190(.*)Temperature(.*)' | sed "s|^|$DNAME $VEND $MODEL |"
     done 2>/dev/null
 fi

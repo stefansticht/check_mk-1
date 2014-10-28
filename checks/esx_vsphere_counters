@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -75,9 +75,14 @@ def inventory_esx_vsphere_counters_diskio(info):
             return [(None, None)]
 
 def check_esx_vsphere_counters_diskio(_no_item, _no_params, info):
-    reads = 0
-    writes = 0
-    latency = 0
+    if not info:
+        raise MKCounterWrapped(None, "Counter data is missing")
+
+    read_bytes  = 0
+    write_bytes = 0
+    reads       = 0
+    writes      = 0
+    latency     = 0
     for counter, item, value, unit in info:
         if item == '':
             if counter == 'disk.read':
@@ -231,6 +236,9 @@ def inventory_esx_vsphere_counters_if(info):
     return inventory_if_common(converted)
 
 def check_esx_vsphere_counters_if(item, params, info):
+    if not info:
+        raise MKCounterWrapped(None, "Counter data is missing")
+
     converted = convert_esx_counters_if(info)
     return check_if_common(item, params, converted)
 
@@ -260,6 +268,9 @@ def inventory_esx_vsphere_counters_uptime(info):
             return [ (None, {}) ]
 
 def check_esx_vsphere_counters_uptime(_no_item, params, info):
+    if not info:
+        raise MKCounterWrapped(None, "Counter data is missing")
+
     for name, instance, counter, unit in info:
         if name == "sys.uptime":
             return check_uptime_seconds(params, int(counter))
@@ -309,6 +320,9 @@ def inventory_esx_vsphere_counters_ramdisk(info):
     return df_inventory(ramdisks)
 
 def check_esx_vsphere_counters_ramdisk(item, params, info):
+    if not info:
+        raise MKCounterWrapped(None, "Counter data is missing")
+
     ramdisks = []
     for name, instance, counter, unit in info:
         if name == 'sys.resourceMemConsumed' \

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -37,6 +37,7 @@ g_profile_path = 'profile.out'
 
 if __name__ == "__main__":
     opt_debug        = '--debug' in sys.argv[1:]
+    opt_interactive  = '--interactive' in sys.argv[1:]
     opt_verbose      = '-v' in sys.argv[1:] or '--verbose' in sys.argv[1:]
     if '--profile' in sys.argv[1:]:
         import cProfile
@@ -48,6 +49,7 @@ if __name__ == "__main__":
 else:
     opt_verbose = False
     opt_debug = False
+    opt_interactive = False
 
 #.
 #   .--Pathnames-----------------------------------------------------------.
@@ -121,6 +123,12 @@ def verbose(t):
     if opt_verbose:
         sys.stderr.write(t)
         sys.stderr.flush()
+
+# Abort after an error, but only in interactive mode.
+def interactive_abort(error):
+    if sys.stdout.isatty() or opt_interactive:
+        sys.stderr.write(error + "\n")
+        sys.exit(1)
 
 
 # During setup a file called defaults is created in the modules
@@ -460,15 +468,13 @@ if __name__ == "__main__":
 #   +----------------------------------------------------------------------+
 
 def output_check_info():
-    print "Available check types:"
-    print
-    print "                                 plugin  perf-  in- "
-    print "Name                             type    data   vent.  service description"
-    print "-------------------------------------------------------------------------"
+    all_check_manuals = all_manuals()
+    read_manpage_catalog()
 
     checks_sorted = check_info.items() + active_check_info.items()
     checks_sorted.sort()
     for check_type, check in checks_sorted:
+        man_filename = all_check_manuals.get(check_type)
         try:
             if 'command_line' in check:
                 what = 'active'
@@ -480,27 +486,15 @@ def output_check_info():
                 what = 'tcp'
                 ty_color = tty_yellow
 
-            if check.get("has_perfdata", False):
-                p = tty_green + tty_bold + "yes" + tty_normal
+            if man_filename:
+                title = file(man_filename).readlines()[0].split(":", 1)[1].strip()
             else:
-                p = "no"
+                title = "(no man page present)"
 
-            if what == 'active':
-                i = '-'
-            elif check["inventory_function"] == None:
-                i = "no"
-            else:
-                i = tty_blue + tty_bold + "yes" + tty_normal
-
-            if what == 'active':
-                descr = '-'
-            else:
-                descr = check["service_description"]
-
-            print (tty_bold + "%-32s" + tty_normal
+            print (tty_bold + "%-44s" + tty_normal
                    + ty_color + " %-6s " + tty_normal
-                   + " %-3s    %-3s    %s") % \
-                  (check_type, what, p, i, descr)
+                   + "%s") % \
+                  (check_type, what, title)
         except Exception, e:
             sys.stderr.write("ERROR in check_type %s: %s\n" % (check_type, e))
 
@@ -710,9 +704,6 @@ def get_snmp_character_encoding(hostname):
     entries = host_extra_conf(hostname, snmp_character_encodings)
     if len(entries) > 0:
         return entries[0]
-
-def check_uses_snmp(check_type):
-    return snmp_info.get(check_type.split(".")[0]) != None
 
 def is_snmp_host(hostname):
     return in_binary_hostlist(hostname, snmp_hosts)
@@ -2385,7 +2376,7 @@ define service {
   check_command\t\t\t%s
   active_checks_enabled\t\t1
 %s}
-""" % (template, hostname, make_utf8(description), simulate_command(command), extraconf))
+""" % (template, hostname, make_utf8(description), make_utf8(simulate_command(command)), extraconf))
 
             # write service dependencies for active checks
             outfile.write(get_dependencies(hostname,description))
@@ -2411,7 +2402,7 @@ define service {
                 continue
 
             if command_line:
-                command_line = autodetect_plugin(command_line)
+                command_line = autodetect_plugin(command_line).replace("\\", "\\\\")
 
             if "freshness" in entry:
                 freshness = "  check_freshness\t\t1\n" + \
@@ -2541,7 +2532,7 @@ define hostgroup {
     # No creation of host groups but we need to define
     # default host group
     elif default_host_group in hostgroups_to_define:
-	outfile.write("""
+        outfile.write("""
 define hostgroup {
   hostgroup_name\t\t%s
   alias\t\t\t\tCheck_MK default hostgroup
@@ -2930,8 +2921,8 @@ def make_inventory(checkname, hostnamelist, check_only=False, include_state=Fals
                 # handling for WATO.
                 if check_only and not include_state and str(e):
                     raise
-		elif not include_state and str(e):
-		    sys.stderr.write("Host '%s': %s\n" % (hostname, str(e)))
+                elif not include_state and str(e):
+                    sys.stderr.write("Host '%s': %s\n" % (hostname, str(e)))
                 elif include_state and str(e): # WATO automation. Abort
                     raise
                 continue
@@ -2940,7 +2931,7 @@ def make_inventory(checkname, hostnamelist, check_only=False, include_state=Fals
                 # handling for WATO.
                 if check_only and not include_state and str(e):
                     raise
-		elif not include_state and str(e):
+                elif not include_state and str(e):
                     sys.stderr.write("Host '%s': %s\n" % (hostname, str(e)))
                 continue
             except Exception, e:
@@ -2958,15 +2949,18 @@ def make_inventory(checkname, hostnamelist, check_only=False, include_state=Fals
                 else:
                     # New preferred style since 1.1.11i3: only one argument: info
                     inventory = inventory_function(info)
-
                 if inventory == None: # tolerate if function does no explicit return
                     inventory = []
+
+                # New yield based api style
+                if type(inventory) != list:
+                    inventory = list(inventory)
             except Exception, e:
                 if opt_debug:
                     sys.stderr.write("Exception in inventory function of check type %s\n" % checkname)
                     raise
                 if opt_verbose:
-		    sys.stderr.write("%s: Invalid output from agent or invalid configuration: %s\n" % (hostname, e))
+                    sys.stderr.write("%s: Invalid output from agent or invalid configuration: %s\n" % (hostname, e))
                 continue
 
             if not isinstance(inventory, list):
@@ -3074,7 +3068,7 @@ def check_inventory(hostname):
             if check_uses_snmp(ct) and not is_snmp:
                 continue # Skip SNMP checks on non-SNMP hosts
             elif check_uses_snmp(ct) and ct not in hosts_checktypes and ct not in snmp_checktypes:
- 		continue # Only try positive scans and existing types
+                continue # Only try positive scans and existing types
             elif not check_uses_snmp(ct) and not is_tcp:
                 continue # Skip TCP checks on non-TCP hosts
 
@@ -3564,8 +3558,6 @@ no_inventory_possible = None
 #   | that is used by the official Check_MK documentation ("nowiki").      |
 #   '----------------------------------------------------------------------'
 
-opt_nowiki   = False
-
 def get_tty_size():
     import termios,struct,fcntl
     try:
@@ -3611,7 +3603,12 @@ def read_manpage_catalog():
         if filename.startswith("."):
             continue
         parsed = parse_man_header(checkname, path)
-        cat = parsed["catalog"]
+        try:
+            cat = parsed["catalog"]
+        except KeyError:
+            sys.stderr.write('ERROR: Invalid manpage: %s (Catalog info missing)\n' % checkname)
+            continue
+
         if not cat:
             cat = [ "unsorted" ]
 
@@ -3861,7 +3858,7 @@ def show_check_manual(checkname):
             return re.sub('(?<!{){', bold_color, re.sub('(?<!})}', tty_normal + attr, line))
 
         def print_sectionheader(left, right):
-            print_splitline(title_color_left, "%-19s" % left, title_color_right, right)
+            print_splitline(title_color_left, "%-25s" % left, title_color_right, right)
 
         def print_subheader(line):
             empty_line()
@@ -3993,12 +3990,12 @@ def show_check_manual(checkname):
                          "solaris":"Solaris", "windows":"Windows", "snmp":"SNMP",
                          "openvms" : "OpenVMS", "vsphere" : "vSphere" }
                          .get(agent, agent.upper()))
-        print_splitline(header_color_left, "Supported Agents:  ", header_color_right, ", ".join(ags))
+        print_splitline(header_color_left, "Supported Agents:        ", header_color_right, ", ".join(ags))
         distro = header['distribution']
         if distro == 'check_mk':
             distro = "official part of Check_MK"
-        print_splitline(header_color_left, "Distribution:      ", header_color_right, distro)
-        print_splitline(header_color_left, "License:           ", header_color_right, header['license'])
+        print_splitline(header_color_left, "Distribution:            ", header_color_right, distro)
+        print_splitline(header_color_left, "License:                 ", header_color_right, header['license'])
 
         empty_line()
         print_textbody(header['description'])
@@ -4368,9 +4365,6 @@ def do_snmptranslate(walk):
             for idx, line in enumerate(result):
                 result_lines.append((line, lines[idx]))
 
-            # Add missing fields one by one
-            for line in lines[len(result_lines):]:
-                result_lines.extend(translate([line]))
         except Exception, e:
             print e
 
@@ -4378,17 +4372,21 @@ def do_snmptranslate(walk):
 
 
     # Translate n-oid's per cycle
-    entries_per_cycle = 50
+    entries_per_cycle = 500
     translated_lines = []
 
     walk_lines = file(path_walk).readlines()
-    sys.stderr.write("Processing %d lines (%d per dot)\n" %  (len(walk_lines), entries_per_cycle))
-    for i in range(0, len(walk_lines), entries_per_cycle):
-        sys.stderr.write(".")
+    sys.stderr.write("Processing %d lines.\n" %  len(walk_lines))
+
+    i = 0
+    while i < len(walk_lines):
+        sys.stderr.write("\r%d to go...    " % (len(walk_lines) - i))
         sys.stderr.flush()
         process_lines = walk_lines[i:i+entries_per_cycle]
-        translated_lines.extend(translate(process_lines))
-    sys.stderr.write("\n")
+        translated = translate(process_lines)
+        i += len(translated)
+        translated_lines += translated
+    sys.stderr.write("\rfinished.                \n")
 
     # Output formatted
     longest_translation = 40
@@ -4554,8 +4552,8 @@ def dump_host(hostname):
         add_txt = " (cluster of " + (",".join(nodes_of(hostname))) + ")"
         try:
             ipaddress = lookup_ipaddress(hostname)
-	except:
-	    ipaddress = "0.0.0.0"
+        except:
+            ipaddress = "0.0.0.0"
     else:
         color = tty_bgblue
         try:
@@ -4720,10 +4718,11 @@ def usage():
  cmk -P, --package COMMAND            do package operations
  cmk --localize COMMAND               do localization operations
  cmk --notify                         used to send notifications from core
- cmk --create-rrd [--keepalive|SPEC]  create round robin database
+ cmk --create-rrd [--keepalive|SPEC]  create round robin database (only CMC)
+ cmk --convert-rrds [--split] [H...]  convert exiting RRD to new format (only CMC)
  cmk -i, --inventory [HOST1 HOST2...] Do a HW/SW-Inventory of some ar all hosts
  cmk --inventory-as-check HOST        Do HW/SW-Inventory, behave like check plugin
- cmk -A, --bake-agents [H1 H2 ..]     Bake agents for hosts (no in all versions)
+ cmk -A, --bake-agents [-f] [H1 H2..] Bake agents for hosts (not in all versions)
  cmk -V, --version                    print version
  cmk -h, --help                       print this help
 
@@ -4741,6 +4740,9 @@ OPTIONS:
                  prevents DNS lookups.
   --usewalk      use snmpwalk stored with --snmpwalk
   --debug        never catch Python exceptions
+  --interactive  Some errors are only reported in interactive mode, i.e. if stdout
+                 is a TTY. This option forces interactive mode even if the output
+                 is directed into a pipe or file.
   --procs N      start up to N processes in parallel during --scan-parents
   --checks A,..  restrict checks/inventory to specified checks (tcp/snmp/check type)
   --keepalive    used by Check_MK Mirco Core: run check and --notify in continous
@@ -4832,8 +4834,17 @@ NOTES:
   defines gateway hosts and parent declarations.
 
   -A, --bake-agents creates RPM/DEB/MSI packages with host-specific
-  monitoring agents. Note: this feature is only contained in the
+  monitoring agents. If you add the option -f, --force then all
+  agents are renewed, even if an uptodate version for a configuration
+  already exists. Note: baking agents is only contained in the
   subscription version of Check_MK.
+
+  --convert-rrds converts the internal structure of existing RRDs
+  to the new structure as configured via the rulesets cmc_host_rrd_config
+  and cmc_service_rrd_config. If you do not specify hosts, then all
+  RRDs will be converted. Conversion just takes place if the configuration
+  of the RRDs has changed. The option --split will activate conversion
+  from exising RRDs in PNP storage type SINGLE to MULTIPLE.
 
 
 """ % (check_mk_configfile,
@@ -4857,8 +4868,13 @@ def do_create_config():
     if bake_agents_on_restart and 'do_bake_agents' in globals():
         sys.stdout.write("Baking agents...")
         sys.stdout.flush()
-        do_bake_agents()
-        sys.stdout.write(tty_ok + "\n")
+        try:
+            do_bake_agents()
+            sys.stdout.write(tty_ok + "\n")
+        except Exception, e:
+            if opt_debug:
+               raise
+            sys.stdout.write("Error: %s\n" % e)
 
 
 def do_output_nagios_conf(args):
@@ -5022,6 +5038,10 @@ def do_donation():
             for f in cache_files:
                 if f == host or f.startswith("%s." % host):
                     donate.append(f)
+    if not donate:
+        sys.stderr.write("No hosts specified. You need to set donation_hosts in main.mk.\n")
+        sys.exit(1)
+
     if opt_verbose:
         print "Donating files %s" % " ".join(cache_files)
     import base64
@@ -5400,10 +5420,44 @@ def copy_globals():
         if varname not in [ "g_service_description", "g_multihost_checks",
                             "g_check_table_cache", "g_singlehost_checks",
                             "total_check_outout", "g_nodesof_cache",
-                            "g_initial_times" ] \
+                            "g_initial_times", "g_keepalive_initial_memusage",
+                            "g_dns_cache", "g_ip_lookup_cache" ] \
             and type(value).__name__ not in [ "function", "module", "SRE_Pattern" ]:
             global_saved[varname] = copy.copy(value)
     return global_saved
+
+
+# Determine currently (VmSize, VmRSS) in Bytes
+def current_memory_usage():
+    parts = file('/proc/self/stat').read().split()
+    vsize = int(parts[22])        # in Bytes
+    rss   = int(parts[23]) * 4096 # in Pages
+    return (vsize, rss)
+
+keepalive_memcheck_cycle = 20
+g_keepalive_initial_memusage = None
+def keepalive_check_memory(num_checks, keepalive_fd):
+    if num_checks % keepalive_memcheck_cycle != 0: # Only do this after every 10 checks
+        return
+
+    global g_keepalive_initial_memusage
+    if not g_keepalive_initial_memusage:
+        g_keepalive_initial_memusage = current_memory_usage()
+    else:
+        usage = current_memory_usage()
+        # Allow VM size to grow by at most 50%
+        if usage[0] > 1.5 * g_keepalive_initial_memusage[0]:
+            file(log_dir + "/cmc-helper.log", "a") \
+                .write("%s [4] check helper[%d]: memory usage increased from %s to %s after %d check cycles. Restarting.\n" %
+                    (time.strftime("%F %T", time.localtime()), os.getpid(),
+                    get_bytes_human_readable(g_keepalive_initial_memusage[0]),
+                    get_bytes_human_readable(usage[0]), num_checks))
+            restart_myself(keepalive_fd)
+
+
+def restart_myself(keepalive_fd):
+    sys.argv = [ x for x in sys.argv if not x.startswith('--keepalive-fd=') ]
+    os.execvp("cmk", sys.argv + [ "--keepalive-fd=%d" % keepalive_fd ])
 
 
 def do_check_keepalive():
@@ -5429,6 +5483,8 @@ def do_check_keepalive():
         os.dup2(devnull, 1)
         os.close(devnull)
 
+    num_checks = 0 # count total number of check cycles
+
     global total_check_output
     total_check_output = ""
     if opt_debug:
@@ -5440,13 +5496,14 @@ def do_check_keepalive():
         cleanup_globals()
         hostname = keepalive_read_line()
         g_initial_times = os.times()
-        if not hostname:
-            break
+
         hostname = hostname.strip()
         if hostname == "*":
-            os.execvp("cmk", sys.argv + [ "--keepalive-fd=%d" % keepalive_fd ])
+            restart_myself(keepalive_fd)
         elif not hostname:
             break
+
+        num_checks += 1
 
         timeout = int(keepalive_read_line())
         try: # catch non-timeout exceptions
@@ -5472,8 +5529,10 @@ def do_check_keepalive():
                 signal.alarm(0)
             except MKCheckTimeout:
                 signal.signal(signal.SIGALRM, signal.SIG_IGN) # Prevent ALRM from CheckHelper.cc
-                status = 3
-                total_check_output = "UNKNOWN - Check_MK timed out after %d seconds\n" % timeout
+                spec = exit_code_spec(hostname)
+                status = spec.get("timeout", 2)
+                total_check_output = "%s - Check_MK timed out after %d seconds\n" % (
+                    nagios_state_names[status], timeout)
 
             os.write(keepalive_fd, "%03d\n%08d\n%s" %
                  (status, len(total_check_output), total_check_output))
@@ -5499,6 +5558,12 @@ def do_check_keepalive():
             total_check_output = "UNKNOWN - %s\n" % e
             os.write(keepalive_fd, "%03d\n%08d\n%s" %
                  (3, len(total_check_output), total_check_output))
+
+        keepalive_check_memory(num_checks, keepalive_fd)
+        # In case of profiling do just this one cycle and end afterwards
+        if g_profile:
+            output_profile()
+            sys.exit(0)
 
 
 # Just one lines from stdin. But: make sure that
@@ -5615,11 +5680,10 @@ def read_config_files(with_autochecks=True, with_conf_d=True):
             marks_hosts_with_path(_old_all_hosts, all_hosts, _f)
             marks_hosts_with_path(_old_clusters, clusters.keys(), _f)
         except Exception, e:
-            sys.stderr.write("Cannot read in configuration file %s:\n%s\n" % (_f, e))
-            if __name__ == "__main__":
-                sys.exit(3)
-            else:
+            if opt_debug:
                 raise
+            else:
+                interactive_abort("Cannot read in configuration file %s: %s" % (_f, e))
 
     # Strip off host tags from the list of all_hosts.  Host tags can be
     # appended to the hostnames in all_hosts, separated by pipe symbols,
@@ -5874,16 +5938,21 @@ def output_profile():
 #   | Main entry point and option parsing. Here is where all begins.       |
 #   '----------------------------------------------------------------------'
 
+opt_nowiki     = False
+opt_split_rrds = False
+
+
 # Do option parsing and execute main function -
 # if check_mk is not called as module
 if __name__ == "__main__":
-    short_options = 'ASHVLCURODMmd:Ic:nhvpXPNBil'
-    long_options = [ "help", "version", "verbose", "compile", "debug",
+    short_options = 'ASHVLCURODMmd:Ic:nhvpXPNBilf'
+    long_options = [ "help", "version", "verbose", "compile", "debug", "interactive",
                      "list-checks", "list-hosts", "list-tag", "no-tcp", "cache",
                      "flush", "package", "localize", "donate", "snmpwalk", "oid=", "extraoid=",
-                     "snmptranslate", "bake-agents",
+                     "snmptranslate", "bake-agents", "force",
                      "usewalk", "scan-parents", "procs=", "automation=", "notify",
                      "snmpget=", "profile", "keepalive", "keepalive-fd=", "create-rrd",
+                     "convert-rrds", "split-rrds",
                      "no-cache", "update", "restart", "reload", "dump", "fake-dns=",
                      "man", "nowiki", "config-check", "backup=", "restore=",
                      "check-inventory=", "paths", "checks=", "inventory", "inventory-as-check=",
@@ -5891,7 +5960,7 @@ if __name__ == "__main__":
 
     non_config_options = ['-L', '--list-checks', '-P', '--package', '-M', '--notify',
                           '--man', '-V', '--version' ,'-h', '--help', '--automation',
-                          '--create-rrd' ]
+                          '--create-rrd', '--convert-rrds' ]
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], short_options, long_options)
@@ -5912,6 +5981,8 @@ if __name__ == "__main__":
     for o,a in opts:
         if o in [ '-v', '--verbose' ]:
             opt_verbose = True
+        elif o in [ '-f', '--force' ]:
+            opt_force = True
         elif o == '-c':
             check_mk_configfile = a
         elif o == '--cache':
@@ -5944,12 +6015,16 @@ if __name__ == "__main__":
             opt_nowiki = True
         elif o == '--debug':
             opt_debug = True
+        elif o == '--interactive':
+            opt_interactive = True
         elif o == '-I':
             seen_I += 1
         elif o == "--checks":
             check_types = a.split(",")
         elif o == "--cmc-file":
             opt_cmc_relfilename = a
+        elif o == "--split-rrds":
+            opt_split_rrds = True
 
     # Perform actions (major modes)
     try:
@@ -6084,6 +6159,11 @@ if __name__ == "__main__":
                 read_config_files(False, True)
                 execfile(modules_dir + "/rrd.py")
                 do_create_rrd(args)
+                done = True
+            elif o == '--convert-rrds':
+                read_config_files(False, True)
+                execfile(modules_dir + "/rrd.py")
+                do_convert_rrds(args)
                 done = True
             elif o in [ '-A', '--bake-agents' ]:
                 if 'do_bake_agents' not in globals():

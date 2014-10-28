@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -26,7 +26,7 @@
 
 # Functions and definitions used by if and if64
 
-if_inventory_porttypes = [ '6', '32', '62', '117' ]
+if_inventory_porttypes = [ '6', '32', '62', '117', '127', '128', '129', '180', '181', '182', '205','229' ]
 if_inventory_portstates = [ '1' ]
 if_inventory_uses_description = False
 if_inventory_uses_alias = False
@@ -570,7 +570,7 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
                     infotext += ", %s: %s" % (what, format_value(traffic))
 
                     if speed:
-                        perc_used = 100.0 * traffic / speed
+                        perc_used = 100.0 * traffic / (speed / 8)
 
                         assumed_info = ""
                         if assumed_speed_in or assumed_speed_out:

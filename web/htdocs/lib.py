@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -344,6 +344,9 @@ def release_lock(path):
             g_aquired_locks.remove((lock_path, fd))
     g_locked_paths.remove(path)
 
+def have_lock(path):
+    return path in g_locked_paths
+
 def release_all_locks():
     global g_aquired_locks, g_locked_paths
     for path, fd in g_aquired_locks:
@@ -365,6 +368,19 @@ def regex(r):
     return rx
 
 
+# Splits a word into sequences of numbers and non-numbers.
+# Creates a tuple from these where the number are converted
+# into int datatype. That way a naturual sort can be
+# implemented.
+def num_split(s):
+    if not s:
+        return ()
+    elif s[0].isdigit():
+        first_num = regex("[^0-9]").split(s)[0]
+        return ( int(first_num), ) + num_split(s[len(first_num):])
+    else:
+        first_word = regex("[0-9]").split(s)[0]
+        return ( first_word, ) + num_split(s[len(first_word):])
 
 
 __builtin__.default_user_localizations = {
@@ -387,3 +403,40 @@ __builtin__.default_user_localizations = {
      u'SNMP (Networking device, Appliance)': { "de": u"SNMP (Netzwerkgerät, Appliance)", },
 }
 
+try:
+    import ast
+    literal_eval = ast.literal_eval
+except ImportError:
+    # python <2.5 compatibility
+    try:
+        from compiler import parse
+        import compiler.ast
+        def literal_eval(node_or_string):
+            _safe_names = {'none': none, 'true': true, 'false': false}
+
+            if isinstance(node_or_string, basestring):
+                node_or_string = parse(node_or_string, mode='eval')
+            if isinstance(node_or_string, compiler.ast.expression):
+                node_or_string = node_or_string.node
+
+            def _convert(node):
+                if isinstance(node, compiler.ast.const) and isinstance(node.value,
+                        (basestring, int, float, long, complex)):
+                     return node.value
+                elif isinstance(node, compiler.ast.tuple):
+                    return tuple(map(_convert, node.nodes))
+                elif isinstance(node, compiler.ast.list):
+                    return list(map(_convert, node.nodes))
+                elif isinstance(node, compiler.ast.dict):
+                    return dict((_convert(k), _convert(v)) for k, v
+                                in node.items)
+                elif isinstance(node, compiler.ast.name):
+                    if node.name in _safe_names:
+                        return _safe_names[node.name]
+                elif isinstance(node, compiler.ast.unarysub):
+                    return -_convert(node.expr)
+                raise valueerror('malformed string')
+
+            return _convert(node_or_string)
+    except:
+        literal_eval = none

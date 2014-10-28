@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -79,6 +79,7 @@ multisite_datasources["hosts"] = {
     "keys"    : [ "host_name", "host_downtimes" ],
     "join"    : ( "services", "host_name" ),
     "idkeys"  : [ "site", "host_name" ],
+    "description"    : _("Displays a list of hosts."),
 }
 
 multisite_datasources["hostsbygroup"] = {
@@ -88,6 +89,8 @@ multisite_datasources["hostsbygroup"] = {
     "keys"    : [ "host_name", "host_downtimes" ],
     "join"    : ( "services", "host_name" ),
     "idkeys"  : [ "site", "hostgroup_name", "host_name" ],
+    "description" : _("Using this, datasources host rows might appear multiple times depending "
+                      "on their membership in hostgroups."),
 }
 
 multisite_datasources["services"] = {
@@ -171,6 +174,7 @@ multisite_datasources["log"] = {
     "infos"    : [ "log", "host", "service", "contact", "command" ],
     "keys"     : [],
     "idkeys"   : [ "log_lineno" ],
+    "time_filters" : [ "logtime" ],
 }
 
 multisite_datasources["log_events"] = {
@@ -180,6 +184,7 @@ multisite_datasources["log_events"] = {
     "infos"       : [ "log", "host", "service" ],
     "keys"        : [],
     "idkeys"      : [ "log_lineno" ],
+    "time_filters" : [ "logtime" ],
 }
 
 multisite_datasources["log_host_events"] = {
@@ -189,6 +194,7 @@ multisite_datasources["log_host_events"] = {
     "infos"       : [ "log", "host" ],
     "keys"        : [],
     "idkeys"      : [ "log_lineno" ],
+    "time_filters" : [ "logtime" ],
 }
 
 multisite_datasources["alert_stats"] = {
@@ -200,4 +206,5 @@ multisite_datasources["alert_stats"] = {
     "keys"         : [],
     "idkeys"       : [ 'host_name', 'service_description' ],
     "ignore_limit" : True,
+    "time_filters" : [ "logtime" ],
 }

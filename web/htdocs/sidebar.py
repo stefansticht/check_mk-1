@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -69,7 +69,7 @@ def link(text, url, target="main", onclick = None):
     # [1] protocol://hostname/url/link.py
     # [2] /absolute/link.py
     # [3] relative.py
-    if not (":" in url[:10]) and url[0] != '/':
+    if not (":" in url[:10]) and not url.startswith("javascript") and url[0] != '/':
         url = defaults.url_prefix + "check_mk/" + url
     onclick = onclick and (' onclick="%s"' % html.attrencode(onclick)) or ''
     return '<a onfocus="if (this.blur) this.blur();" target="%s" ' \
@@ -182,9 +182,12 @@ def sidebar_foot():
     if config.may("general.configure_sidebar"):
         html.icon_button("sidebar_add_snapin.py", _("Add snapin to the sidebar"), "sidebar_addsnapin",
                          target="main")
-    if config.may("general.edit_profile") or config.may("general.change_password"):
-        html.icon_button("user_profile.py", _("Edit your personal settings, change your password"), "sidebar_settings",
-                         target="main")
+    # editing the profile is not possible on remote sites which are sync targets
+    # of a central WATO system
+    if config.wato_enabled and \
+       (config.may("general.edit_profile") or config.may("general.change_password")):
+        html.icon_button("user_profile.py", _("Edit your personal settings, change your password"),
+            "sidebar_settings", target="main")
     if config.may("general.logout") and not config.auth_by_http_header:
         html.icon_button("logout.py", _("Log out"), "sidebar_logout", target="_top")
 
@@ -210,7 +213,10 @@ def page_side():
     else:
         interval = 'null'
     html.html_head(_("Check_MK Sidebar"), javascripts=["sidebar"], stylesheets=["sidebar", "status"])
-    html.write('<body class="side" onload="initScrollPos(); setSidebarHeight(); init_messages(%s);" '
+    html.write('<body class="side')
+    if config.screenshotmode:
+        html.write(" screenshotmode")
+    html.write('" onload="initScrollPos(); setSidebarHeight(); init_messages(%s);" '
                'onunload="storeScrollPos()">\n' % interval)
     html.write('<div id="check_mk_sidebar">\n')
 
@@ -346,7 +352,7 @@ def ajax_openclose():
 
 def ajax_snapin():
     # Update online state of the user (if enabled)
-    userdb.update_user_access_time()
+    userdb.update_user_access_time(config.user_id)
 
     snapname = html.var("name")
     if snapname:
@@ -759,7 +765,7 @@ def search_url_tmpl(used_filters, row, exact = True):
             elif ty == 'servicegroups':
                 return 'view.py?view_name=servicegroup&servicegroup=%(name)s&site=%(site)s'
             elif ty == 'services':
-                return 'view.py?view_name=allservices&service=%(name)s&site=%(site)s'
+                return 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
         else: # Get the search template
             if plugin.get("search_url_tmpl_func"):
                 return plugin['search_url_tmpl_func'](used_filters, row_data)
@@ -769,13 +775,13 @@ def search_url_tmpl(used_filters, row, exact = True):
             # Default search templates
             ty = plugin.get("dftl_url_tmpl", plugin.get("id"))
             if ty == 'hosts':
-                return 'view.py?view_name=hosts&host=%(name)s'
+                return 'view.py?view_name=searchhost&host=%(name)s&filled_in=filter'
             elif ty == 'hostgroups':
                 return 'view.py?view_name=hostgroups&hostgroup_name=%(name)s&site=%(site)s'
             elif ty == 'servicegroups':
                 return 'view.py?view_name=svcgroups&servicegroup_name=%(name)s&site=%(site)s'
             elif ty == 'services':
-                return 'view.py?view_name=allservices&service=%(name)s&site=%(site)s'
+                return 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
 
     # Search the template
     url_tmpl = find_tmpl()

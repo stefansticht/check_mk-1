@@ -5,7 +5,7 @@ $!# |           | |   | '_ \ / _ \/ __| |/ /   | |\/| | ' /            |
 $!# |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 $!# |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 $!# |                                                                  |
-$!# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+$!# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 $!# +------------------------------------------------------------------+
 $!#
 $!# This file is part of Check_MK.
@@ -162,7 +162,7 @@ $set noVerify
 $define sys$output "''cacheFile'_new"
 $on error then goto WCFdone
 $say "<<<check_mk>>>"
-$say "Version: 1.2.5i4"
+$say "Version: 1.2.5i6"
 $say "AgentOS: openvms"
 $say "Nodename: ",f$getsyi("nodename")
 $say "Architecture: ''HWinfo'"

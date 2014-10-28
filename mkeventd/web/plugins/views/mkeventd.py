@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -284,6 +284,7 @@ if mkeventd_enabled:
         "infos"       : [ "event", "host" ],
         "keys"        : [],
         "idkeys"      : [ 'site', 'host_name', 'event_id' ],
+        "time_filters" : [ "event_first" ],
     }
 
     multisite_datasources["mkeventd_history"] = {
@@ -292,161 +293,9 @@ if mkeventd_enabled:
         "infos"       : [ "history", "event", "host" ],
         "keys"        : [],
         "idkeys"      : [ 'site', 'host_name', 'event_id', 'history_line' ],
+        "time_filters" : [ "history_time" ],
     }
 
-    #.
-    #   .--Filters-------------------------------------------------------------.
-    #   |                     _____ _ _ _                                      |
-    #   |                    |  ___(_) | |_ ___ _ __ ___                       |
-    #   |                    | |_  | | | __/ _ \ '__/ __|                      |
-    #   |                    |  _| | | | ||  __/ |  \__ \                      |
-    #   |                    |_|   |_|_|\__\___|_|  |___/                      |
-    #   |                                                                      |
-    #   '----------------------------------------------------------------------'
-
-    # All filters for events define a function event_headers, that
-    # returns header lines for the event daemon, if the filter is in
-    # use.
-    class EventFilterText(FilterText):
-        def __init__(self, table, filter_name, column, title, op):
-           FilterText.__init__(self, filter_name, title, table, column, filter_name, op)
-           self._table = table
-
-        # Disable Livestatus filter
-        def filter(self, infoname):
-            return ""
-
-        def event_headers(self):
-            return FilterText.filter(self, self._table)
-
-    declare_filter(200, EventFilterText("event",   "event_id",         "event_id",          _("Event ID"),                              "="))
-    declare_filter(200, EventFilterText("event",   "event_rule_id",    "event_rule_id",     _("ID of rule"),                            "="))
-    declare_filter(201, EventFilterText("event",   "event_text",       "event_text",        _("Message/Text of event"),                 "~~"))
-    declare_filter(201, EventFilterText("event",   "event_application","event_application", _("Application / Syslog-Tag"),              "~~"))
-    declare_filter(201, EventFilterText("event",   "event_contact",    "event_contact",     _("Contact Person"),                        "~~"))
-    declare_filter(201, EventFilterText("event",   "event_comment",    "event_comment",     _("Comment to the event"),                  "~~"))
-    declare_filter(201, EventFilterText("event",   "event_host_regex", "event_host",        _("Hostname/IP-Address of original event"), "~~"))
-    declare_filter(201, EventFilterText("event",   "event_host",       "event_host",        _("Hostname/IP-Address of event, exact match"), "="))
-    declare_filter(201, EventFilterText("event",   "event_owner",      "event_owner",       _("Owner of event"),                        "~~"))
-    declare_filter(221, EventFilterText("history", "history_who",      "history_who",       _("User that performed action"),            "~~"))
-    declare_filter(222, EventFilterText("history", "history_line",     "history_line",      _("Line number in history logfile"),        "="))
-
-
-    class EventFilterCount(Filter):
-        def __init__(self, name, title):
-            Filter.__init__(self, name, title, "event", [name + "_from", name + "_to"], [name])
-            self._name = name
-
-        def display(self):
-            html.write("from: ")
-            html.number_input(self._name + "_from", "")
-            html.write(" to: ")
-            html.number_input(self._name + "_to", "")
-
-        def filter(self, infoname):
-            return ""
-
-        def event_headers(self):
-            try:
-                f = ""
-                if html.var(self._name + "_from"):
-                    f += "Filter: event_count >= %d\n" % int(html.var(self._name + "_from"))
-                if html.var(self._name + "_to"):
-                    f += "Filter: event_count <= %d\n" % int(html.var(self._name + "_to"))
-                return f
-            except:
-                return ""
-
-
-    declare_filter(205, EventFilterCount("event_count", _("Message count")))
-
-    class EventFilterState(Filter):
-        def __init__(self, table, name, title, choices):
-            varnames = [ name + "_" + str(c[0]) for c in choices ]
-            Filter.__init__(self, name, title, table, varnames, [name])
-            self._name = name
-            self._choices = choices
-
-        def double_height(self):
-            return len(self._choices) >= 5
-
-        def display(self):
-            html.begin_checkbox_group()
-            chars = 0
-            for name, title in self._choices:
-                chars += len(title) + 2
-                html.checkbox(self._name + "_" + str(name), True, label=title)
-                if (title[0].isupper() and chars > 24) or \
-                    (title[0].islower() and chars > 36):
-                    html.write("<br>")
-                    chars = 0
-            html.end_checkbox_group()
-
-        def filter(self, infoname):
-            return ""
-
-        def event_headers(self):
-            sel = []
-            for name, title in self._choices:
-                if html.get_checkbox(self._name + "_" + str(name)):
-                    sel.append(str(name))
-            if len(sel) > 0 and len(sel) < len(self._choices):
-                return "Filter: %s in %s\n" % (self._name, " ".join(sel))
-
-
-
-    declare_filter(206, EventFilterState("event", "event_state", _("State classification"), [ (0, _("OK")), (1, _("WARN")), (2, _("CRIT")), (3,_("UNKNOWN")) ]))
-    declare_filter(207, EventFilterState("event", "event_phase", _("Phase"), mkeventd.phase_names.items()))
-    declare_filter(209, EventFilterState("event", "event_priority", _("Syslog Priority"), mkeventd.syslog_priorities))
-    declare_filter(225, EventFilterState("history", "history_what", _("History action type"), [(k,k) for k in mkeventd.action_whats.keys()]))
-
-
-    class EventFilterTime(FilterTime):
-        def __init__(self, table, name, title):
-            FilterTime.__init__(self, table, name, title, name)
-            self._table = table
-
-        def filter(self, infoname):
-            return ""
-
-        def event_headers(self):
-            return FilterTime.filter(self, self._table)
-
-    declare_filter(220, EventFilterTime("event", "event_first", _("First occurrance of event")))
-    declare_filter(221, EventFilterTime("event", "event_last", _("Last occurrance of event")))
-    declare_filter(222, EventFilterTime("history", "history_time", _("Time of entry in event history")))
-
-
-    class EventFilterDropdown(Filter):
-        def __init__(self, name, title, choices, operator = '=', column=None):
-            if column == None:
-                column = name
-            self._varname = "event_" + name
-            Filter.__init__(self, "event_" + name, title, "event", [ self._varname ], [ "event_" + column ])
-            self._choices = choices
-            self._column = column
-            self._operator = operator
-
-        def display(self):
-            if type(self._choices) == list:
-                choices = self._choices
-            else:
-                choices = self._choices()
-            html.select(self._varname, [ ("", "") ] + [(str(n),t) for (n,t) in choices])
-
-        def filter(self, infoname):
-            return ""
-
-        def event_headers(self):
-            val = html.var(self._varname)
-            if val:
-                return "Filter: event_%s %s %s\n" % (self._column, self._operator, val)
-
-
-
-    declare_filter(210, EventFilterDropdown("facility", _("Syslog Facility"), mkeventd.syslog_facilities))
-    declare_filter(211, EventFilterDropdown("sl", _("Service Level at least"), mkeventd.service_levels, operator='>='))
-    declare_filter(211, EventFilterDropdown("sl_max", _("Service Level at most"), mkeventd.service_levels, operator='<=', column="sl"))
 
     #.
     #   .--Painters------------------------------------------------------------.
@@ -892,7 +741,7 @@ if mkeventd_enabled:
 
     def mkeventd_view(d):
         x = {
-            'topic':           u'Event Console',
+            'topic':           _('Event Console'),
             'browser_reload':  60,
             'column_headers':  'pergroup',
             'icon':            'mkeventd',
@@ -916,8 +765,8 @@ if mkeventd_enabled:
 
     # Table of all open events
     multisite_builtin_views['ec_events'] = mkeventd_view({
-        'title':       u'Events',
-        'description': u'Table of all currently open events (handled and unhandled)',
+        'title':       _('Events'),
+        'description': _('Table of all currently open events (handled and unhandled)'),
         'datasource':  'mkeventd_events',
         'layout':      'table',
         'painters': [
@@ -960,8 +809,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_events_of_monhost'] = mkeventd_view({
-        'title':       u'Events of Monitored Host',
-        'description': u'Currently open events of a host that is monitored',
+        'title':       _('Events of Monitored Host'),
+        'description': _('Currently open events of a host that is monitored'),
         'datasource':  'mkeventd_events',
         'layout':      'table',
         'hidden':      True,
@@ -999,8 +848,8 @@ if mkeventd_enabled:
         ],
     })
     multisite_builtin_views['ec_events_of_host'] = mkeventd_view({
-        'title':       u'Events of Host',
-        'description': u'Currently open events of one specific host',
+        'title':       _('Events of Host'),
+        'description': _('Currently open events of one specific host'),
         'datasource':  'mkeventd_events',
         'layout':      'table',
         'hidden':      True,
@@ -1039,8 +888,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_event'] = mkeventd_view({
-        'title':        u'Event Details',
-        'description':  u'Details about one event',
+        'title':        _('Event Details'),
+        'description':  _('Details about one event'),
         'linktitle':    'Event Details',
         'datasource':   'mkeventd_events',
         'layout':       'dataset',
@@ -1078,9 +927,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_history_recent'] = mkeventd_view({
-        'title':       u'Recent Event History',
-        'description': u'Information about events and actions on events during the '
-                       u'recent 24 hours.',
+        'title':       _('Recent Event History'),
+        'description': _('Information about events and actions on events during the recent 24 hours.'),
         'datasource':  'mkeventd_history',
         'layout':      'table',
 
@@ -1132,8 +980,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_historyentry'] = mkeventd_view({
-        'title':        u'Event History Entry',
-        'description':  u'Details about a historical event history entry',
+        'title':        _('Event History Entry'),
+        'description':  _('Details about a historical event history entry'),
         'datasource':   'mkeventd_history',
         'layout':       'dataset',
 
@@ -1173,8 +1021,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_history_of_event'] = mkeventd_view({
-        'title':        u'History of Event',
-        'description':  u'History entries of one specific event',
+        'title':        _('History of Event'),
+        'description':  _('History entries of one specific event'),
         'datasource':   'mkeventd_history',
         'layout':       'table',
         'columns':      1,
@@ -1207,8 +1055,8 @@ if mkeventd_enabled:
     })
 
     multisite_builtin_views['ec_history_of_host'] = mkeventd_view({
-        'title':        u'Event History of Host',
-        'description':  u'History entries of one specific host',
+        'title':        _('Event History of Host'),
+        'description':  _('History entries of one specific host'),
         'datasource':   'mkeventd_history',
         'layout':       'table',
         'columns':      1,
@@ -1260,3 +1108,114 @@ if mkeventd_enabled:
             ('history_line', True),
         ],
     })
+
+    multisite_builtin_views['ec_event_mobile'] = \
+         {'browser_reload': 0,
+          'column_headers': 'pergroup',
+          'context': {},
+          'datasource': 'mkeventd_events',
+          'description': u'Details about one event\n',
+          'group_painters': [],
+          'hidden': True,
+          'hidebutton': False,
+          'icon': 'mkeventd',
+          'layout': 'mobiledataset',
+          'linktitle': u'Event Details',
+          'mobile': True,
+          'name': 'ec_event_mobile',
+          'num_columns': 1,
+          'painters': [('event_state', None, None),
+                       ('event_host', None, None),
+                       ('host_address', 'hoststatus', None),
+                       ('host_contacts', None, None),
+                       ('host_icons', None, None),
+                       ('event_text', None, None),
+                       ('event_comment', None, None),
+                       ('event_owner', None, None),
+                       ('event_first', None, None),
+                       ('event_last', None, None),
+                       ('event_id', None, None),
+                       ('event_icons', None, None),
+                       ('event_count', None, None),
+                       ('event_sl', None, None),
+                       ('event_contact', None, None),
+                       ('event_contact_groups', None, None),
+                       ('event_application', None, None),
+                       ('event_pid', None, None),
+                       ('event_priority', None, None),
+                       ('event_facility', None, None),
+                       ('event_rule_id', None, None),
+                       ('event_phase', None, None),
+                       ('host_services', None, None)],
+          'public': True,
+          'single_infos': ['event'],
+          'sorters': [],
+          'title': u'Event Details',
+          'topic': u'Event Console',
+          'user_sortable': True}
+
+    multisite_builtin_views['ec_events_mobile'] = \
+          {'browser_reload': 60,
+           'column_headers': 'pergroup',
+           'context': {'event_application': {'event_application': ''},
+                       'event_comment': {'event_comment': ''},
+                       'event_contact': {'event_contact': ''},
+                       'event_count': {'event_count_from': '',
+                                       'event_count_to': ''},
+                       'event_facility': {'event_facility': ''},
+                       'event_first': {'event_first_from': '',
+                                       'event_first_from_range': '3600',
+                                       'event_first_until': '',
+                                       'event_first_until_range': '3600'},
+                       'event_host_regex': {'event_host_regex': ''},
+                       'event_id': {'event_id': ''},
+                       'event_last': {'event_last_from': '',
+                                      'event_last_from_range': '3600',
+                                      'event_last_until': '',
+                                      'event_last_until_range': '3600'},
+                       'event_phase': {'event_phase_ack': 'on',
+                                       'event_phase_closed': 'on',
+                                       'event_phase_counting': '',
+                                       'event_phase_delayed': '',
+                                       'event_phase_open': 'on'},
+                       'event_priority': {'event_priority_0': 'on',
+                                          'event_priority_1': 'on',
+                                          'event_priority_2': 'on',
+                                          'event_priority_3': 'on',
+                                          'event_priority_4': 'on',
+                                          'event_priority_5': 'on',
+                                          'event_priority_6': 'on',
+                                          'event_priority_7': 'on'},
+                       'event_rule_id': {'event_rule_id': ''},
+                       'event_sl': {'event_sl': ''},
+                       'event_sl_max': {'event_sl_max': ''},
+                       'event_state': {'event_state_0': 'on',
+                                       'event_state_1': 'on',
+                                       'event_state_2': 'on',
+                                       'event_state_3': 'on'},
+                       'event_text': {'event_text': ''},
+                       'hostregex': {'host_regex': ''}},
+           'datasource': 'mkeventd_events',
+           'description': u'Table of all currently open events (handled and unhandled)\n',
+           'group_painters': [],
+           'hidden': False,
+           'hidebutton': False,
+           'icon': 'mkeventd',
+           'layout': 'mobilelist',
+           'linktitle': u'Events',
+           'mobile': True,
+           'name': 'ec_events_mobile',
+           'num_columns': 1,
+           'owner': 'omdadmin',
+           'painters': [('event_id', 'ec_event_mobile', None),
+                        ('event_state', None, None),
+                        ('event_host', 'ec_events_of_host', None),
+                        ('event_application', None, None),
+                        ('event_text', None, None),
+                        ('event_last', None, None)],
+           'public': True,
+           'single_infos': [],
+           'sorters': [],
+           'title': u'Events',
+           'topic': u'Event Console',
+           'user_sortable': True}

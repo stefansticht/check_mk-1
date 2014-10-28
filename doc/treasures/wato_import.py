@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -42,6 +42,8 @@ except:
 
 folders = {}
 for line in datei:
+    if line.startswith('#'):
+        continue
     ordner, name, alias, ipaddress = line.split(';')[:4]
     if ordner:
         try:

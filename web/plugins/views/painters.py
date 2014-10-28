@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -97,17 +97,7 @@ multisite_painter_options["ts_format"] = {
 }
 
 multisite_painter_options["ts_date"] = {
-    'valuespec' : DropdownChoice(
-        title = _("Date format"),
-        default_value = "%Y-%m-%d",
-        choices = [
-            ("%Y-%m-%d", "1970-12-18"),
-            ("%d.%m.%Y", "18.12.1970"),
-            ("%m/%d/%Y", "12/18/1970"),
-            ("%d.%m.",   "18.12."),
-            ("%m/%d",    "12/18")
-        ],
-    )
+    'valuespec' : DateFormat(),
 }
 
 # This helper function returns the value of the given custom var
@@ -465,14 +455,14 @@ multisite_painters["svc_check_command"] = {
     "title"   : _("Service check command"),
     "short"   : _("Check command"),
     "columns" : ["service_check_command"],
-    "paint"   : lambda row: (None, row["service_check_command"]),
+    "paint"   : lambda row: (None, html.attrencode(row["service_check_command"])),
 }
 
 multisite_painters["svc_check_command_expanded"] = {
     "title"   : _("Service check command expanded"),
     "short"   : _("Check command expanded"),
     "columns" : ["service_check_command_expanded"],
-    "paint"   : lambda row: (None, row["service_check_command_expanded"]),
+    "paint"   : lambda row: (None, html.attrencode(row["service_check_command_expanded"])),
 }
 
 multisite_painters["svc_contacts"] = {
@@ -1258,7 +1248,7 @@ def paint_host_group_memberlist(row):
     for group in row["host_groups"]:
         link = "view.py?view_name=hostgroup&hostgroup=" + group
         if html.var("display_options"):
-            link += "&display_options=%s" % html.var("display_options")
+            link += "&display_options=%s" % html.attrencode(html.var("display_options"))
         links.append('<a href="%s">%s</a>' % (link, group))
     return "", ", ".join(links)
 
@@ -1705,8 +1695,11 @@ multisite_painters["log_message"] = {
 
 def paint_log_plugin_output(row):
     output = row["log_plugin_output"]
+    comment = row["log_comment"]
     if output:
         return "", format_plugin_output(output, row)
+    elif comment:
+        return "", comment
     else:
         log_type = row["log_type"]
         lst = row["log_state_type"]
@@ -1729,7 +1722,7 @@ def paint_log_plugin_output(row):
 multisite_painters["log_plugin_output"] = {
     "title"   : _("Log: output of check plugin"),
     "short"   : _("Check output"),
-    "columns" : ["log_plugin_output", "log_type", "log_state_type" ],
+    "columns" : ["log_plugin_output", "log_type", "log_state_type", "log_comment" ],
     "paint"   : paint_log_plugin_output,
 }
 
@@ -1933,14 +1926,6 @@ multisite_painters["host_tags_with_titles"] = {
     "sorter"  : 'host',
 }
 
-g_tags_by_id = {}
-def get_tag_group(tgid):
-    # Build a cache
-    if not g_tags_by_id:
-        for entry in config.wato_host_tags:
-            g_tags_by_id[entry[0]] = (entry[1], entry[2])
-
-    return g_tags_by_id.get(tgid)
 
 def paint_host_tag(row, tgid):
     tags_of_host = get_host_tags(row).split()

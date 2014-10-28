@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -36,16 +36,16 @@ config.declare_permission(
 )
 
 config.declare_permission(
-    'nagvis.Map_view_*',
-    _('View all maps'),
-    _('Grants read access to all maps.'),
+    'nagvis.Rotation_view_*',
+    _('Use all map rotations'),
+    _('Grants read access to all rotations.'),
     [ 'guest' ]
 )
 
 config.declare_permission(
-    'nagvis.Rotation_view_*',
-    _('Use all map rotations'),
-    _('Grants read access to all rotations.'),
+    'nagvis.Map_view_*',
+    _('View all maps'),
+    _('Grants read access to all maps.'),
     [ 'guest' ]
 )
 
@@ -61,4 +61,25 @@ config.declare_permission(
     _('Delete all maps'),
     _('Permits to delete all maps.'),
     []
+)
+
+config.declare_permission(
+    'nagvis.Map_view',
+    _('View permitted maps'),
+    _('Grants read access to all maps the user is a contact for.'),
+    ['user']
+)
+
+config.declare_permission(
+    'nagvis.Map_edit',
+    _('Edit permitted maps'),
+    _('Grants modify access to all maps the user is contact for.'),
+    ['user']
+)
+
+config.declare_permission(
+    'nagvis.Map_delete',
+    _('Delete permitted maps'),
+    _('Permits to delete all maps the user is contact for.'),
+    ['user']
 )

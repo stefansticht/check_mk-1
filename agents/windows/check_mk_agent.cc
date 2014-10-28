@@ -5,7 +5,7 @@
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 // |                                                                  |
-// | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+// | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
 // This file is part of Check_MK.
@@ -78,7 +78,8 @@
 //  | Declarations of macrosk, structs and function prototypes             |
 //  '----------------------------------------------------------------------'
 
-#define CHECK_MK_VERSION "1.2.5i4"
+const char *check_mk_version = CHECK_MK_VERSION;
+
 #define CHECK_MK_AGENT_PORT 6556
 #define SERVICE_NAME "Check_MK_Agent"
 #define KiloByte 1024
@@ -263,6 +264,9 @@ void close_crash_log();
 void crash_log(const char *format, ...);
 void lowercase(char* value);
 char* next_word(char** line);
+int get_perf_counter_id(const char* counter_name);
+void collect_script_data(script_execution_mode mode);
+void find_scripts();
 
 //  .----------------------------------------------------------------------.
 //  |                    ____ _       _           _                        |
@@ -595,7 +599,7 @@ void df_output_filesystem(SOCKET &out, char *volid)
         if (total.QuadPart > 0)
             perc_used = 100 - (100 * free_avail.QuadPart / total.QuadPart);
 
-        if (volume[0]) // have a volume name 
+        if (volume[0]) // have a volume name
             char_replace(' ', '_', volume);
         else
             strncpy(volume, volid, sizeof(volume));
@@ -1051,6 +1055,8 @@ bool output_eventlog_entry(SOCKET &out, char *dllpath, EVENTLOGRECORD *event, ch
         // but not entirely for sure - C:\WINDOWS
         if (strncasecmp(dllpath, "%SystemRoot%", 12) == 0)
             snprintf(dll_realpath, sizeof(dll_realpath), "%s%s", system_root(), dllpath + 12);
+        else if (strncasecmp(dllpath, "%windir%", 8) == 0)
+            snprintf(dll_realpath, sizeof(dll_realpath), "%s%s", system_root(), dllpath + 8);
         else
             snprintf(dll_realpath, sizeof(dll_realpath), "%s", dllpath);
 
@@ -1157,7 +1163,7 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
     EVENTLOGRECORD *event = (EVENTLOGRECORD *)buffer;
     while (bytesread > 0)
     {
-        crash_log("     - record %d: process_eventlog_entries bytesread %d, event->Length %d", *record_number, bytesread, event->Length); 
+        crash_log("     - record %d: process_eventlog_entries bytesread %d, event->Length %d", *record_number, bytesread, event->Length);
         *record_number = event->RecordNumber;
 
         char type_char;
@@ -1706,6 +1712,7 @@ typedef vector<condition_pattern*> condition_patterns_t;
 // C:/tmp/Testfile*.log
 struct glob_token {
     char *pattern;
+    bool  nocontext;
     bool  found_match;
 };
 typedef vector<glob_token*> glob_tokens_t;
@@ -1732,6 +1739,7 @@ struct logwatch_textfile {
     unsigned long long    file_size; // size of the file
     unsigned long long    offset;    // current fseek offset in the file
     bool                  missing;   // file no longer exists
+    bool                  nocontext; // do not report ignored lines
     file_encoding         encoding;
     condition_patterns_t *patterns;  // glob patterns applying for this file
 };
@@ -1869,7 +1877,7 @@ logwatch_textfile* get_logwatch_textfile(const char *filename)
 
 // Add a new textfile and to the global textfile list
 // and determine some initial values
-bool add_new_logwatch_textfile(const char *full_filename, condition_patterns_t *patterns)
+bool add_new_logwatch_textfile(const char *full_filename, glob_token* token, condition_patterns_t *patterns)
 {
     logwatch_textfile *new_textfile = new logwatch_textfile();
 
@@ -1885,9 +1893,10 @@ bool add_new_logwatch_textfile(const char *full_filename, condition_patterns_t *
     GetFileInformationByHandle(hFile, &fileinfo);
     CloseHandle(hFile);
 
-    new_textfile->path         = strdup(full_filename);
-    new_textfile->missing      = false;
-    new_textfile->patterns     = patterns;
+    new_textfile->path      = strdup(full_filename);
+    new_textfile->missing   = false;
+    new_textfile->patterns  = patterns;
+    new_textfile->nocontext = token->nocontext;
 
     // Hier aus den gespeicherten Hints was holen....
     bool found_hint = false;
@@ -1918,7 +1927,7 @@ bool add_new_logwatch_textfile(const char *full_filename, condition_patterns_t *
 
 // Check if the given full_filename already exists. If so, do some basic file integrity checks
 // Otherwise create a new textfile instance
-void update_or_create_logwatch_textfile(const char *full_filename, condition_patterns_t *patterns)
+void update_or_create_logwatch_textfile(const char *full_filename, glob_token* token, condition_patterns_t *patterns)
 {
     logwatch_textfile *textfile;
     if ((textfile = get_logwatch_textfile(full_filename)) != NULL)
@@ -1962,11 +1971,11 @@ void update_or_create_logwatch_textfile(const char *full_filename, condition_pat
         }
     }
     else
-        add_new_logwatch_textfile(full_filename, patterns); // Add new file
+        add_new_logwatch_textfile(full_filename, token, patterns); // Add new file
 }
 
 // Process a single expression (token) of a globline and try to find matching files
-void process_glob_expression(glob_token *glob_token, condition_patterns_t *patterns) 
+void process_glob_expression(glob_token *glob_token, condition_patterns_t *patterns)
 {
     WIN32_FIND_DATA data;
     char full_filename[512];
@@ -1981,11 +1990,11 @@ void process_glob_expression(glob_token *glob_token, condition_patterns_t *patte
             basename = glob_token->pattern;
         }
         snprintf(full_filename,sizeof(full_filename), "%s\\%s", basename, data.cFileName);
-        update_or_create_logwatch_textfile(full_filename, patterns);
+        update_or_create_logwatch_textfile(full_filename, glob_token, patterns);
 
         while (FindNextFile(h, &data)){
             snprintf(full_filename,sizeof(full_filename), "%s\\%s", basename, data.cFileName);
-            update_or_create_logwatch_textfile(full_filename, patterns);
+            update_or_create_logwatch_textfile(full_filename, glob_token, patterns);
         }
 
         if (end)
@@ -1995,7 +2004,7 @@ void process_glob_expression(glob_token *glob_token, condition_patterns_t *patte
 }
 
 // Add a new globline from the config file:
-// C:/Testfile D:/var/log/data.log D:/tmp/art*.log
+// C:/Testfile | D:/var/log/data.log D:/tmp/art*.log
 // This globline is split into tokens which are processed by process_glob_expression
 void add_globline(char *value)
 {
@@ -2016,6 +2025,16 @@ void add_globline(char *value)
         while (token) {
             token = lstrip(token);
             glob_token *new_token = new glob_token();
+
+            if (!strncmp(token, "nocontext", 9))
+            {
+                new_token->nocontext = true;
+                token += 9;
+                token = lstrip(token);
+            }
+            else
+                new_token->nocontext = false;
+
             new_token->pattern = strdup(token);
             new_globline->tokens->push_back(new_token);
             process_glob_expression(new_token, new_globline->patterns);
@@ -2051,7 +2070,7 @@ bool globmatch(const char *pattern, char *astring);
 
 // Remove missing files from list
 void cleanup_logwatch_textfiles()
-{ 
+{
     for (logwatch_textfiles_t::iterator it_tf = g_logwatch_textfiles.begin();
          it_tf != g_logwatch_textfiles.end();) {
         if ((*it_tf)->missing) {
@@ -2064,7 +2083,7 @@ void cleanup_logwatch_textfiles()
 }
 
 // Called on program exit
-void cleanup_logwatch() 
+void cleanup_logwatch()
 {
     // cleanup textfiles
     for (logwatch_textfiles_t::iterator it_tf = g_logwatch_textfiles.begin();
@@ -2107,7 +2126,7 @@ int fill_unicode_bytebuffer(FILE *file, char* buffer, int offset) {
     return read_bytes + offset;
 }
 
-int find_unicode_linebreak(char* buffer) {
+int find_crnl_end(char* buffer) {
     int index = 0;
     while (true) {
         if (index >= UNICODE_BUFFER_SIZE)
@@ -2119,39 +2138,51 @@ int find_unicode_linebreak(char* buffer) {
     return -1;
 }
 
-bool process_textfile_unicode(FILE *file, logwatch_textfile* textfile, SOCKET &out, bool write_output)
+struct process_textfile_response{
+    bool found_match;
+    int  unprocessed_bytes;
+};
+
+process_textfile_response process_textfile_unicode(FILE *file, logwatch_textfile* textfile, SOCKET &out, bool write_output)
 {
     verbose("Checking UNICODE file %s\n", textfile->path);
-
+    process_textfile_response response;
     char output_buffer[UNICODE_BUFFER_SIZE];
     char unicode_block[UNICODE_BUFFER_SIZE];
 
     condition_pattern *pattern = 0;
     int  buffer_level          = 0;     // Current bytes in buffer
     bool cut_line              = false; // Line does not fit in buffer
-    int  linebreak_offset;              // Byte index of CRLF in unicode block
+    int  crnl_end_offset;              // Byte index of CRLF in unicode block
+    int  old_buffer_level      = 0;
 
     memset(unicode_block, 0, UNICODE_BUFFER_SIZE);
 
     while (true) {
         // Only fill buffer if there is no CRNL present
-        if (find_unicode_linebreak(unicode_block) == -1) {
-            int old_buffer_level = buffer_level;
+        if (find_crnl_end(unicode_block) == -1) {
+            old_buffer_level = buffer_level;
             buffer_level = fill_unicode_bytebuffer(file, unicode_block, buffer_level);
 
             if (old_buffer_level == buffer_level)
                 break; // Nothing new, file finished
         }
 
-        linebreak_offset = find_unicode_linebreak(unicode_block);
-        if (linebreak_offset == -1) {
-            // This line is too long, only report up to the buffers size
-            cut_line = true;
+        crnl_end_offset = find_crnl_end(unicode_block);
+        if (crnl_end_offset == -1)
+        {
+            if (buffer_level == UNICODE_BUFFER_SIZE )
+                // This line is too long, only report up to the buffers size
+                cut_line = true;
+            else
+                // Missing CRNL... this line is not finished yet
+                continue;
         }
 
+        // Convert unicode to utf-8
         memset(output_buffer, 0, UNICODE_BUFFER_SIZE);
         WideCharToMultiByte(CP_UTF8, 0, (wchar_t*)unicode_block,
-                            cut_line ? (UNICODE_BUFFER_SIZE - 2) / 2 : (linebreak_offset - 4) / 2,
+                            cut_line ? (UNICODE_BUFFER_SIZE - 2) / 2 : (crnl_end_offset - 4) / 2,
                             output_buffer, sizeof(output_buffer), NULL, NULL);
 
         // Check line
@@ -2161,7 +2192,11 @@ bool process_textfile_unicode(FILE *file, logwatch_textfile* textfile, SOCKET &o
             pattern = *it_patt;
             if (globmatch(pattern->glob_pattern, output_buffer)){
                 if (!write_output && (pattern->state == 'C' || pattern->state == 'W' || pattern->state == 'O'))
-                    return true;
+                {
+                    response.found_match = true;
+                    response.unprocessed_bytes = buffer_level;
+                    return response;
+                }
                 state = pattern->state;
                 break;
             }
@@ -2174,28 +2209,36 @@ bool process_textfile_unicode(FILE *file, logwatch_textfile* textfile, SOCKET &o
 
         if (cut_line) {
             cut_line = false;
-            while (linebreak_offset == -1) {
+            buffer_level = 2;
+            while (crnl_end_offset == -1) {
                 memcpy(unicode_block, unicode_block + UNICODE_BUFFER_SIZE - 2, 2);
                 memset(unicode_block + 2, 0, UNICODE_BUFFER_SIZE - 2);
+                old_buffer_level = buffer_level;
                 buffer_level = fill_unicode_bytebuffer(file, unicode_block, 2);
-                if (buffer_level == 2)
+                if (old_buffer_level == buffer_level)
                     // Nothing new, file finished
                     break;
-                linebreak_offset = find_unicode_linebreak(unicode_block);
+                crnl_end_offset = find_crnl_end(unicode_block);
             }
         }
 
-        buffer_level = buffer_level - linebreak_offset;
-        memmove(unicode_block, unicode_block + linebreak_offset, buffer_level);
-        memset(unicode_block + buffer_level, 0, UNICODE_BUFFER_SIZE - buffer_level);
+        if (crnl_end_offset > 0) {
+           buffer_level = buffer_level - crnl_end_offset;
+           memmove(unicode_block, unicode_block + crnl_end_offset, buffer_level);
+           memset(unicode_block + buffer_level, 0, UNICODE_BUFFER_SIZE - buffer_level);
+        }
     }
-    return false;
+
+    response.found_match = false;
+    response.unprocessed_bytes = buffer_level;
+    return response;
 }
 
-bool process_textfile(FILE *file, logwatch_textfile* textfile, SOCKET &out, bool write_output)
+process_textfile_response process_textfile(FILE *file, logwatch_textfile* textfile, SOCKET &out, bool write_output)
 {
     char line[4096];
     condition_pattern *pattern = 0;
+    process_textfile_response response;
     verbose("Checking file %s\n", textfile->path);
 
     while (!feof(file)) {
@@ -2210,18 +2253,24 @@ bool process_textfile(FILE *file, logwatch_textfile* textfile, SOCKET &out, bool
              it_patt != textfile->patterns->end(); it_patt++) {
             pattern = *it_patt;
             if (globmatch(pattern->glob_pattern, line)){
-                if (!write_output && (pattern->state == 'C' || pattern->state == 'W' || pattern->state == 'O'))
-                    return true;
+                if (!write_output && (pattern->state == 'C' || pattern->state == 'W' || pattern->state == 'O')) 
+                {
+                    response.found_match = true;
+                    response.unprocessed_bytes = 0;
+                    return response;
+                }
                 state = pattern->state;
                 break;
             }
         }
 
-        if (write_output && strlen(line) > 0)
+        if (write_output && strlen(line) > 0 && !(textfile->nocontext && (state == 'I' || state == '.')))
             output(out, "%c %s\n", state, line);
     }
 
-    return false;
+    response.found_match = false;
+    response.unprocessed_bytes = 0;
+    return response;
 }
 
 
@@ -2291,22 +2340,22 @@ void section_logfiles(SOCKET &out)
         }
 
         fseek(file, (textfile->encoding == UNICODE && textfile->offset == 0) ? 2 : textfile->offset, SEEK_SET);
-        bool found_match;
+        process_textfile_response response;
         if (textfile->encoding == UNICODE)
-            found_match = process_textfile_unicode(file, textfile, out, false);
+            response = process_textfile_unicode(file, textfile, out, false);
         else
-            found_match = process_textfile(file, textfile, out, false);
+            response = process_textfile(file, textfile, out, false);
 
-        if (found_match) {
+        if (response.found_match) {
             fseek(file, (textfile->encoding == UNICODE && textfile->offset == 0) ? 2 : textfile->offset, SEEK_SET);
             if (textfile->encoding == UNICODE)
-                found_match = process_textfile_unicode(file, textfile, out, true);
+                response = process_textfile_unicode(file, textfile, out, true);
             else
-                found_match = process_textfile(file, textfile, out, true);
+                response = process_textfile(file, textfile, out, true);
         }
 
         fclose(file);
-        textfile->offset = textfile->file_size;
+        textfile->offset = textfile->file_size - response.unprocessed_bytes;
     }
 
     cleanup_logwatch_textfiles();
@@ -2522,7 +2571,7 @@ bool handle_script_config_variable(char *var, char *value, script_type type)
             user = lstrip(var + 7);
 
         runas_include* tmp = new runas_include();
-        memset(tmp, 0, sizeof(tmp));
+        memset(tmp, 0, sizeof(*tmp));
 
         if (user)
             snprintf(tmp->user, sizeof(tmp->user), user);
@@ -2738,7 +2787,7 @@ int launch_program(script_container* cont)
             while (out_offset + bread > current_heap_size) {
                 // Increase heap buffer
                 if (current_heap_size * 2 <= HEAP_BUFFER_MAX) {
-                    cont->buffer_work = (char *) HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 
+                    cont->buffer_work = (char *) HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                                                              cont->buffer_work, current_heap_size * 2);
                     current_heap_size = HeapSize(GetProcessHeap(), 0, cont->buffer_work);
                 }
@@ -2792,6 +2841,7 @@ DWORD WINAPI ScriptWorkerThread(LPVOID lpParam)
             cont->status       = SCRIPT_FINISHED;
             cont->last_problem = SCRIPT_NONE;
             cont->retry_count  = cont->max_retries;
+            cont->buffer_time  = time(0);
             break;
         case 1:
             cont->status       = SCRIPT_ERROR;
@@ -2841,7 +2891,6 @@ void run_script_container(script_container *cont)
         if (cont->status == SCRIPT_COLLECT || cont->status == SCRIPT_FINISHED) {
             return;
         }
-        cont->buffer_time = time(0);
         cont->status = SCRIPT_COLLECT;
 
         if (cont->worker_thread != INVALID_HANDLE_VALUE)
@@ -3158,7 +3207,7 @@ void section_check_mk(SOCKET &out)
 {
     crash_log("<<<check_mk>>>");
     output(out, "<<<check_mk>>>\n");
-    output(out, "Version: %s\n", CHECK_MK_VERSION);
+    output(out, "Version: %s\n", check_mk_version);
     output(out, "BuildDate: %s\n", __DATE__);
 #ifdef ENVIRONMENT32
     output(out, "Architecture: 32bit\n");
@@ -3716,7 +3765,7 @@ bool handle_global_config_variable(char *var, char *value)
             g_default_script_async_execution = SEQUENTIAL;
         return true;
     }
-    // Do no longer use this!
+    // Do not longer use this!
     else if (!strcmp(var, "caching_method")) {
         if (!strcmp(value, "async")) {
             g_default_script_async_execution = PARALLEL;
@@ -3783,19 +3832,31 @@ bool handle_global_config_variable(char *var, char *value)
 bool handle_winperf_config_variable(char *var, char *value)
 {
     if (!strcmp(var, "counters")) {
-        char *word;
-        while (0 != (word = next_word(&value))) {
-            char *colon = strchr(word, ':');
-            if (!colon) {
-                fprintf(stderr, "Invalid counter '%s' in section [winperf]: need number and colon, e.g. 238:processor.\n", word);
-                exit(1);
-            }
-            *colon = 0;
-            winperf_counter *tmp_counter = new winperf_counter();
-            tmp_counter->name = strdup(colon + 1);
-            tmp_counter->id = atoi(word);
-            g_winperf_counters.push_back(tmp_counter);
+        char *colon = strrchr(value, ':');
+        if (!colon) {
+            fprintf(stderr, "Invalid counter '%s' in section [winperf]: need number(or text) and colon, e.g. 238:processor.\n", value);
+            exit(1);
         }
+        *colon = 0;
+        winperf_counter *tmp_counter = new winperf_counter();
+        tmp_counter->name = strdup(colon + 1);
+
+        bool is_digit = true;
+        for (unsigned int i = 0; i < strlen(value); i++)
+            if (!isdigit(value[i])) {
+                is_digit = false;
+                int id = get_perf_counter_id(value);
+                if (id == -1) {
+                    fprintf(stderr, "No matching performance counter id found for %s.\n", value);
+                    return false;
+                }
+                tmp_counter->id = id;
+                break;
+            }
+
+        if(is_digit)
+            tmp_counter->id = atoi(value);
+        g_winperf_counters.push_back(tmp_counter);
         return true;
     }
     return false;
@@ -3808,19 +3869,23 @@ bool handle_logfiles_config_variable(char *var, char *value)
         if (value != 0)
             add_globline(value);
         return true;
-    }else if (!strcmp(var, "warn")) {
+    }
+    else if (!strcmp(var, "warn")) {
         if (value != 0)
             add_condition_pattern('W', value);
         return true;
-    }else if (!strcmp(var, "crit")) {
+    }
+    else if (!strcmp(var, "crit")) {
         if (value != 0)
             add_condition_pattern('C', value);
         return true;
-    }else if (!strcmp(var, "ignore")) {
+    }
+    else if (!strcmp(var, "ignore")) {
         if (value != 0)
             add_condition_pattern('I', value);
         return true;
-    }else if (!strcmp(var, "ok")) {
+    }
+    else if (!strcmp(var, "ok")) {
         if (value != 0)
             add_condition_pattern('O', value);
         return true;
@@ -3895,7 +3960,6 @@ bool handle_mrpe_config_variable(char *var, char *value)
     if (!strcmp(var, "check")) {
         // First word: service description
         // Rest: command line
-        fprintf(stderr, "VALUE: [%s]\r\n", value);
         char *service_description = next_word(&value);
         char *command_line = value;
         if (!command_line || !command_line[0]) {
@@ -3924,13 +3988,14 @@ bool handle_mrpe_config_variable(char *var, char *value)
                 sizeof(tmp_entry->plugin_name));
         g_mrpe_entries.push_back(tmp_entry);
         return true;
-    } else if (!strncmp(var, "include", 7)) {
+    }
+    else if (!strncmp(var, "include", 7)) {
         char *user = NULL;
         if (strlen(var) > 7)
             user = lstrip(var + 7);
 
         runas_include* tmp = new runas_include();
-        memset(tmp, 0, sizeof(tmp));
+        memset(tmp, 0, sizeof(*tmp));
 
         if (user)
             snprintf(tmp->user, sizeof(tmp->user), user);
@@ -4145,7 +4210,7 @@ void stop_threads()
             it_cont->second->should_terminate = 1;
         }
         it_cont++;
-    } 
+    }
     WaitForMultipleObjects(active_thread_count, hThreadArray, TRUE, 5000);
     TerminateJobObject(g_workers_job_object, 0);
 }
@@ -4182,6 +4247,24 @@ void listen_tcp_loop()
     // Job object for worker jobs. All worker are within this object
     // and receive a terminate when the agent ends
     g_workers_job_object = CreateJobObject(NULL, "workers_job");
+
+    // Run all ASYNC scripts on startup, so that their data is available on
+    // the first query of a client. Obviously, this slows down the agent startup...
+    // This procedure is mandatory, since we want to prevent missing agent sections
+    find_scripts();
+    collect_script_data(ASYNC);
+    DWORD dwExitCode = 0;
+    while (true)
+    {
+        if (GetExitCodeThread(g_collection_thread, &dwExitCode))
+        {
+            if (dwExitCode != STILL_ACTIVE)
+                break;
+            Sleep(200);
+        }
+        else
+            break;
+    }
 
     SOCKET connection;
     // Loop for ever.
@@ -4310,12 +4393,13 @@ void output(SOCKET &out, const char *format, ...)
 void usage()
 {
     fprintf(stderr, "Usage: \n"
-            "check_mk_agent version -- show version " CHECK_MK_VERSION " and exit\n"
+            "check_mk_agent version -- show version %s and exit\n"
             "check_mk_agent install -- install as Windows NT service Check_Mk_Agent\n"
             "check_mk_agent remove  -- remove Windows NT service\n"
             "check_mk_agent adhoc   -- open TCP port %d and answer request until killed\n"
             "check_mk_agent test    -- test output of plugin, do not open TCP port\n"
-            "check_mk_agent debug   -- similar to test, but with lots of debug output\n", g_port);
+            "check_mk_agent debug   -- similar to test, but with lots of debug output\n",
+            check_mk_version, g_port);
     exit(1);
 }
 
@@ -4466,6 +4550,18 @@ void do_adhoc()
     listen_tcp_loop(); // runs for ever or until Ctrl-C
 }
 
+void find_scripts()
+{
+    // Check if there are new scripts available
+    // Scripts in default paths
+    determine_available_scripts(g_plugins_dir, PLUGIN, NULL);
+    determine_available_scripts(g_local_dir,   LOCAL,  NULL);
+    // Scripts included with user permissions
+    for (script_include_t::iterator it_include = g_script_includes.begin();
+         it_include != g_script_includes.end(); it_include++)
+        determine_available_scripts((*it_include)->path, (*it_include)->type, (*it_include)->user);
+}
+
 void output_data(SOCKET &out)
 {
     // make sure, output of numbers is not localized
@@ -4476,15 +4572,7 @@ void output_data(SOCKET &out)
 
     update_script_statistics();
 
-
-    // Check if there are new scripts available
-    // Scripts in default paths
-    determine_available_scripts(g_plugins_dir, PLUGIN, NULL);
-    determine_available_scripts(g_local_dir,   LOCAL,  NULL);
-    // Scripts included with user permissions
-    for (script_include_t::iterator it_include = g_script_includes.begin();
-         it_include != g_script_includes.end(); it_include++)
-        determine_available_scripts((*it_include)->path, (*it_include)->type, (*it_include)->user);
+    find_scripts();
 
     if (enabled_sections & SECTION_CHECK_MK)
         section_check_mk(out);
@@ -4556,7 +4644,7 @@ void cleanup()
 
 void show_version()
 {
-    printf("Check_MK_Agent version %s\n", CHECK_MK_VERSION);
+    printf("Check_MK_Agent version %s\n", check_mk_version);
 }
 
 void get_agent_dir(char *buffer, int size)
@@ -4606,6 +4694,76 @@ void determine_directories()
     snprintf(g_local_dir, sizeof(g_local_dir), "%s\\local", g_agent_directory);
     snprintf(g_spool_dir, sizeof(g_spool_dir), "%s\\spool", g_agent_directory);
     snprintf(g_logwatch_statefile, sizeof(g_logwatch_statefile), "%s\\logstate.txt", g_agent_directory);
+
+    // Set these directories as environment variables. Some scripts might use them...
+    SetEnvironmentVariable("PLUGINSDIR", g_plugins_dir);
+    SetEnvironmentVariable("LOCALDIR",   g_local_dir);
+    SetEnvironmentVariable("SPOOLDIR",   g_spool_dir);
+    SetEnvironmentVariable("MK_CONFDIR", g_agent_directory);
+}
+
+int get_counter_id_from_lang(const char *language, const char *counter_name)
+{
+    HKEY hKey;
+    LONG result;
+    TCHAR szValueName[300000];
+    DWORD dwcbData = sizeof(szValueName);
+    char regkey[512];
+    snprintf(regkey, sizeof(regkey), "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\%s", language);
+    result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, regkey, REG_MULTI_SZ, KEY_READ, &hKey);
+    RegQueryValueEx(
+        hKey,
+        "Counter",
+        NULL,
+        NULL,
+        (LPBYTE) szValueName,
+        &dwcbData
+    );
+    RegCloseKey (hKey);
+
+    if (result != ERROR_SUCCESS) {
+        return -1;
+    }
+
+    int   length      = 0;
+    int   last_ctr_id = 0;
+    bool  is_name     = false;
+    DWORD offset      = 0;
+
+    TCHAR* ptr_perf = szValueName;
+    for(;;) {
+        if (offset > dwcbData)
+            break;
+
+        length = strlen(ptr_perf);
+        if (length == 0)
+            break;
+
+        if (is_name && !strcmp(counter_name, ptr_perf))
+            return last_ctr_id;
+        else
+            last_ctr_id = atoi(ptr_perf);
+
+        offset   = offset + length + 1;
+        ptr_perf = szValueName + offset;
+        is_name = !is_name;
+    }
+
+    return -1;
+}
+
+int get_perf_counter_id(const char *counter_name)
+{
+    int counter_id;
+    // Try to find it in current language
+    if ((counter_id = get_counter_id_from_lang("CurrentLanguage", counter_name)) != -1)
+        return counter_id;
+
+    // Try to find it in english
+    if ((counter_id = get_counter_id_from_lang("009", counter_name)) != -1)
+        return counter_id;
+
+    return -1;
 }
 
 int main(int argc, char **argv)

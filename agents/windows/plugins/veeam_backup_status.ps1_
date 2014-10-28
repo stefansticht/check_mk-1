@@ -78,6 +78,14 @@ foreach ($myJob in $myBackupJobs)
 		$myTaskTotalSize = $myTask.Progress.TotalSize
 
 		$myTaskText = "$myTaskText" + "TotalSizeByte" + "`t" + "$myTaskTotalSize" + "`n"
+		
+		$myTaskReadSize = $myTask.Progress.ReadSize
+		
+		$myTaskText = "$myTaskText" + "ReadSizeByte" + "`t" + "$myTaskReadSize" + "`n"
+		
+		$myTaskTransferedSize = $myTask.Progress.TransferedSize
+		
+		$myTaskText = "$myTaskText" + "TransferedSizeByte" + "`t" + "$myTaskTransferedSize" + "`n"
 
 		$myTaskStartTime = ""
 		$myTaskStartTime = $myTask.Progress.StartTime |  get-date -Format "dd.MM.yyyy HH:mm:ss"  -ErrorAction SilentlyContinue
@@ -115,7 +123,9 @@ foreach ($myJob in $myBackupJobs)
 }
 
 # Final output
-"$myJobsText" + "$myTaskText"
+write-host $myJobsText
+write-host $myTaskText
+# "$myJobsText" + "$myTaskText"
 
 
 # END OF TRY
@@ -129,3 +139,4 @@ $errItem = $_.Exception.ItemName
 Write-Error "Totally unexpected and unhandled error occured:`n Item: $errItem`n Error Message: $errMsg"
 Break
 }
+

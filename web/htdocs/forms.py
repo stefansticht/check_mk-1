@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -40,34 +40,66 @@ def get_input(valuespec, varprefix):
     return value
 
 
+def edit_dictionary(entries, value, **args):
+    result = edit_dictionaries([("value", entries)], {"value": value}, **args)
+    if result:
+        return result["value"]
+    else:
+        return result
 
-# preview = True: Do not output error messages, do not consume
-# current transaction. This is for preview mode
-def edit_dictionary(entries, value, focus=None, hover_help=True,
+# Edit a list of several dictionaries. Those can either be dictionary
+# valuespec or just a list of elements. Each entry in dictionaries is
+# a pair of key and either a list of elements or a Dictionary.
+def edit_dictionaries(dictionaries, value, focus=None, hover_help=True,
                     validate=None, buttontext=None, title=None,
                     buttons = None, method="GET", preview=False,
-                    varprefix="", formname="form"):
-    new_value = value.copy()
+                    varprefix="", formname="form", consume_transid = True):
+
+    # Convert list of entries/dictionaries
+    sections = []
+    for keyname, d in dictionaries:
+        if type(d) == list:
+            sections.append((keyname, title or _("Properties"), d))
+        else:
+            sections.append((keyname, None, d)) # valuespec Dictionary, title used from dict
+
     if html.var("filled_in") == formname and html.transaction_valid():
-        if not preview:
+        if not preview and consume_transid:
             html.check_transaction()
 
         messages = []
-        for name, vs in entries:
-            try:
-                v = vs.from_html_vars(varprefix + name)
-                vs.validate_value(v, varprefix + name)
-                new_value[name] = v
-            except MKUserError, e:
-                messages.append("%s: %s" % (vs.title(), e.message))
-                html.add_user_error(e.varname, e.message)
+        new_value = {}
+        for keyname, section_title, entries in sections:
+            new_value[keyname] = value.get(keyname, {}).copy()
+            if type(entries) == list:
+                for name, vs in entries:
+                    if len(sections) == 1:
+                        vp = varprefix
+                    else:
+                        vp = keyname + "_" + varprefix
+                    try:
+                        v = vs.from_html_vars(vp + name)
+                        vs.validate_value(v, keyname + "_" + varprefix + name)
+                        new_value[keyname][name] = v
+                    except MKUserError, e:
+                        messages.append("%s: %s" % (title, e.message))
+                        html.add_user_error(e.varname, e.message)
 
-        if validate and not html.has_user_errors():
-            try:
-                validate(new_value)
-            except MKUserError, e:
-                messages.append(e.message)
-                html.add_user_error(e.varname, e.message)
+            else:
+                try:
+                    edited_value = entries.from_html_vars(keyname)
+                    entries.validate_value(edited_value, keyname)
+                    new_value[keyname].update(edited_value)
+                except Exception, e:
+                    messages.append("%s: %s" % (entries.title() or _("Properties"), e.message))
+                    html.add_user_error(e.varname, e.message)
+
+            if validate and not html.has_user_errors():
+                try:
+                    validate(new_value[keyname])
+                except MKUserError, e:
+                    messages.append(e.message)
+                    html.add_user_error(e.varname, e.message)
 
         if messages:
             if not preview:
@@ -79,24 +111,34 @@ def edit_dictionary(entries, value, focus=None, hover_help=True,
 
 
     html.begin_form(formname, method=method)
-    header(title and title or _("Properties"))
-    first = True
-    for name, vs in entries:
-        section(vs.title())
-        html.help(vs.help())
-        if name in value:
-            v = value[name]
+    for keyname, title, entries in sections:
+        subvalue = value.get(keyname, {})
+        if type(entries) == list:
+            header(title)
+            first = True
+            for name, vs in entries:
+                section(vs.title())
+                html.help(vs.help())
+                if name in subvalue:
+                    v = subvalue[name]
+                else:
+                    v = vs.default_value()
+                if len(sections) == 1:
+                    vp = varprefix
+                else:
+                    vp = keyname + "_" + varprefix
+                vs.render_input(vp + name, v)
+                if (not focus and first) or (name == focus):
+                    vs.set_focus(vp + name)
+                    first = False
         else:
-            v = vs.default_value()
-        vs.render_input(varprefix + name, v)
-        if (not focus and first) or (name == focus):
-            vs.set_focus(varprefix + name)
-            first = False
+            entries.render_input(keyname, subvalue, form=True)
+
 
     end()
     if buttons:
-        for name, title, icon in buttons:
-            html.button(name, title)
+        for name, button_title, icon in buttons:
+            html.button(name, button_title)
     else:
         if buttontext == None:
             buttontext = _("Save")

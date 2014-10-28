@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -40,6 +40,8 @@ import help
 import bi
 import userdb
 import notify
+import webapi
+import visuals
 
 # map URLs to page rendering functions
 
@@ -50,8 +52,9 @@ pagehandlers.update({
    "ajax_switch_help"         : help.ajax_switch_help,
    "switch_site"              : main.ajax_switch_site,
    "edit_views"               : views.page_edit_views,
+   "create_view"              : views.page_create_view,
+   "create_view_infos"        : views.page_create_view_infos,
    "edit_view"                : views.page_edit_view,
-   "get_edit_column"          : views.ajax_get_edit_column,
    "count_context_button"     : views.ajax_count_button,
    "export_views"             : views.ajax_export,
    "ajax_set_viewoption"      : views.ajax_set_viewoption,
@@ -78,16 +81,25 @@ pagehandlers.update({
    "tree_openclose"           : weblib.ajax_tree_openclose,
    "edit_bookmark"            : sidebar.page_edit_bookmark,
    "nagios_action"            : actions.ajax_action,
+
    "dashboard"                : dashboard.page_dashboard,
-   "dashboard_resize"         : dashboard.ajax_resize,
-   "dashlet_overview"         : dashboard.dashlet_overview,
-   "dashlet_mk_logo"          : dashboard.dashlet_mk_logo,
-   "dashlet_hoststats"        : dashboard.dashlet_hoststats,
-   "dashlet_servicestats"     : dashboard.dashlet_servicestats,
-   "dashlet_pnpgraph"         : dashboard.dashlet_pnpgraph,
-   "dashlet_nodata"           : dashboard.dashlet_nodata,
+   "dashboard_dashlet"        : dashboard.ajax_dashlet,
+   "edit_dashboards"          : dashboard.page_edit_dashboards,
+   "create_dashboard"         : dashboard.page_create_dashboard,
+   "edit_dashboard"           : dashboard.page_edit_dashboard,
+   "edit_dashlet"             : dashboard.page_edit_dashlet,
+   "delete_dashlet"           : dashboard.page_delete_dashlet,
+   "create_view_dashlet"      : dashboard.page_create_view_dashlet,
+   "create_view_dashlet_infos": dashboard.page_create_view_dashlet_infos,
+   "ajax_dashlet_pos"         : dashboard.ajax_dashlet_pos,
+
+   "ajax_popup_add_visual"   : visuals.ajax_popup_add,
+   "ajax_add_visual"         : visuals.ajax_add_visual,
+
    "ajax_userdb_sync"         : userdb.ajax_sync,
    "notify"                   : notify.page_notify,
    "ajax_inv_render_tree"     : views.ajax_inv_render_tree,
+
+   "webapi"                   : webapi.page_api,
 })
 

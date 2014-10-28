@@ -170,6 +170,17 @@ td.graphs {
 img {
     margin-right: 10px;
 }
+
+table.context {
+    border-collapse: collapse;
+}
+
+table.context td {
+    border: 1px solid #888;
+    padding: 3px 8px;
+}
+
+
 </style>
 </head>
 <body>
@@ -220,6 +231,14 @@ body_elements = [
     "$HOSTOUTPUT$",
     "$HOSTOUTPUT$",),
 
+  ( "ack_author", "host", False, "Acknowledge Author",
+    "$HOSTACKAUTHORNAME$",
+    "$HOSTACKAUTHORNAME$",),
+
+  ( "ack_comment", "host", False, "Acknowledge Comment",
+    "$HOSTACKCOMMENT$",
+    "$HOSTACKCOMMENT$",),
+
   ( "perfdata", "host", False, "Performance Data",
     "$HOSTPERFDATA$",
     "$HOSTPERFDATA$",),
@@ -238,9 +257,27 @@ body_elements = [
     "$LONGSERVICEOUTPUT$",
     "$LONGSERVICEOUTPUT$",),
 
+  ( "ack_author", "service", False, "Acknowledge Author",
+    "$SERVICEACKAUTHOR$",
+    "$SERVICEACKAUTHOR$",),
+
+  ( "ack_comment", "service", False, "Acknowledge Comment",
+    "$SERVICEACKCOMMENT$",
+    "$SERVICEACKCOMMENT$",),
+
+  ( "perfdata", "host", False, "Performance Data",
+    "$HOSTPERFDATA$",
+    "$HOSTPERFDATA$",),
+
   ( "perfdata", "service", False, "Performance Data",
     "$SERVICEPERFDATA$",
     "$SERVICEPERFDATA$",),
+
+  # Debugging
+  ( "context", "both", False, "Complete variable list",
+    "$CONTEXT_ASCII$",
+    "$CONTEXT_HTML$",
+  )
 ]
 
 tmpl_host_subject = 'Check_MK: $HOSTNAME$ - $EVENT_TXT$'
@@ -258,9 +295,31 @@ def substitute_context(template, context):
     for varname, value in context.items():
         template = template.replace('$'+varname+'$', value)
 
+    # Debugging of variables. Create content only on demand
+    if "$CONTEXT_ASCII$" in template or "$CONTEXT_HTML$" in template:
+        template = replace_variable_context(template, context)
+
     # Remove the rest of the variables and make them empty
     template = re.sub("\$[A-Z_][A-Z_0-9]*\$", "", template)
     return template
+
+
+def replace_variable_context(template, context):
+    ascii_output = ""
+    html_output = "<table class=context>\n"
+    elements = context.items()
+    elements.sort()
+    for varname, value in elements:
+        ascii_output += "%s=%s\n" % (varname, value)
+        html_output += "<tr><td class=varname>%s</td><td class=value>%s</td></tr>\n" % (
+            varname, encode_entities(value))
+    html_output += "</table>\n"
+    return template.replace("$CONTEXT_ASCII$", ascii_output).replace("$CONTEXT_HTML$", html_output)
+
+
+def encode_entities(text):
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def multipart_mail(target, subject, from_address, reply_to, content_txt, content_html, attach = []):
     m = MIMEMultipart('related', _charset='utf-8')
@@ -302,8 +361,12 @@ def multipart_mail(target, subject, from_address, reply_to, content_txt, content
 
     return m
 
-def send_mail(m, target):
-    p = subprocess.Popen(["/usr/sbin/sendmail", "-i", target ], stdin = subprocess.PIPE)
+def send_mail(m, target, from_address):
+    cmd = ["/usr/sbin/sendmail"]
+    if from_address:
+        cmd += ['-f', from_address]
+    cmd += [ "-i", target]
+    p = subprocess.Popen(cmd, stdin = subprocess.PIPE)
     p.communicate(m.as_string())
     return True
 
@@ -320,8 +383,7 @@ def fetch_pnp_data(context, params):
     if not os.path.exists(path):
         raise GraphException('Unable to locate pnp4nagios index.php (%s)' % path)
 
-    #return os.popen('REMOTE_USER="%s" php %s %s "%s"' % (context['CONTACTNAME'], php_save_path, path, params)).read()
-    return os.popen('REMOTE_USER="%s" php %s %s "%s"' % ('omdadmin', php_save_path, path, params)).read()
+    return os.popen('REMOTE_USER="%s" php %s %s "%s"' % (context['CONTACTNAME'], php_save_path, path, params)).read()
 
 def fetch_num_sources(context):
     svc_desc = context['WHAT'] == 'HOST' and '_HOST_' or context['SERVICEDESC']
@@ -399,7 +461,7 @@ def construct_content(context):
     #   NOTIFICATIONTYPE is "FLAPPINGSTART" or "FLAPPINGSTOP"
 
     # - Downtimes             Started, Ended, Cancelled
-    #   NOTIFICATIONTYPE is "DOWNTIMESTART", "DOWNTIMECANCELLED", or "DOWNTIMESTOPPED"
+    #   NOTIFICATIONTYPE is "DOWNTIMESTART", "DOWNTIMECANCELLED", or "DOWNTIMEEND"
 
     # - Acknowledgements
     #   NOTIFICATIONTYPE is "ACKNOWLEDGEMENT"
@@ -428,6 +490,7 @@ def construct_content(context):
         html_info = "Downtime " + what + " (while " + html_state + ")"
 
     elif notification_type == "ACKNOWLEDGEMENT":
+
         txt_info = "Acknowledged ($@SHORTSTATE$)"
         html_info = "Acknowledged (while " + html_state + ")"
 
@@ -500,7 +563,9 @@ def construct_content(context):
                 '<tr class="even0"><td colspan=2 class=graphs>%s</td></tr>' % graph_code
             )
 
-    content_html = tmpl_head_html + content_html + tmpl_foot_html
+    content_html = substitute_context(tmpl_head_html, context) + \
+                   content_html + \
+                   substitute_context(tmpl_foot_html, context)
 
     return content_txt, content_html, attachments
 
@@ -590,6 +655,6 @@ def main():
     from_address = context.get("PARAMETER_FROM")
     reply_to = context.get("PARAMETER_REPLY_TO")
     m = multipart_mail(mailto, subject, from_address, reply_to, content_txt, content_html, attachments)
-    send_mail(m, mailto)
+    send_mail(m, mailto, from_address)
 
 main()

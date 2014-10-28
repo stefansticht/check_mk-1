@@ -5,7 +5,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -23,7 +23,7 @@
 # Boston, MA 02110-1301 USA.
 
 SHELL           = /bin/bash
-VERSION        	= 1.2.5i4
+VERSION        	= 1.2.5i6
 NAME           	= check_mk
 RPM_TOPDIR     	= rpm.topdir
 RPM_BUILDROOT  	= rpm.buildroot
@@ -34,10 +34,24 @@ LIBDIR	       	= $(PREFIX)/lib/$(NAME)
 DISTNAME       	= $(NAME)-$(VERSION)
 TAROPTS        	= --owner=root --group=root --exclude=.svn --exclude=*~ \
 		  --exclude=.gitignore --exclude=.*.swp --exclude=.f12
+
+# File to pack into livestatus-$(VERSION).tar.gz
 LIVESTATUS_SOURCES = configure aclocal.m4 config.guess config.h.in config.sub \
 		     configure.ac ltmain.sh Makefile.am Makefile.in missing \
-		     nagios/README nagios/*.h nagios4/README nagios4/*.h src/*.{h,c,cc} src/Makefile.{in,am} \
+		     nagios/README nagios/*.h nagios4/README nagios4/*.h \
+		     src/*.{h,c,cc} src/Makefile.{in,am} \
 		     depcomp install-sh api/python/{*.py,README} api/perl/*
+
+# Files that are checked for trailing spaces
+HEAL_SPACES_IN = checkman/* modules/* checks/* notifications/* inventory/* \
+               $$(find -name Makefile) livestatus/src/*{cc,c,h} agents/windows/*.cc \
+	       web/htdocs/*.{py,css} web/htdocs/js/*.js web/plugins/*/*.py \
+               doc/helpers/* scripts/setup.sh scripts/autodetect.py \
+	       $$(find pnp-templates -type f -name "*.php") \
+               mkeventd/bin/mkeventd mkeventd/web/htdocs/*.py mkeventd/web/plugins/*/*.py \
+	       mkeventd/src/*.c mkeventd/checks/* check_mk_templates.cfg \
+	       doc/treasures/mknotifyd agents/check_mk_*agent* agents/*.c agents/cfg_examples/* \
+	       agents/special/* $$(find agents/plugins -type f)
 
 
 .PHONY: help install clean
@@ -54,15 +68,6 @@ help:
 	@echo "make headers                   --> create/update fileheades"
 	@echo "make healspaces                --> remove trailing spaces in code"
 
-check-spaces:
-	@echo -n "Checking for trailing spaces..."
-	@if grep -q '[[:space:]]$$' $(SOURCE_FILES) ; then echo $$? ; figlet "Space error" \
-          ; echo "Aborting due to trailing spaces. Please use 'make healspaces' to repair." \
-          ; echo "Affected files: " \
-          ; grep -l '[[:space:]]$$' $(SOURCE_FILES) \
-          ; exit 1 ; fi
-	@echo OK
-
 check-permissions:
 	@echo -n "Checking permissions... with find -not -perm -444..." && [ -z "$$(find -not -perm -444)" ] && echo OK
 
@@ -70,11 +75,6 @@ check-binaries:
 	@if [ -z "$(SKIP_SANITY_CHECKS)" ]; then \
 	    echo -n "Checking precompiled binaries..." && file agents/waitmax | grep 32-bit >/dev/null && echo OK ; \
 	fi
-
-check-version:
-	@sed -n 1p ChangeLog | fgrep -qx '$(VERSION):' || { \
-	    echo "Version $(VERSION) not listed at top of ChangeLog!" ; \
-	    false ; }
 
 
 check: check-spaces check-permissions check-binaries check-version
@@ -102,7 +102,23 @@ dist: mk-livestatus mk-eventd
 	cp multisite.mk multisite.mk-$(VERSION)
 	tar  czf $(DISTNAME)/conf.tar.gz $(TAROPTS) main.mk-$(VERSION) multisite.mk-$(VERSION)
 	rm -f main.mk-$(VERSION) multisite.mk-$(VERSION)
-	tar  czf $(DISTNAME)/agents.tar.gz $(TAROPTS) -C agents --exclude "*~" --exclude .f12 $$(cd agents ; ls)
+	tar  czf $(DISTNAME)/agents.tar.gz $(TAROPTS) -C agents \
+		--exclude "msibuild" \
+		--exclude "build_version" \
+		--exclude "*.rc" \
+		--exclude "*.rc.in" \
+		--exclude "bin_replace" \
+		--exclude "*.nsi" \
+		--exclude "*.ico" \
+		--exclude "endless.bat" \
+		--exclude "logstate.txt" \
+		--exclude "*.unversioned.exe" \
+		--exclude "*.cc" \
+		--exclude "*.res" \
+		--exclude "*~" \
+		--exclude "Makefile" \
+		--exclude "crash.exe" \
+		--exclude .f12 $$(cd agents ; ls)
 	cd $(DISTNAME) ; ../make_package_info $(VERSION) > package_info
 	install -m 755 scripts/*.{sh,py} $(DISTNAME)
 	install -m 644 COPYING AUTHORS ChangeLog $(DISTNAME)
@@ -133,6 +149,11 @@ mk-livestatus:
 	rm -rf mk-livestatus-$(VERSION)
 
 
+check-version:
+	@sed -n 1p ChangeLog | fgrep -qx '$(VERSION):' || { \
+	    echo "Version $(VERSION) not listed at top of ChangeLog!" ; \
+	    false ; }
+
 version:
 	[ "$$(head -c 12 /etc/issue)" = "Ubuntu 10.10" \
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 11.04" \
@@ -154,16 +175,17 @@ setversion:
 	    fi ; \
 	done ; \
         sed -i 's/say "Version: .*"/say "Version: $(NEW_VERSION)"/' agents/check_mk_agent.openvms
-	sed -i 's/#define CHECK_MK_VERSION .*/#define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' agents/windows/check_mk_agent.cc ; \
-	sed -i 's/!define CHECK_MK_VERSION .*/!define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' agents/windows/installer.nsi ; \
+	sed -i 's/!define CHECK_MK_VERSION .*/!define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' agents/windows/installer*.nsi ; \
 	sed -ri 's/^(VERSION[[:space:]]*= *).*/\1'"$(NEW_VERSION)/" agents/windows/Makefile ; \
 	sed -i 's/^AC_INIT.*/AC_INIT([MK Livestatus], ['"$(NEW_VERSION)"'], [mk@mathias-kettner.de])/' livestatus/configure.ac ; \
 	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' mkeventd/bin/mkeventd ; \
 	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' doc/treasures/mknotifyd ; \
 	sed -i 's/^VERSION=.*/VERSION='"$(NEW_VERSION)"'/' scripts/setup.sh ; \
 	echo 'check-mk_$(NEW_VERSION)-1_all.deb net optional' > debian/files ; \
-	cd agents/windows ; rm *.exe ; make ; cd ../.. ; \
-	cp agents/windows/install_agent.exe check-mk-agent-$(NEW_VERSION).exe
+	cd agents/windows ; rm check_mk_agent.exe check_mk_agent-64.exe check_mk_agent.msi ; make ; cd ../.. ; \
+	cp agents/windows/install_agent.exe check-mk-agent-$(NEW_VERSION).exe ; \
+	cp agents/windows/install_agent-64.exe check-mk-agent-$(NEW_VERSION)-64.exe ; \
+	cp agents/windows/check_mk_agent.msi check-mk-agent-$(NEW_VERSION).msi
 
 headers:
 	doc/helpers/headrify
@@ -219,27 +241,6 @@ deb-agent: $(NAME)-agent-$(VERSION)-1.noarch.rpm $(NAME)-agent-logwatch-$(VERSIO
 	done
 
 
-clean:
-	rm -rf dist.tmp rpm.topdir *.rpm *.deb *.exe \
-	       mkeventd-*.tar.gz mk-livestatus-*.tar.gz \
-	       $(NAME)-*.tar.gz *~ counters autochecks \
-	       precompiled cache
-	find -name "*~" | xargs rm -f
-
-mrproper:
-	git clean -xfd -e .bugs 2>/dev/null || git clean -xfd
-
-
-SOURCE_FILES = checkman/* modules/* checks/* notifications/* inventory/* $$(find -name Makefile) \
-          livestatus/src/*{cc,c,h} web/htdocs/*.{py,css} web/htdocs/js/*.js web/plugins/*/*.py \
-          doc/helpers/* scripts/setup.sh scripts/autodetect.py $$(find pnp-templates -type f -name "*.php") \
-          mkeventd/bin/mkeventd mkeventd/web/htdocs/*.py mkeventd/web/plugins/*/*.py mkeventd/src/*.c \
-          mkeventd/checks/* check_mk_templates.cfg doc/treasures/mknotifyd
-
-healspaces:
-	@echo "Removing trailing spaces from code lines..."
-	@sed -ri 's/[[:space:]]+$$//g' $(SOURCE_FILES)
-
 setup:
 
 	$(MAKE) dist
@@ -249,3 +250,29 @@ setup:
 	rm -rf $(DISTNAME)
 	check_mk -R
 	/etc/init.d/apache2 reload
+
+
+check-spaces:
+	@echo -n "Checking for trailing spaces..."
+	@if grep -q '[[:space:]]$$' $(HEAL_SPACES_IN) ; then echo $$? ; figlet "Space error" \
+          ; echo "Aborting due to trailing spaces. Please use 'make healspaces' to repair." \
+          ; echo "Affected files: " \
+          ; grep -l '[[:space:]]$$' $(HEAL_SPACES_IN) \
+          ; exit 1 ; fi
+	@echo OK
+
+
+healspaces:
+	@echo "Removing trailing spaces from code lines..."
+	@sed -ri 's/[[:space:]]+$$//g' $(HEAL_SPACES_IN)
+
+
+clean:
+	rm -rf dist.tmp rpm.topdir *.rpm *.deb *.exe \
+	       mkeventd-*.tar.gz mk-livestatus-*.tar.gz \
+	       $(NAME)-*.tar.gz *~ counters autochecks \
+	       precompiled cache
+	find -name "*~" | xargs rm -f
+
+mrproper:
+	git clean -xfd -e .bugs 2>/dev/null || git clean -xfd

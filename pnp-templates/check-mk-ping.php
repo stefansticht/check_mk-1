@@ -6,7 +6,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -24,7 +24,7 @@
 # Boston, MA 02110-1301 USA.
 
 $ds_name[1] = "Round Trip Averages";
-$opt[1] = "--vertical-label \"RTA (ms)\" --title \"Ping times for $hostname\" ";
+$opt[1] = "--vertical-label \"RTA (ms)\" -X0 --title \"Ping times for $hostname\" ";
 $def[1] =  "DEF:var1=$RRDFILE[1]:$DS[1]:AVERAGE " ;
 $def[1] .= "DEF:var2=$RRDFILE[2]:$DS[2]:MAX " ;
 $def[1] .= "VDEF:maxrta=var1,MAXIMUM " ;

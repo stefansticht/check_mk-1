@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -34,20 +34,35 @@ loaded_with_language = False
 
 # Custom user attributes
 user_attributes = {}
+builtin_user_attribute_names = []
 
-# Load all login plugins
+# Load all userdb plugins
 def load_plugins():
+    global user_attributes
+    global multisite_user_connectors
+
+    # Do not cache the custom user attributes. They can be created by the user
+    # during runtime, means they need to be loaded during each page request.
+    # But delete the old definitions before to also apply removals of attributes
+    if user_attributes:
+        for attr_name in user_attributes.keys():
+            if attr_name not in builtin_user_attribute_names:
+                del user_attributes[attr_name]
+        declare_custom_user_attrs()
+
     global loaded_with_language
     if loaded_with_language == current_language:
         return
 
     # declare & initialize global vars
-    global user_attributes ; user_attributes = {}
-    global multisite_user_connectors ; multisite_user_connectors = []
-
-    declare_custom_user_attrs()
+    user_attributes = {}
+    multisite_user_connectors = []
 
     load_web_plugins("userdb", globals())
+
+    global builtin_user_attribute_names
+    builtin_user_attribute_names = user_attributes.keys()
+    declare_custom_user_attrs()
 
     # This must be set after plugin loading to make broken plugins raise
     # exceptions all the time and not only the first time (when the plugins
@@ -127,17 +142,17 @@ def user_locked(username):
     users = load_users()
     return users[username].get('locked', False)
 
-def update_user_access_time():
+def update_user_access_time(username):
     if not config.save_user_access_times:
         return
-    save_custom_attr(html.user, 'last_seen', repr(time.time()))
+    save_custom_attr(username, 'last_seen', repr(time.time()))
 
 def on_succeeded_login(username):
     num_failed = load_custom_attr(username, 'num_failed', saveint)
     if num_failed != None and num_failed != 0:
         save_custom_attr(username, 'num_failed', '0')
 
-    update_user_access_time()
+    update_user_access_time(username)
 
 def on_failed_login(username):
     users = load_users(lock = True)
@@ -345,6 +360,7 @@ def load_custom_attr(userid, key, conv_func, default = None):
 
 def save_custom_attr(userid, key, val):
     basedir = defaults.var_dir + "/web/" + userid
+    make_nagios_directory(basedir)
     create_user_file('%s/%s.mk' % (basedir, key), 'w').write('%s\n' % val)
 
 def get_online_user_ids():
@@ -565,6 +581,7 @@ def load_roles():
 
 def load_group_information():
     try:
+        # Load group information from Check_MK world
         vars = {}
         for what in ["host", "service", "contact" ]:
             vars["define_%sgroups" % what] = {}
@@ -575,9 +592,28 @@ def load_group_information():
         except IOError:
             return {} # skip on not existing file
 
+        # Now load information from the Web world
+        multisite_vars = {}
+        for what in ["host", "service", "contact" ]:
+            multisite_vars["multisite_%sgroups" % what] = {}
+
+        filename = multisite_dir + "groups.mk"
+        try:
+            execfile(filename, multisite_vars, multisite_vars)
+        except IOError:
+            pass
+
+        # Merge information from Check_MK and Multisite worlds together
         groups = {}
         for what in ["host", "service", "contact" ]:
-            groups[what] = vars.get("define_%sgroups" % what, {})
+            groups[what] = {}
+            for id, alias in vars['define_%sgroups' % what].items():
+                groups[what][id] = {
+                    'alias': alias
+                }
+                if id in multisite_vars['multisite_%sgroups' % what]:
+                    groups[what][id].update(multisite_vars['multisite_%sgroups' % what][id])
+
         return groups
 
     except Exception, e:

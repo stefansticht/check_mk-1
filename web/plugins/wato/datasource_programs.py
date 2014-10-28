@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -89,6 +89,7 @@ register_rule(group,
                              ( "virtualmachine", _("Virtual Machines") ),
                              ( "datastore",      _("Datastores") ),
                              ( "counters",       _("Performance Counters") ),
+                             ( "licenses",       _("License Usage") ),
                          ],
                          default_value = [ "hostsystem", "virtualmachine", "datastore", "counters" ],
                          allow_empty = False,
@@ -97,12 +98,34 @@ register_rule(group,
                        title = _("Retrieve information about..."),
                     )
                  ),
+                 ( "host_pwr_display",
+                   DropdownChoice(
+                       title = _("Display ESX Host power state on"),
+                       choices = [
+                           ( None,      _("The queried ESX system (vCenter / Host)") ),
+                           ( "esxhost", _("The ESX Host") ),
+                           ( "vm",      _("The Virtual Machine") ),
+                       ],
+                       default = None,
+                   )
+                 ),
+                 ( "vm_pwr_display",
+                   DropdownChoice(
+                       title = _("Display VM power state on"),
+                       choices = [
+                           ( None,      _("The queried ESX system (vCenter / Host)") ),
+                           ( "esxhost", _("The ESX Host") ),
+                           ( "vm",      _("The Virtual Machine") ),
+                       ],
+                       default = None,
+                   )
+                 ),
                  ( "spaces",
                    DropdownChoice(
                        title = _("Spaces in hostnames"),
                        choices = [
-                           ( "underscore", _("Replace with underscores") ),
                            ( "cut",        _("Cut everything after first space") ),
+                           ( "underscore", _("Replace with underscores") ),
                        ],
                        default = "underscore",
                    )
@@ -142,7 +165,7 @@ register_rule(group,
                   )
                 ),
             ],
-            optional_keys = [ "tcp_port", "timeout", ],
+            optional_keys = [ "tcp_port", "timeout", "vm_pwr_display", "host_pwr_display" ],
         ),
         title = _("Check state of VMWare ESX via vSphere"),
         help = _("This rule selects the vSphere agent instead of the normal Check_MK Agent "
@@ -350,4 +373,43 @@ register_rule(group,
     ),
     factory_default = FACTORY_DEFAULT_UNUSED,
     match = "first")
+
+register_rule(group,
+    "special_agents:hivemanager",
+    Tuple(
+        title = _("Hivemanager"),
+        help = _( "Connect to AeroHive HiveManger via a webcall to get a list of all devices"),
+        elements = [
+           TextAscii(title = _("Username")),
+           Password( title = _("Password")),
+        ]
+    ),
+    factory_default = FACTORY_DEFAULT_UNUSED,
+    match = "first")
+
+register_rule(group,
+    "special_agents:allnet_ip_sensoric",
+     Dictionary(
+        title = _("Check state of ALLNET IP Sensoric Devices"),
+        help = _("This rule selects the ALLNET IP Sensoric agent, which fetches "
+                 "/xml/sensordata.xml from the device by HTTP and extracts the "
+                 "needed monitoring information from this file."),
+        elements = [
+            ( "timeout",
+              Integer(
+                  title = _("Connection timeout"),
+                  help = _("The network timeout in seconds when communicating via HTTP. "
+                           "The default is 10 seconds."),
+                  default_value = 10,
+                  minvalue = 1,
+                  unit = _("seconds"),
+              )
+            ),
+        ],
+        optional_keys = [ "timeout" ],
+    ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
+    match = 'first')
+
+
 

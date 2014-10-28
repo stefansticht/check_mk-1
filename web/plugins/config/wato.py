@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -40,6 +40,7 @@ wato_write_nagvis_auth         = False
 wato_use_git                   = False
 wato_hidden_users              = []
 wato_user_attrs                = []
+wato_legacy_eval               = False
 
 def tag_alias(tag):
     for entry in wato_host_tags:

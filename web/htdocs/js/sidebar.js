@@ -5,7 +5,7 @@
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 // |                                                                  |
-// | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+// | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
 // This file is part of Check_MK.
@@ -105,15 +105,6 @@ var snapinDragging = false;
 var snapinOffset   = [ 0, 0 ];
 var snapinStartPos = [ 0, 0 ];
 var snapinScrollTop = 0;
-
-function getButton(event) {
-  if (event.which == null)
-    /* IE case */
-    return (event.button < 2) ? "LEFT" : ((event.button == 4) ? "MIDDLE" : "RIGHT");
-  else
-    /* All others */
-    return (event.which < 2) ? "LEFT" : ((event.which == 2) ? "MIDDLE" : "RIGHT");
-}
 
 function snapinStartDrag(event) {
   if (!event)
@@ -849,6 +840,7 @@ function wato_views_clicked(link_obj) {
     g_last_view = link_obj.href;
 
     highlight_link(link_obj, 'snapin_container_views');
+    highlight_link(link_obj, 'snapin_container_dashboards');
 
     if (g_last_folder != '') {
         // Navigate by using javascript, cancel following the default link

@@ -12,7 +12,7 @@ header ()
       printf "|%-66s|\n" "${line//@/ }"
     done
     echo '|                                                                  |'
-    echo '| Copyright Mathias Kettner 2013             mk@mathias-kettner.de |'
+    echo '| Copyright Mathias Kettner 2014             mk@mathias-kettner.de |'
     echo '+------------------------------------------------------------------+'
 
     cat <<EOF
@@ -43,6 +43,12 @@ headrify ()
       echo "Skipping $file. It's not a file."
       return
   fi
+
+  if [ "${file##*/}" = README ] ; then
+      echo "skipping README file."
+      return
+  fi
+
   echo "$file..."
   PERMISSIONS=$(stat -c %a "$file")
   TMP=$(mktemp .headrify.new.XXXXXX)
@@ -55,12 +61,18 @@ headrify ()
   elif [ "${headline:0:16}" = "#!/usr/bin/ksh93" ] ; then
       comment="# "
       bangpath="#!/usr/bin/ksh93"
+  elif [ "${headline:0:14}" = "#!/usr/bin/ksh" ] ; then
+      comment="# "
+      bangpath="#!/usr/bin/ksh"
   elif [ "${headline:0:11}" = "#!/bin/bash" ] ; then
       comment="# "
       bangpath="#!/bin/bash"
   elif [ "${headline:0:15}" = "#!/usr/bin/bash" ] ; then
       comment="# "
       bangpath="#!/usr/bin/bash"
+  elif [ "${headline:0:14}" = "#!/usr/bin/php" ] ; then
+      comment="# "
+      bangpath="#!/usr/bin/pnp"
   else
       bangpath=""
       case "${file##*/}" in
@@ -105,7 +117,13 @@ if [ "$#" -gt 0 ] ; then
     headrify "$file"
   done
 else
-  { find -not -type l -and -not -name "jquery*" -and \( \
+  { find -not -type l -and \
+      -not -name "jquery*" \
+      -not -name "*.rc" \
+      -not -name "*.rc.in" \
+      -not -name "ltmain.sh" \
+      -not -name "*.exe" \
+      -and \( \
       -name "Makefile" -or \
       -name "*.cfg" -or \
       -name "Makefile.am" -or \
@@ -119,8 +137,8 @@ else
       -name "*.php" -or \
       -name "*.sh" -or \
       -name "*.spec" \) ; \
-    rm -f checks/*~ ; ls checks/* ; echo agents/plugins/* agents/* | tr ' ' \\n | grep -vx agents/waitmax | grep -vx agents/mk-job | fgrep -v agents/hpux | fgrep -v windows | fgrep -v .exe | fgrep -v /plugins | fgrep -v .hpux ; ls agents/windows/*.cc ; echo agents/windows/Makefile ; } \
-	| grep -v /Privat/ | grep -v livestatus/nagios/ | grep -vx '' | \
+    rm -f checks/*~ ; ls checks/* ; echo agents/plugins/* agents/special/* agents/* | tr ' ' \\n | grep -vx agents/waitmax | fgrep -v windows | fgrep -v .exe | fgrep -v windows/plugins ; ls agents/windows/*.cc ; echo agents/windows/Makefile ; } \
+	| egrep -v 'livestatus/nagios4?/' | grep -vx '' | \
   while read file
   do
     headrify "$file" &

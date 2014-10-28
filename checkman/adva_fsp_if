@@ -9,12 +9,16 @@ description:
 
  State information is collected from the SNMP IF-MIB parameters {ifAdminStatus} and
  {ifOperStatus}. Laser information is collected from the FspR7-MIB parameters
- {currentPmSnapshotOutputPower} and {currentPmSnapshotInputPower}. 
+ {currentPmSnapshotOutputPower} and {currentPmSnapshotInputPower}.
 
- Lower warning and critical limits can be configured for the input (received)
+ Lower and upper critical limits can be configured for the input (received)
  and output (transmit) power of the laser. Per default, not limits are imposed,
  since meaningful values depend on the type of interface.
 
+ A {WARN} state is triggered if no laser power information can be found.
+ Service interfaces (item name beginning with "S") do not have laser power
+ information, so that non-existent laser power information is ignored for these
+ interfaces.
 
 item:
  There are three allowed ways to specify an interface: {1}: the last component
@@ -35,10 +39,8 @@ inventory:
 
 [parameters]
 parameters (dict):
-        {"min_input_power"}: a tuple of warning and critical values in dBm,
-                             default is (None, None)
-        {"min_output_power"}: a tuple of warning and critical values in dBm,
-                             default is (None, None)
+        {"limits_input_power"}: a tuple of lower and upper critical values in dBm,
+        {"limits_output_power"}: a tuple of lower and upper critical values in dBm
 
 [configuration]
 adva_fsp_if_inventory_porttypes (list of strings):  List of interface types the inventory should create checks for.

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -34,6 +34,7 @@ roles = {} # User supplied roles
 
 # define default values for all settings
 debug                  = False
+screenshotmode         = False
 profile                = False
 users                  = []
 admin_users            = []
@@ -56,6 +57,7 @@ sidebar = [
     ('tactical_overview', 'open'),
     ('search',            'open'),
     ('views',             'open'),
+    ('reports',           'closed'), # does not harm if not available
     ('bookmarks',         'open'),
     ('admin',             'open'),
     ('master_control',    'closed')
@@ -237,3 +239,6 @@ default_user_profile  = {
 lock_on_logon_failures = False
 
 user_localizations = default_user_localizations
+
+# Write WATO folder permissions to auth.php file
+export_folder_permissions = False

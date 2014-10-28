@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -111,5 +111,5 @@ def validate_host_parents(effective_host):
                   "relation is used to describe the reachability of hosts by one monitoring daemon.") %
                     (parentname, parent["site"], effective_host["site"]))
 
-api.register_hook('validate-host', validate_host_parents)
+register_hook('validate-host', validate_host_parents)
 

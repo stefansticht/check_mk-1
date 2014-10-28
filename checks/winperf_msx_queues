@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -53,8 +53,14 @@
 # 4 0 0 0 0 rawcount
 # 6 0 0 0 0 rawcount
 
-# Default warn/crit levels for length of queues
+# For Legacy reasons we need still this var.
 msx_queues_default_levels = (500, 2000)
+
+# Default warn/crit levels for length of queues
+factory_settings['winperf_msx_queues_factory'] = {
+        'levels': ( 500, 2000 ),
+}
+
 
 # Queues to be inventorized (number are relative to counter base)
 winperf_msx_queues = {
@@ -64,20 +70,43 @@ winperf_msx_queues = {
    "Poison Queue Length"     :  "44",
 }
 
+winperf_msx_queues_inventory = []
+
 def inventory_winperf_msx_queues(info):
     num_instances = int(info[1][0])
     if num_instances > 0:
-        return [ (name, "msx_queues_default_levels") for name in winperf_msx_queues ]
+        # Its possible to set the wanted queues via wato
+        inventory_rules = {}
+        for rulset in host_extra_conf(g_hostname, winperf_msx_queues_inventory):
+            inventory_rules.update(dict(rulset))
+        # In case that rules for this host are set,
+        # only use this rules
+        if inventory_rules:
+            queues = inventory_rules
+        else:
+            queues = winperf_msx_queues
+        return [ (name, { "offset" : offset } ) for name, offset in queues.items() ]
 
 def check_winperf_msx_queues(item, params, info):
     num_instances = int(info[1][0])
     if num_instances < 1:
         return (3, "no counters available, transport service running?")
 
+    # Old default case:
+    if type(params) == tuple:
+        warn, crit = params
+        offset = winperf_msx_queues.get(item)
+    else:
+        warn, crit = params['levels']
+        if params.get('offset'):
+            offset = str(params['offset'])
+        # If no offset is set, we assume that still the default counters are used
+        else:
+            offset = winperf_msx_queues.get(item)
+
     for line in info[2:]:
-        if line[0] == winperf_msx_queues.get(item):
+        if line[0] == offset:
             length = int(line[-2])
-            warn, crit = params
             perfdata = [("length", length, warn, crit)]
             infotext = "%d entries" % length
             if length >= crit:
@@ -96,5 +125,6 @@ check_info["winperf_msx_queues"] = {
     'inventory_function':      inventory_winperf_msx_queues,
     'service_description':     'Queue %s',
     'has_perfdata':            True,
+    "default_levels_variable" : "winperf_msx_queues_factory",
     'group':                   'msx_queues',
 }

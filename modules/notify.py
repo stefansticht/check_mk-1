@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -121,6 +121,8 @@ COMMANDS to e.g. support development of notification plugins.
 Available commands:
     spoolfile <filename>    Reads the given spoolfile and creates a
                             notification out of its data
+    stdin                   Read one notification context from stdin instead
+                            of taking variables from environment
     replay N                Uses the N'th recent notification from the backlog
                             and sends it again, counting from 0.
     send-bulks              Send out ripe bulk notifications
@@ -141,12 +143,12 @@ def do_notify(args):
         notify_mode = 'notify'
         if args:
             notify_mode = args[0]
-            if notify_mode not in [ 'spoolfile', 'replay', 'send-bulks' ]:
+            if notify_mode not in [ 'stdin', 'spoolfile', 'replay', 'send-bulks' ]:
                 sys.stderr.write("ERROR: Invalid call to check_mk --notify.\n\n")
                 notify_usage()
                 sys.exit(1)
 
-            if len(args) != 2 and notify_mode not in [ "replay", "send-bulks" ]:
+            if len(args) != 2 and notify_mode not in [ "stdin", "replay", "send-bulks" ]:
                 sys.stderr.write("ERROR: need an argument to --notify %s.\n\n" % notify_mode)
                 sys.exit(1)
 
@@ -168,12 +170,15 @@ def do_notify(args):
         if notify_mode == "spoolfile":
             return handle_spoolfile(filename)
 
-        if opt_keepalive:
+        elif opt_keepalive:
             notify_keepalive()
 
         elif notify_mode == 'replay':
             raw_context = raw_context_from_backlog(replay_nr)
             notify_notify(raw_context)
+
+        elif notify_mode == 'stdin':
+            notify_notify(raw_context_from_stdin())
 
         elif notify_mode == "send-bulks":
             send_ripe_bulks()
@@ -205,11 +210,16 @@ def notify_notify(raw_context, analyse=False):
     # Add some further variable for the conveniance of the plugins
 
     if notification_logging >= 2:
+        encoded_context = dict(raw_context.items())
+        convert_context_to_unicode(encoded_context)
         notify_log("Raw notification context:\n"
-                   + "\n".join(["                    %s=%s" % v for v in sorted(raw_context.items())]))
+                   + "\n".join(["                    %s=%s" % v for v in sorted(encoded_context.items())]))
 
     raw_keys = list(raw_context.keys())
-    complete_raw_context(raw_context)
+    try:
+        complete_raw_context(raw_context)
+    except Exception, e:
+        notify_log("Mist: %s" % e)
 
     if notification_logging >= 2:
         notify_log("Computed variables:\n"
@@ -615,6 +625,9 @@ def rbn_match_rule(rule, context):
     return \
         rbn_match_folder(rule, context)                or \
         rbn_match_hosttags(rule, context)              or \
+        rbn_match_hostgroups(rule, context)            or \
+        rbn_match_servicegroups(rule, context)         or \
+        rbn_match_contactgroups(rule, context)         or \
         rbn_match_hosts(rule, context)                 or \
         rbn_match_exclude_hosts(rule, context)         or \
         rbn_match_services(rule, context)              or \
@@ -626,7 +639,8 @@ def rbn_match_rule(rule, context):
         rbn_match_escalation_throtte(rule, context)    or \
         rbn_match_servicelevel(rule, context)          or \
         rbn_match_host_event(rule, context)            or \
-        rbn_match_service_event(rule, context)
+        rbn_match_service_event(rule, context)         or \
+        rbn_match_event_console(rule, context)
 
 
 def rbn_match_folder(rule, context):
@@ -658,6 +672,75 @@ def rbn_match_hosttags(rule, context):
         if not hosttags_match_taglist(tags, required):
             return "The host's tags %s do not match the required tags %s" % (
                 "|".join(tags), "|".join(required))
+
+
+def rbn_match_servicegroups(rule, context):
+    if context["WHAT"] != "SERVICE":
+        return
+    required_groups = rule.get("match_servicegroups")
+    if required_groups != None:
+        sgn = context.get("SERVICEGROUPNAMES")
+        if sgn == None:
+            return "No information about service groups is in the context, but service " \
+                   "must be in group %s" % ( " or ".join(required_groups))
+        if sgn:
+            servicegroups = sgn.split(",")
+        else:
+            return "The service is in no group, but %s is required" % (
+                 " or ".join(required_groups))
+
+        for group in required_groups:
+            if group in servicegroups:
+                return
+
+        return "The service is only in the groups %s, but %s is required" % (
+              sgn, " or ".join(required_groups))
+
+def rbn_match_contactgroups(rule, context):
+    required_groups = rule.get("match_contactgroups")
+    if context["WHAT"] != "SERVICE":
+        cgn = context.get("SERVICECONTACTGROUPNAMES")
+    else:
+        cgn = context.get("HOSTCONTACTGROUPNAMES")
+
+    if required_groups != None:
+        if cgn == None:
+            notify_log("Warning: No information about contact groups in the context. " \
+                       "Seams that you don't use the Check_MK Microcore. ")
+            return 
+        if cgn:
+            contactgroups = cgn.split(",")
+        else:
+            return "The object is in no group, but %s is required" % (
+                 " or ".join(required_groups))
+
+        for group in required_groups:
+            if group in contactgroups:
+                return
+
+        return "The object is only in the groups %s, but %s is required" % (
+              cgn, " or ".join(required_groups))
+
+
+def rbn_match_hostgroups(rule, context):
+    required_groups = rule.get("match_hostgroups")
+    if required_groups != None:
+        hgn = context.get("HOSTGROUPNAMES")
+        if hgn == None:
+            return "No information about host groups is in the context, but host " \
+                   "must be in group %s" % ( " or ".join(required_groups))
+        if hgn:
+            hostgroups = hgn.split(",")
+        else:
+            return "The host is in no group, but %s is required" % (
+                 " or ".join(required_groups))
+
+        for group in required_groups:
+            if group in hostgroups:
+                return
+
+        return "The host is only in the groups %s, but %s is required" % (
+              hgn, " or ".join(required_groups))
 
 
 def rbn_match_hosts(rule, context):
@@ -842,6 +925,46 @@ def rbn_rule_contacts(rule, context):
             all_enabled.append(contactname)
 
     return all_enabled
+
+
+def rbn_match_event_console(rule, context):
+    if "match_ec" in rule:
+        match_ec = rule["match_ec"]
+        is_ec_notification = "EC_ID" in context
+        if match_ec == False and is_ec_notification:
+            return "Notification has been created by the Event Console."
+        elif match_ec != False and not is_ec_notification:
+            return "Notification has not been created by the Event Console."
+
+        if match_ec != False:
+
+            # Match Event Console rule ID
+            if "match_rule_id" in match_ec and context["EC_RULE_ID"] != match_ec["match_rule_id"]:
+                return "EC Event has rule ID '%s', but '%s' is required" % (
+                    context["EC_RULE_ID"], match_ec["match_rule_id"])
+
+            # Match syslog priority of event
+            if "match_priority" in match_ec:
+                prio_from, prio_to = match_ec["match_priority"]
+                if prio_from > prio_to:
+                    prio_to, prio_from = prio_from, prio_to
+                    p = int(context["EC_PRIORITY"])
+                    if p < prio_from or p > prio_to:
+                        return "Event has priority %s, but matched range is %s .. %s" % (
+                            p, prio_from, prio_to)
+
+            # Match syslog facility of event
+            if "match_facility" in match_ec:
+                if match_ec["match_facility"] != int(context["EC_FACILITY"]):
+                    return "Wrong syslog facility %s, required is %s" % (context["EC_FACILITY"], match_ec["match_facility"])
+
+            # Match event comment
+            if "match_comment" in match_ec:
+                r = regex(match_ec["match_comment"])
+                if not r.search(context["EC_COMMENT"]):
+                    return "The event comment '%s' does not match the regular expression '%s'" % (
+                        context["EC_COMMENT"], match_ec["match_comment"])
+
 
 def rbn_object_contacts(context):
     commasepped = context.get("CONTACTS")
@@ -1230,7 +1353,7 @@ def call_notification_script(plugin, plugin_context):
     # Existing vars are replaced, some already existing might remain
     for key in plugin_context:
         if type(plugin_context[key]) == bool:
-            notify_log("MIST: %s=%s ist bool" % (key, plugin_context[key]))
+            notify_log("INTERNAL ERROR: %s=%s is of type bool" % (key, plugin_context[key]))
         os.putenv('NOTIFY_' + key, plugin_context[key].encode('utf-8'))
 
     notify_log("     executing %s" % path)
@@ -1578,7 +1701,7 @@ def complete_raw_context(raw_context):
     # Add the previous hard state. This is neccessary for notification rules that depend on certain transitions,
     # like OK -> WARN (but not CRIT -> WARN). The CMC sends PREVIOUSHOSTHARDSTATE and PREVIOUSSERVICEHARDSTATE.
     # Nagios does not have this information and we try to deduct this.
-    if "PREVIOUSHOSTHARDSTATE" not in raw_context:
+    if "PREVIOUSHOSTHARDSTATE" not in raw_context and "LASTHOSTSTATE" in raw_context:
         prev_state = raw_context["LASTHOSTSTATE"]
         # When the attempts are > 1 then the last state could be identical with
         # the current one, e.g. both critical. In that case we assume the
@@ -1654,13 +1777,22 @@ def raw_context_from_env():
         if var.startswith("NOTIFY_")
             and not dead_nagios_variable(value) ])
 
+
+def raw_context_from_stdin():
+    context = {}
+    for line in sys.stdin:
+        varname, value = line.strip().split("=", 1)
+        context[varname] = value.replace(r"\n", "\n").replace("\\\\", "\\")
+    return context
+
+
 def raw_context_from_string(data):
     # Context is line-by-line in g_notify_readahead_buffer
     context = {}
     try:
         for line in data.split('\n'):
             varname, value = line.strip().split("=", 1)
-            context[varname] = value
+            context[varname] = value.replace(r"\n", "\n").replace("\\\\", "\\")
     except Exception, e: # line without '=' ignored or alerted
         if opt_debug:
             raise
@@ -1792,12 +1924,12 @@ def core_notification_log(plugin, plugin_context):
     log_message = "%s NOTIFICATION: %s;%s;%s;%s;%s" % (
             what, contact, spec, state, plugin or "plain email", output)
     if monitoring_core == "cmc":
-        livestatus_send_command("LOG;" + log_message)
+        livestatus_send_command("LOG;" + log_message.encode("utf-8"))
     else:
         # Nagios and friends do not support logging via an
         # external command. We write the files into a help file
         # in var/check_mk/notify. If the users likes he can
         # replace that file with a symbolic link to the nagios
         # log file. But note: Nagios logging might not atomic.
-        file(notification_core_log, "a").write("[%d] %s\n" % (time.time(), log_message))
+        file(notification_core_log, "a").write("[%d] %s\n" % (time.time(), log_message.encode("utf-8")))
 

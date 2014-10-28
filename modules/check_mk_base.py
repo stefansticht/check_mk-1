@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -108,6 +108,7 @@ opt_cmc_relfilename          = "config"
 opt_keepalive_fd             = None
 opt_oids                     = []
 opt_extra_oids               = []
+opt_force                    = False
 
 # register SIGINT handler for consistenct CTRL+C handling
 def interrupt_handler(signum, frame):
@@ -278,7 +279,7 @@ def get_host_info(hostname, ipaddress, checkname):
         exception_texts = []
         global opt_use_cachefile
         opt_use_cachefile = True
-	is_snmp_error = False
+        is_snmp_error = False
         for node in nodes:
             # If an error with the agent occurs, we still can (and must)
             # try the other nodes.
@@ -293,16 +294,16 @@ def get_host_info(hostname, ipaddress, checkname):
             except MKSkipCheck:
                 at_least_one_without_exception = True
             except MKAgentError, e:
-		if str(e) != "": # only first error contains text
+                if str(e) != "": # only first error contains text
                     exception_texts.append(str(e))
-		g_broken_agent_hosts.add(node)
+                g_broken_agent_hosts.add(node)
             except MKSNMPError, e:
-		if str(e) != "": # only first error contains text
-		    exception_texts.append(str(e))
-		g_broken_snmp_hosts.add(node)
-		is_snmp_error = True
+                if str(e) != "": # only first error contains text
+                    exception_texts.append(str(e))
+                g_broken_snmp_hosts.add(node)
+                is_snmp_error = True
         if not at_least_one_without_exception:
-	    if is_snmp_error:
+            if is_snmp_error:
                 raise MKSNMPError(", ".join(exception_texts))
             else:
                 raise MKAgentError(", ".join(exception_texts))
@@ -363,8 +364,8 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
         # Not cached -> need to get info via SNMP
 
         # Try to contact host only once
-	if hostname in g_broken_snmp_hosts:
-	    raise MKSNMPError("")
+        if hostname in g_broken_snmp_hosts:
+            raise MKSNMPError("")
 
         # New in 1.1.3: oid_info can now be a list: Each element
         # of that list is interpreted as one real oid_info, fetches
@@ -392,7 +393,7 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
     # tries to get data from the agent? If yes we must not do that again! Even if
     # no cache file is present.
     if g_agent_already_contacted.has_key(hostname):
-	raise MKAgentError("")
+        raise MKAgentError("")
 
     g_agent_already_contacted[hostname] = True
     store_cached_hostinfo(hostname, []) # leave emtpy info in case of error
@@ -656,6 +657,8 @@ def get_agent_info(hostname, ipaddress, max_cache_age):
 
 # Get data in case of external program
 def get_agent_info_program(commandline):
+    exepath = commandline.split()[0] # for error message, hide options!
+
     import subprocess
     if opt_verbose:
         sys.stderr.write("Calling external program %s\n" % commandline)
@@ -664,11 +667,11 @@ def get_agent_info_program(commandline):
         stdout, stderr = p.communicate()
         exitstatus = p.returncode
     except Exception, e:
-        raise MKAgentError("Could not execute '%s': %s" % (commandline, e))
+        raise MKAgentError("Could not execute '%s': %s" % (exepath, e))
 
     if exitstatus:
         if exitstatus == 127:
-            raise MKAgentError("Program '%s' not found (exit code 127)" % (commandline,))
+            raise MKAgentError("Program '%s' not found (exit code 127)" % exepath)
         else:
             raise MKAgentError("Agent exited with code %d: %s" % (exitstatus, stderr))
     return stdout
@@ -754,6 +757,7 @@ def parse_info(lines, hostname):
     section = []
     section_options = {}
     separator = None
+    encoding  = None
     for line in lines:
         if line[:4] == '<<<<' and line[-4:] == '>>>>':
             host = line[4:-4]
@@ -796,7 +800,16 @@ def parse_info(lines, hostname):
                 until = int(section_options["persist"])
                 persist[section_name] = ( until, section )
 
+            # The section data might have a different encoding
+            encoding = section_options.get("encoding")
+
         elif line != '':
+            if encoding:
+                try:
+                    decoded_line = line.decode(encoding)
+                    line = decoded_line.encode('utf-8')
+                except:
+                    pass
             section.append(line.split(separator))
     return info, piggybacked, persist
 
@@ -835,6 +848,21 @@ def load_counters(hostname):
                 g_counters[' '.join(line[0:-2])] = ( int(line[-2]), int(line[-1]) )
         except:
             g_counters = {}
+
+
+# Deletes counters from g_counters matching the given pattern and are older_than x seconds
+def clear_counters(pattern, older_than):
+    global g_counters
+    counters_to_delete = []
+    now = time.time()
+
+    for name, (timestamp, value) in g_counters.items():
+        if name.startswith(pattern):
+            if now > timestamp + older_than:
+                counters_to_delete.append(name)
+
+    for name in counters_to_delete:
+        del g_counters[name]
 
 def get_counter(countername, this_time, this_val, allow_negative=False):
     global g_counters
@@ -965,7 +993,7 @@ def do_check(hostname, ipaddress, only_check_types = None):
         num_errors = len(error_sections)
         save_counters(hostname)
         if problems:
-	    output = "%s, " % problems
+            output = "%s, " % problems
             status = exit_spec.get("connection", 2)
         elif num_errors > 0 and num_success > 0:
             output = "Missing agent sections: %s - " % ", ".join(error_sections)
@@ -1112,6 +1140,57 @@ def convert_check_info():
         if info["snmp_scan_function"] and basename not in snmp_scan_functions:
             snmp_scan_functions[basename] = info["snmp_scan_function"]
 
+
+def convert_check_result(result, is_snmp):
+    if type(result) == tuple:
+        return result
+
+    elif result == None:
+        return item_not_found(is_snmp)
+
+    # The check function may either return a tuple (pair or triple) or an iterator
+    # (using yield). The latter one is new since version 1.2.5i5.
+    else: # We assume an iterator, convert to tuple
+        subresults = list(result)
+
+        # Empty list? Check returned nothing
+        if not subresults:
+            return item_not_found(is_snmp)
+
+
+        # Simple check with no separate subchecks (yield wouldn't have been neccessary here!)
+        if len(subresults) == 1:
+            return subresults[0]
+
+        # Several sub results issued with multiple yields. Make that worst sub check
+        # decide the total state, join the texts and performance data. Subresults with
+        # an infotext of None are used for adding performance data.
+        else:
+            perfdata = []
+            infotexts = []
+            status = 0
+
+            for subresult in subresults:
+                st, text = subresult[:2]
+                if text != None:
+                    infotexts.append(text + ["", "(!)", "(!!)", "(?)"][st])
+                    if st == 2 or status == 2:
+                        status = 2
+                    else:
+                        status = max(status, st)
+                if len(subresult) == 3:
+                    perfdata += subresult[2]
+
+            return status, ", ".join(infotexts),  perfdata
+
+
+def item_not_found(is_snmp):
+    if is_snmp:
+        return 3, "Item not found in SNMP data"
+    else:
+        return 3, "Item not found in agent output"
+
+
 # Loops over all checks for a host, gets the data, calls the check
 # function that examines that data and sends the result to Nagios
 def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
@@ -1152,22 +1231,22 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
 
         infotype = checkname.split('.')[0]
         try:
-	    info = get_host_info(hostname, ipaddress, infotype)
+            info = get_host_info(hostname, ipaddress, infotype)
         except MKSkipCheck, e:
             continue
         except MKSNMPError, e:
-	    if str(e):
-	        problems.append(str(e))
-            error_sections.add(infotype)
-	    g_broken_snmp_hosts.add(hostname)
-	    continue
-
-        except MKAgentError, e:
-	    if str(e):
+            if str(e):
                 problems.append(str(e))
             error_sections.add(infotype)
-	    g_broken_agent_hosts.add(hostname)
-	    continue
+            g_broken_snmp_hosts.add(hostname)
+            continue
+
+        except MKAgentError, e:
+            if str(e):
+                problems.append(str(e))
+            error_sections.add(infotype)
+            g_broken_agent_hosts.add(hostname)
+            continue
 
         if info or info == []:
             num_success += 1
@@ -1178,7 +1257,11 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
 
             try:
                 dont_submit = False
-                result = check_function(item, params, info)
+
+                # Call the actual check function
+                result = convert_check_result(check_function(item, params, info), check_uses_snmp(checkname))
+
+
             # handle check implementations that do not yet support the
             # handling of wrapped counters via exception. Do not submit
             # any check result in that case:
@@ -1234,7 +1317,7 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
         else:
             agent_version = None
     except MKAgentError, e:
-	g_broken_agent_hosts.add(hostname)
+        g_broken_agent_hosts.add(hostname)
         agent_version = "(unknown)"
     except:
         agent_version = "(unknown)"
@@ -1512,6 +1595,9 @@ def nodes_of(hostname):
     g_nodesof_cache[hostname] = None
     return None
 
+def check_uses_snmp(check_type):
+    return snmp_info.get(check_type.split(".")[0]) != None
+
 def pnp_cleanup(s):
     return s \
         .replace(' ',  '_') \
@@ -1537,20 +1623,26 @@ def pnp_cleanup(s):
 # dsname:  name of the datasource in the RRD that corresponds to this value
 # unit:    unit to be displayed in the plugin output, e.g. "MB/s"
 # factor:  the levels are multiplied with this factor before applying
-#          them to the value. For example the disk-IO check uses B/s
-#          as the unit for the value. But the levels are in MB/s. In that
-#          case the factor is 1.0 / 1048576.
-def check_levels(value, dsname, params, unit = "", factor = 1.0, statemarkers=False):
+#          them to the value. This is being used for the CPU load check
+#          currently. The levels here are "per CPU", so the number of
+#          CPUs is used as factor.
+# scale:   Scale of the levels in relation to "value" and the value in the RRDs.
+#          For example if the levels are specified in GB and the RRD store KB, then
+#          the scale is 1024*1024.
+def check_levels(value, dsname, params, unit="", factor=1.0, scale=1.0, statemarkers=False):
+    if unit:
+        unit = " " + unit # Insert space before MB, GB, etc.
 
+    perfdata = []
+    infotexts = []
+
+    # None or (None, None) -> do not check any levels
     if params == None or params == (None, None):
         return 0, "", []
 
-    perfdata = []
-    infotext = ""
-
     # Pair of numbers -> static levels
-    if type(params) == tuple:
-        warn_upper, crit_upper = params[0] * factor, params[1] * factor,
+    elif type(params) == tuple:
+        warn_upper, crit_upper = params[0] * factor * scale, params[1] * factor * scale,
         warn_lower, crit_lower = None, None
         ref_value = None
 
@@ -1558,11 +1650,11 @@ def check_levels(value, dsname, params, unit = "", factor = 1.0, statemarkers=Fa
     else:
         try:
             ref_value, ((warn_upper, crit_upper), (warn_lower, crit_lower)) = \
-                get_predictive_levels(dsname, params, "MAX", levels_factor=factor)
+                get_predictive_levels(dsname, params, "MAX", levels_factor=factor * scale)
             if ref_value:
-                infotext += "predicted reference: %.2f%s" % (ref_value * factor, unit)
+                infotexts.append("predicted reference: %.2f%s" % (ref_value * factor / scale, unit))
             else:
-                infotext += "no reference for prediction yet"
+                infotexts.append("no reference for prediction yet")
         except Exception, e:
             if opt_debug:
                 raise
@@ -1574,22 +1666,27 @@ def check_levels(value, dsname, params, unit = "", factor = 1.0, statemarkers=Fa
     # Critical cases
     if crit_upper != None and value >= crit_upper:
         state = 2
-        infotext += " (critical level at %.2f%s)" % (crit_upper / factor, unit)
+        infotexts.append("critical level at %.2f%s" % (crit_upper / factor / scale, unit))
     elif crit_lower != None and value <= crit_lower:
         state = 2
-        infotext += " (too low: critical level at %.2f%s)" % (crit_lower / factor, unit)
+        infotexts.append("too low: critical level at %.2f%s" % (crit_lower / factor / scale, unit))
 
     # Warning cases
     elif warn_upper != None and value >= warn_upper:
         state = 1
-        infotext += " (warning level at %.2f%s)" % (warn_upper / factor, unit)
+        infotexts.append("warning level at %.2f%s" % (warn_upper / factor / scale, unit))
     elif warn_lower != None and value <= warn_lower:
         state = 1
-        infotext += " (too low: warning level at %.2f%s)" % (warn_lower / factor, unit)
+        infotexts.append("too low: warning level at %.2f%s" % (warn_lower / factor / scale, unit))
 
     # OK
     else:
         state = 0
+
+    if infotexts:
+        infotext = " (" + ", ".join(infotexts) + ")"
+    else:
+        infotext = ""
 
     if state and statemarkers:
         if state == 1:
@@ -1618,8 +1715,8 @@ def get_regex(pattern):
 # Names of texts usually output by checks
 nagios_state_names = ["OK", "WARN", "CRIT", "UNKNOWN"]
 
-# Symbolic representations of states
-state_markers = ["(.)", "(!)", "(!!)", "(?)"]
+# Symbolic representations of states (Needed for new 2.0 check api)
+state_markers = ["", "(!)", "(!!)", "(?)"]
 
 # int() function that return 0 for strings the
 # cannot be converted to a number
@@ -1695,9 +1792,6 @@ def get_nic_speed_human_readable(speed):
         pass
     return speed
 
-# Convert Fahrenheit to Celsius
-def to_celsius(f):
-    return round(float(f) - 32.0) * 5.0 / 9.0
 
 # Format time difference seconds into approximated
 # human readable value
@@ -1709,12 +1803,12 @@ def get_age_human_readable(secs):
         return "%d min" % mins
     hours, mins = divmod(mins, 60)
     if hours < 12 and mins > 0:
-        return "%d hours, %d min" % (hours, mins)
+        return "%d hours %d min" % (hours, mins)
     elif hours < 48:
         return "%d hours" % hours
     days, hours = divmod(hours, 24)
     if days < 7 and hours > 0:
-        return "%d days, %d hours" % (days, hours)
+        return "%d days %d hours" % (days, hours)
     return "%d days" % days
 
 # Quote string for use as arguments on the shell

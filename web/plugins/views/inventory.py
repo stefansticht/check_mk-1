@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -48,178 +48,6 @@ def cmp_inventory_node(a, b, invpath):
     val_b = inventory.get(b["host_inventory"], invpath)
     return cmp(a, b)
 
-class FilterInvText(Filter):
-    def __init__(self, name, invpath, title):
-        self._invpath = invpath
-        Filter.__init__(self, name, title, "host", [name], [])
-
-    def need_inventory(self):
-        return True
-
-    def display(self):
-        htmlvar = self.htmlvars[0]
-        current_value = html.var(htmlvar, "")
-        html.text_input(htmlvar, current_value)
-
-    def filter_table(self, rows):
-        htmlvar = self.htmlvars[0]
-        filtertext = html.var(htmlvar, "").strip().lower()
-        if not filtertext:
-            return rows
-
-        regex = re.compile(filtertext, re.IGNORECASE)
-
-        newrows = []
-        for row in rows:
-            invdata = inventory.get(row["host_inventory"], self._invpath)
-            if invdata == None:
-                invdata = ""
-            if regex.search(invdata):
-                newrows.append(row)
-        return newrows
-
-class FilterInvFloat(Filter):
-    def __init__(self, name, invpath, title, unit="", scale=1.0):
-        self._invpath = invpath
-        self._unit = unit
-        self._scale = scale
-        Filter.__init__(self, name, title, "host", [name + "_from", name + "_to"], [])
-
-    def need_inventory(self):
-        return True
-
-    def display(self):
-        html.write(_("From: "))
-        htmlvar = self.htmlvars[0]
-        current_value = html.var(htmlvar, "")
-        html.number_input(htmlvar, current_value)
-        if self._unit:
-            html.write(self._unit)
-
-        html.write("&nbsp;&nbsp;" + _("To: " ))
-        htmlvar = self.htmlvars[1]
-        current_value = html.var(htmlvar, "")
-        html.number_input(htmlvar, current_value)
-        if self._unit:
-            html.write(self._unit)
-
-    def filter_table(self, rows):
-        fromvar = self.htmlvars[0]
-        fromtext = html.var(fromvar)
-        lower = None
-        if fromtext:
-            try:
-                lower = float(fromtext) * self._scale
-            except:
-                pass
-
-        tovar = self.htmlvars[1]
-        totext = html.var(tovar)
-        upper = None
-        if totext:
-            try:
-                upper = float(totext) * self._scale
-            except:
-                pass
-
-        if lower == None and upper == None:
-            return rows
-
-        newrows = []
-        for row in rows:
-            invdata = inventory.get(row["host_inventory"], self._invpath)
-            if lower != None and invdata < lower:
-                continue
-            if upper != None and invdata > upper:
-                continue
-            newrows.append(row)
-        return newrows
-
-class FilterHasInventory(FilterTristate):
-    def __init__(self):
-        FilterTristate.__init__(self, "has_inv", _("Has Inventory Data"), "host", "host_inventory")
-
-    def filter(self, infoname):
-        return "" # No Livestatus filtering right now
-
-    def filter_table(self, rows):
-        return [ row for row in rows if row["host_inventory"] ]
-
-class FilterInvHasSoftwarePackage(Filter):
-    def __init__(self):
-        self._varprefix = "invswpac_host_"
-        Filter.__init__(self, "invswpac", _("Host has software package"), "host",
-                        [ self._varprefix + "name", self._varprefix + "version_from",
-                          self._varprefix + "version_to", self._varprefix + "negate"], [])
-
-    def double_height(self):
-        return True
-
-    def need_inventory(self):
-        return True
-
-    def display(self):
-        html.text_input(self._varprefix + "name")
-        html.write("<br>")
-        html.begin_radio_group(horizontal=True)
-        html.radiobutton(self._varprefix + "match", "exact", True, label=_("exact match"))
-        html.radiobutton(self._varprefix + "match", "regex", False, label=_("regular expression, substring match"))
-        html.end_radio_group()
-        html.write("<br>")
-        html.write(_("Min.&nbsp;Version:"))
-        html.text_input(self._varprefix + "version_from", size = 9)
-        html.write(" &nbsp; ")
-        html.write(_("Max.&nbsp;Vers.:"))
-        html.text_input(self._varprefix + "version_to", size = 9)
-        html.write("<br>")
-        html.checkbox(self._varprefix + "negate", False, label=_("Negate: find hosts <b>not</b> having this package"))
-
-    def filter_table(self, rows):
-        name = html.var_utf8(self._varprefix + "name")
-        if not name:
-            return rows
-
-        from_version = html.var(self._varprefix + "from_version")
-        to_version   = html.var(self._varprefix + "to_version")
-        negate       = html.get_checkbox(self._varprefix + "negate")
-        match        = html.var(self._varprefix + "match")
-        if match == "regex":
-            name = re.compile(name)
-
-        new_rows = []
-        for row in rows:
-            packages = inventory.get(row["host_inventory"], ".software.packages:")
-            is_in = self.find_package(packages, name, from_version, to_version)
-            if is_in != negate:
-                new_rows.append(row)
-        return new_rows
-
-    def find_package(self, packages, name, from_version, to_version):
-        for package in packages:
-            if type(name) == unicode:
-                if package["name"] != name:
-                    continue
-            else:
-                if not name.search(package["name"]):
-                    continue
-            if not from_version and not to_version:
-                return True # version not relevant
-            version = package["version"]
-            if from_version == to_version and from_version != version:
-                continue
-            if from_version and self.version_is_lower(version, from_version):
-                continue
-            if to_version and self.version_is_higher(version, to_version):
-                continue
-        return False
-
-    def version_is_lower(self, a, b):
-        return a != b and not self.version_is_higher(a, b)
-
-    def version_is_higher(self, a, b):
-        return cmp_version(a, b) == 1
-
-
 # Try to magically compare two software versions.
 # Currently we only assume the format A.B.C.D....
 # When we suceed converting A to a number, then we
@@ -244,6 +72,7 @@ inv_filter_info = {
     "bytes_rounded" : { "unit" : _("MB"),    "scale" : 1024*1024 },
     "hz"            : { "unit" : _("MHz"),   "scale" : 1000000 },
     "volt"          : { "unit" : _("Volt") },
+    "timestamp"     : { "unit" : _("secs") },
 }
 
 
@@ -277,10 +106,10 @@ def declare_inv_column(invpath, datatype, title, short = None):
 
         # Declare filter.
         if datatype == "str":
-            declare_filter(800, FilterInvText(name, invpath, title))
+            visuals.declare_filter(800, visuals.FilterInvText(name, invpath, title))
         else:
             filter_info = inv_filter_info.get(datatype, {})
-            declare_filter(800, FilterInvFloat(name, invpath, title,
+            visuals.declare_filter(800, visuals.FilterInvFloat(name, invpath, title,
                unit = filter_info.get("unit"),
                scale = filter_info.get("scale", 1.0)))
 
@@ -501,7 +330,7 @@ def inv_paint_bytes(b):
     if b == None:
         return "", _("unknown")
     elif b == 0:
-        return "0"
+        return "number", "0"
 
     units = [ 'B', 'kB', 'MB', 'GB', 'TB' ]
     i = 0
@@ -540,16 +369,32 @@ def inv_paint_volt(volt):
     else:
         return "", ""
 
+def inv_paint_timestamp(stamp):
+    if stamp:
+        return "Unix time", "%i" % stamp
+    else:
+        return "", ""
+
+def inv_paint_date(stamp):
+    if stamp:
+        date_painted = time.strftime("%Y-%m-%d", time.localtime(stamp))
+        return "Date", "%s" % date_painted
+    else:
+        return "", ""
+
 inventory_displayhints.update({
     "."                                                : { "title" : _("Inventory") },
     ".hardware."                                       : { "title" : _("Hardware"), "icon" : "hardware", },
     ".hardware.bios."                                  : { "title" : _("BIOS"), },
     ".hardware.bios.vendor"                            : { "title" : _("Vendor"), },
+    ".hardware.bios.version"                           : { "title" : _("Version"), },
+    ".hardware.bios.date"                              : { "title" : _("Date"), "paint": "date"},
     ".hardware.chassis."                               : { "title" : _("Chassis"), },
     ".hardware.cpu."                                   : { "title" : _("Processor"), },
     ".hardware.cpu.model"                              : { "title" : _("Model"), "short" : _("CPU Model"), },
     ".hardware.cpu.cache_size"                         : { "title" : _("Cache Size"),                     "paint" : "bytes" },
     ".hardware.cpu.max_speed"                          : { "title" : _("Maximum Speed"),                  "paint" : "hz" },
+    ".hardware.cpu.bus_speed"                          : { "title" : _("Bus Speed"),                      "paint" : "hz" },
     ".hardware.cpu.voltage"                            : { "title" : _("Voltage"),                        "paint" : "volt" },
     ".hardware.cpu.cores_per_cpu"                      : { "title" : _("Cores per CPU"),                  "paint" : "count" },
     ".hardware.cpu.threads_per_cpu"                    : { "title" : _("Hyperthreads per CPU"),           "paint" : "count" },
@@ -571,15 +416,38 @@ inventory_displayhints.update({
     ".hardware.memory.arrays:*.devices:*.size"         : { "title" : _("Size"),                   "paint" : "bytes", },
     ".hardware.memory.arrays:*.devices:*.speed"        : { "title" : _("Speed"),                  "paint" : "hz", },
     ".hardware.system."                                : { "title" : _("System") },
-    ".hardware.harddisks."                             : { "title" : _("Hard Disks") },
-    ".hardware.video."                                 : { "title" : _("Video Cards") },
+    ".hardware.storage."                               : { "title" : _("Storage") },
+    ".hardware.storage.disks:"                         : { "title" : _("Block Devices") },
+    ".hardware.storage.disks:*."                       : { "title" : _("Block Device %d") },
+    ".hardware.storage.disks:*.signature"              : { "title" : _("Disk ID") },
+    ".hardware.storage.disks:*.vendor"                 : { "title" : _("Vendor") },
+    ".hardware.storage.disks:*.local"                  : { "title" : _("Local") },
+    ".hardware.storage.disks:*.bus"                    : { "title" : _("Bus") },
+    ".hardware.storage.disks:*.product"                : { "title" : _("Product") },
+    ".hardware.storage.disks:*.fsnode"                 : { "title" : _("Filesystem Node") },
+    ".hardware.storage.disks:*.serial"                 : { "title" : _("Serial Number") },
+    ".hardware.storage.disks:*.size"                   : { "title" : _("Size") },
+    ".hardware.storage.disks:*.type"                   : { "title" : _("Type") },
+    ".hardware.video:"                                 : { "title" : _("Graphic Cards") },
+    ".hardware.video:*."                               : { "title" : _("Graphic Card %d") },
+    ".hardware.video:*.name"                           : { "title" : _("Graphic Card Name"), "short" : _("Card Name") },
+    ".hardware.video:*.subsystem"                      : { "title" : _("Vendor and Device ID"), "short" : _("Vendor") },
+    ".hardware.video:*.driver"                         : { "title" : _("Driver"), "short" : _("Driver") },
+    ".hardware.video:*.driver_date"                    : { "title" : _("Driver Date"), "short" : _("Driver Date") },
+    ".hardware.video:*.driver_version"                 : { "title" : _("Driver Version"), "short" : _("Driver Version") },
 
     ".software."                                       : { "title" : _("Software"), "icon" : "software" },
     ".software.os."                                    : { "title" : _("Operating System") },
     ".software.os.name"                                : { "title" : _("Name"), "short" : _("Operating System") },
-    ".software.os.kernel"                              : { "title" : _("Kernel Version"), "short" : _("Kernel") },
+    ".software.os.version"                             : { "title" : _("Version"), },
+    ".software.os.vendor"                              : { "title" : _("Vendor"), },
+    ".software.os.type"                                : { "title" : _("Type"), }, # e.g. "linux"
+    ".software.os.install_date"                        : { "title" : _("Install Date"), "paint" : "date" },
+    ".software.os.kernel_version"                      : { "title" : _("Kernel Version"), "short" : _("Kernel") },
     ".software.os.arch"                                : { "title" : _("Kernel Architecture"), "short" : _("Architecture") },
     ".software.os.service_pack"                        : { "title" : _("Service Pack"), "short" : _("Service Pack") },
+    ".software.os.service_packs:"                      : { "title" : _("Service Packs"), "render" : render_inv_dicttable,
+                                                            "keyorder" : [ "name" ] },
     ".software.packages:"                              : { "title" : _("Packages"), "icon" : "packages", "render": render_inv_dicttable,
                                                            "keyorder" : [ "name", "version", "arch", "package_type", "summary"] },
     ".software.packages:*.name"                        : { "title" : _("Name"), },
@@ -587,9 +455,11 @@ inventory_displayhints.update({
     ".software.packages:*.package_type"                : { "title" : _("Type"), },
     ".software.packages:*.summary"                     : { "title" : _("Description"), },
     ".software.packages:*.version"                     : { "title" : _("Version"), },
+    ".software.packages:*.vendor"                      : { "title" : _("Publisher"), },
     ".software.packages:*.package_version"             : { "title" : _("Package Version"), },
-    ".software.packages:*.install_date"                : { "title" : _("Install Date"), },
+    ".software.packages:*.install_date"                : { "title" : _("Install Date"), "paint" : "date"},
     ".software.packages:*.size"                        : { "title" : _("Size"), "paint" : "count" },
+    ".software.packages:*.path"                        : { "title" : _("Path"), },
 })
 
 # TEST: create painters for node with a display hint
@@ -598,9 +468,6 @@ for invpath, hint in inventory_displayhints.items():
         datatype = hint.get("paint", "str")
         long_title = inv_titleinfo_long(invpath, None)
         declare_inv_column(invpath, datatype, long_title, hint.get("short", long_title))
-
-declare_filter(801, FilterHasInventory())
-declare_filter(801, FilterInvHasSoftwarePackage())
 
 # View for Inventory tree of one host
 multisite_builtin_views["inv_host"] = {
@@ -683,7 +550,7 @@ multisite_builtin_views["inv_hosts_cpu"] = {
     'hard_filtervars'              : [
         ('is_has_inv', '1' ),
     ],
-    'hide_filters'                 : ['host', 'site'],
+    'hide_filters'                 : [],
     'show_filters'                 : [
          'inv_hardware_cpu_cpus',
          'inv_hardware_cpu_cores',
@@ -742,60 +609,6 @@ def inv_software_table(columns, add_headers, only_sites, limit, filters):
 
     return rows
 
-class FilterSWPacsText(Filter):
-    def __init__(self, name, title):
-        varname = "invswpac_" + name
-        Filter.__init__(self, varname, title, "invswpacs", [varname], [])
-
-    def display(self):
-        htmlvar = self.htmlvars[0]
-        current_value = html.var(htmlvar, "")
-        html.text_input(htmlvar, current_value)
-
-    def filter_table(self, rows):
-        htmlvar = self.htmlvars[0]
-        filtertext = html.var(htmlvar, "").strip().lower()
-        if not filtertext:
-            return rows
-
-        regex = re.compile(filtertext, re.IGNORECASE)
-
-        newrows = []
-        for row in rows:
-            if regex.search(row.get(htmlvar, "")):
-                newrows.append(row)
-        return newrows
-
-class FilterSWPacsVersion(Filter):
-    def __init__(self, name, title):
-        varname = "invswpac_" + name
-        Filter.__init__(self, varname, title, "invswpacs", [varname + "_from", varname + "_to"], [])
-
-    def display(self):
-        htmlvar = self.htmlvars[0]
-        html.write(_("Min.&nbsp;Version:"))
-        html.text_input(self.htmlvars[0], size = 9)
-        html.write(" &nbsp; ")
-        html.write(_("Max.&nbsp;Version:"))
-        html.text_input(self.htmlvars[1], size = 9)
-
-    def filter_table(self, rows):
-        from_version = html.var(self.htmlvars[0])
-        to_version   = html.var(self.htmlvars[1])
-        if not from_version and not to_version:
-            return rows # Filter not used
-
-        new_rows = []
-        for row in rows:
-            version = row.get(self.name, "")
-            if from_version and cmp_version(version, from_version) == -1:
-                continue
-            if to_version and cmp_version(version, to_version) == 1:
-                continue
-            new_rows.append(row)
-
-        return new_rows
-
 def declare_swpacs_columns(name, title, sortfunc):
     column = "invswpac_" + name
     multisite_painters[column] = {
@@ -812,9 +625,9 @@ def declare_swpacs_columns(name, title, sortfunc):
     }
 
     if sortfunc == cmp_version:
-        declare_filter(801, FilterSWPacsVersion(name, _("Software Package") + ": " + title))
+        visuals.declare_filter(801, visuals.FilterSWPacsVersion(name, _("Software Package") + ": " + title))
     else:
-        declare_filter(800, FilterSWPacsText(name, _("Software Package") + ": " + title))
+        visuals.declare_filter(800, visuals.FilterSWPacsText(name, _("Software Package") + ": " + title))
 
 
 for name, title, sortfunc in [
@@ -832,11 +645,11 @@ for name, title, sortfunc in [
 
 
 multisite_datasources["invswpacs"] = {
-    "title"       : _("Inventory: Software Packages"),
-    "table"       : inv_software_table,
-    "infos"       : [ "host", "invswpac" ],
-    "keys"        : [],
-    "idkeys"      : [],
+    "title"        : _("Inventory: Software Packages"),
+    "table"        : inv_software_table,
+    "infos"        : [ "host", "invswpac" ],
+    "keys"         : [],
+    "idkeys"       : [],
 }
 
 

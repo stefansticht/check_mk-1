@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -40,21 +40,39 @@
 #file('/tmp/1', 'a').write('%s %s\n%s' % (datetime.datetime.now(), current_language, ''.join(traceback.format_stack())))
 
 # RESCHEDULE ACTIVE CHECKS
+def command_reschedule(cmdtag, spec, row, row_nr, total_rows):
+    if html.var("_resched_checks"):
+        spread = saveint(html.var("_resched_spread"))
+        text = _("<b>reschedule an immediate check")
+        if spread:
+            text += _(" spread over %d minutes ") % spread
+
+        text += "</b>" + _("of")
+
+        t = time.time()
+        if spread:
+            t += spread * 60.0 * row_nr / total_rows
+
+        command = "SCHEDULE_FORCED_" + cmdtag + "_CHECK;%s;%d" % (spec, int(t))
+        return command, text
+
 config.declare_permission("action.reschedule",
         _("Reschedule checks"),
         _("Reschedule host and service checks"),
         [ "user", "admin" ])
 
+
 multisite_commands.append({
     "tables"      : [ "host", "service" ],
     "permission"  : "action.reschedule",
-    "title"       : _("Reschedule"),
+    "title"       : _("Reschedule active checks"),
     "render"      : lambda: \
-        html.button("_resched_checks", _("Reschedule active checks")),
-    "action"      : lambda cmdtag, spec, row:
-        html.var("_resched_checks") and (
-            "SCHEDULE_FORCED_" + cmdtag + "_CHECK;%s;%d" % (spec, int(time.time())),
-            _("<b>reschedule an immediate check</b> of"))
+        html.button("_resched_checks", _("Reschedule")) == \
+        html.write(_("and spread over") + " ") == \
+        html.number_input("_resched_spread", 0, size=3) == \
+        html.write(" " + _("minutes") + " "),
+    "action"      : command_reschedule,
+    "row_stats"   : True, # Get information about number of rows and current row nr.
 })
 
 
@@ -157,7 +175,7 @@ def command_fake_checks(cmdtag, spec, row):
     for s in [0,1,2,3]:
         statename = html.var("_fake_%d" % s)
         if statename:
-            pluginoutput = _("Manually set to %s by %s") % (statename, config.user_id)
+            pluginoutput = _("Manually set to %s by %s") % (html.attrencode(statename), config.user_id)
             if cmdtag == "SVC":
                 cmdtag = "SERVICE"
             command = "PROCESS_%s_CHECK_RESULT;%s;%s;%s" % (cmdtag, spec, s, pluginoutput)
@@ -347,10 +365,12 @@ def command_downtime(cmdtag, spec, row):
 
         down_to = time.time() + minutes * 60
         title = _("<b>schedule an immediate downtime for the next %d minutes</b> on" % minutes)
+
     elif html.var("_down_adhoc"):
         minutes = config.adhoc_downtime.get("duration",0)
         down_to = time.time() + minutes * 60
         title = _("<b>schedule an immediate downtime for the next %d minutes</b> on" % minutes)
+
     elif html.var("_down_custom"):
         down_from = html.get_datetime_input("_down_from")
         down_to   = html.get_datetime_input("_down_to")
@@ -363,6 +383,9 @@ def command_downtime(cmdtag, spec, row):
             time.asctime(time.localtime(down_to)))
 
     elif html.var("_down_remove"):
+        if html.var("_on_hosts"):
+            raise MKUserError("_on_hosts", _("The checkbox for setting host downtimes does not work when removing downtimes."))
+
         downtime_ids = []
         if cmdtag == "HOST":
             prefix = "host_"
@@ -394,6 +417,10 @@ def command_downtime(cmdtag, spec, row):
 
         if html.var("_include_childs"): # only for hosts
             specs = [ spec ] + get_child_hosts(row["site"], [spec], recurse = not not html.var("_include_childs_recurse"))
+        elif html.var("_on_hosts"): # set on hosts instead of services
+            specs = [ spec.split(";")[0] ]
+            title += " the hosts of"
+            cmdtag = "HOST"
         else:
             specs = [ spec ]
 
@@ -401,6 +428,7 @@ def command_downtime(cmdtag, spec, row):
                    + ("%d;%d;%d;0;%d;%s;" % (down_from, down_to, fixed, duration, config.user_id)) \
                    + comment) for spec in specs]
         return commands, title
+
 
 def get_child_hosts(site, hosts, recurse):
     hosts = set(hosts)
@@ -418,6 +446,7 @@ def get_child_hosts(site, hosts, recurse):
         rec_childs = get_child_hosts(site, new_childs, True)
         new_childs.update(rec_childs)
     return list(new_childs)
+
 
 def paint_downtime_buttons(what):
 
@@ -454,11 +483,14 @@ def paint_downtime_buttons(what):
     html.checkbox("_down_flexible", False, label=_('flexible with max. duration')+" ")
     html.time_input("_down_duration", 2, 0)
     html.write(" "+_('(HH:MM)'))
+    html.write("<hr>")
     if what == "host":
-        html.write("<hr>")
         html.checkbox("_include_childs", False, label=_('Also set downtime on child hosts'))
         html.write("  ")
         html.checkbox("_include_childs_recurse", False, label=_('Do this recursively'))
+    else:
+        html.checkbox("_on_hosts", False, label=_('Schedule downtimes on the affected <b>hosts</b> instead of their services'))
+
 
 
 multisite_commands.append({
@@ -514,13 +546,6 @@ multisite_commands.append({
 #   |                                                                      |
 #   '----------------------------------------------------------------------'
 
-def load_stars():
-    return set(config.load_user_file("favorites", []))
-
-def save_stars(stars):
-    config.save_user_file("favorites", list(stars))
-
-
 def command_star(cmdtag, spec, row):
     if html.var("_star") or html.var("_unstar"):
         star = html.var("_star") and 1 or 0
@@ -533,12 +558,12 @@ def command_star(cmdtag, spec, row):
 
 def command_executor_star(command, site):
     foo, star, spec = command.split(";", 2)
-    stars = load_stars()
+    stars = config.load_stars()
     if star == "0" and spec in stars:
         stars.remove(spec)
     elif star == "1":
         stars.add(spec)
-    save_stars(stars)
+    config.save_stars(stars)
 
 config.declare_permission("action.star",
     _("Use favorites"),

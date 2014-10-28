@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# encoding: utf-8
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2010             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -102,7 +102,7 @@ password       = None
 mortypes       = [ 'all' ]
 fetch_agent_info = False
 
-naviseccli_options = { 
+naviseccli_options = {
     "disks"      : {"cmd_option" : "-disk",  "active" : False},
     "hba"        : {"cmd_option" : "-hba",   "active" : False},
     "hwstatus"   : {"cmd_option" : "-array", "active" : False},
@@ -188,10 +188,10 @@ for line in os.popen(cmd).readlines():
 
 print "Version: %s" % emcvnx_version
 
-# maybe we could fill AgentOs: by reading "Model:" line of naviseccli output
+# maybe we could fill AgentOS: by reading "Model:" line of naviseccli output
 # in section "Agent/Host Information", but need a call of naviseccli with an
 # other commandline argument
-#print "AgentOs: %s " % emcvnx_model
+#print "AgentOS: %s " % emcvnx_model
 
 print "<<<emcvnx_info>>>"
 for line in cmdout:

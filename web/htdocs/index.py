@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -35,7 +35,14 @@ from mod_python import apache
 import sys, os, pprint
 from lib import *
 import livestatus
-import defaults, config, login, userdb, hooks, default_permissions
+import defaults, config, login, userdb, hooks, visuals, default_permissions
+try:
+    import reporting
+except SyntaxError:
+    raise
+except:
+    reporting = None
+
 from html_mod_python import *
 
 # Load page handlers
@@ -60,20 +67,15 @@ if defaults.omd_root:
 
 # Call the load_plugins() function in all modules
 def load_all_plugins():
-    for module in [ hooks, userdb, views, sidebar, dashboard, wato, bi, mobile, notify ]:
+    for module in [ hooks, userdb, visuals, views, sidebar, dashboard,
+                    wato, bi, mobile, notify, webapi, reporting ]:
         try:
             module.load_plugins # just check if this function exists
-            module.load_plugins()
         except AttributeError:
             pass
-        except Exception:
-            raise
+        else:
+            module.load_plugins()
 
-    # Load reporting plugins (only available in subscription version)
-    try:
-        reporting.load_plugins()
-    except:
-        pass
 
 __builtin__.load_all_plugins = load_all_plugins
 
@@ -104,6 +106,10 @@ def handler(req, fields = None, profiling = True):
         config.load_config() # load multisite.mk
         if html.var("debug"): # Debug flag may be set via URL
             config.debug = True
+
+        if html.var("screenshotmode") or config.screenshotmode: # Omit fancy background, make it white
+            html.screenshotmode = True
+
         html.enable_debug = config.debug
         html.set_buffering(config.buffered_http_stream)
 

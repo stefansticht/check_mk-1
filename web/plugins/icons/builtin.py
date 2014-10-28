@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -304,7 +304,7 @@ def logwatch_url(sitename, hostname, item):
 def paint_logwatch(what, row, tags, custom_vars):
     if what != "service":
         return
-    if row[what + "_check_command"] == 'check_mk-logwatch':
+    if row[what + "_check_command"] in [ 'check_mk-logwatch', 'check_mk-logwatch.groups' ]:
         return '<a href="%s"><img class=icon ' \
                'src="images/icon_logwatch.png\"></a>' % \
                    logwatch_url(row["site"], row['host_name'], row['service_description'][4:])
@@ -576,5 +576,30 @@ def paint_stars(what, row, tags, custom_vars):
 multisite_icons.append({
     'columns': [],
     'paint': paint_stars,
+})
+
+def paint_icon_check_bi_aggr(what, row, tags, custom_vars):
+    if what == "service" and row.get("service_check_command","").startswith("check_mk_active-bi_aggr!"):
+        args = row['service_check_command']
+        start = args.find('-b \'') + 4
+        end   = args.find('\' ', start)
+        base_url = args[start:end]
+        base_url = base_url.replace('$HOSTADDRESS$', row['host_address'])
+        base_url = base_url.replace('$HOSTNAME$', row['host_name'])
+
+        start = args.find('-a \'') + 4
+        end   = args.find('\' ', start)
+        aggr_name = args[start:end]
+
+        url = "%s/check_mk/view.py?view_name=aggr_single&aggr_name=%s" % \
+              (base_url, html.urlencode(aggr_name))
+
+        return '<a href="%s"><img class=icon src="images/icon_aggr.gif" title="%s"></a>' % \
+                 (html.attrencode(url), _('Open this Aggregation'))
+
+
+multisite_icons.append({
+    'host_columns' : [ 'check_command', 'name', 'address' ],
+    'paint'        : paint_icon_check_bi_aggr,
 })
 

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -25,25 +25,14 @@
 # Boston, MA 02110-1301 USA.
 
 def inventory_decru_temps(info):
-    return [ (l[0], (int(to_celsius(int(l[1]))) + 4.0,
-    int(to_celsius(int(l[1]))) + 8.0 ) ) for l in info ]
+    return [ (l[0], (int(fahrenheit_to_celsius(int(l[1]))) + 4.0,
+    int(fahrenheit_to_celsius(int(l[1]))) + 8.0 ) ) for l in info ]
 
 def check_decru_temps(item, params, info):
-    for temp in info:
-        if temp[0] == item:
-            temp = to_celsius(int(temp[1]))
-            warn, crit = params
-            perfdata = [("temp", temp, "", "", warn, crit)]
-            infotxt = "%d C (levels at %d/%d)" % (temp, warn, crit)
-            if temp >= crit:
-                return (2, infotxt, perfdata)
-            elif temp >= warn:
-                return (1, infotxt, perfdata)
-            else:
-                return (0, infotxt, perfdata)
-
-    return (3, "sensor not found")
-
+    for name, rawtemp in info:
+        if name == item:
+            temp = fahrenheit_to_celsius(int(rawtemp))
+            return check_temperature(temp, params)
 
 
 check_info["decru_temps"] = {
@@ -55,4 +44,5 @@ check_info["decru_temps"] = {
     'snmp_scan_function':      \
      lambda oid: "datafort" in oid('.1.3.6.1.2.1.1.1.0').lower(),
     'group':                   'hw_temperature',
+    'includes':                [ 'temperature.include' ],
 }

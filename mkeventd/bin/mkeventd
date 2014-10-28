@@ -6,7 +6,7 @@ import socket, os, time, sys, getopt, signal, thread, pprint, re, \
 from pwd import getpwnam
 from grp import getgrnam
 
-VERSION="1.2.5i4"
+VERSION="1.2.5i6"
 
 #   .--Declarations--------------------------------------------------------.
 #   |       ____            _                 _   _                        |
@@ -377,6 +377,185 @@ class MKClientError(Exception):
         Exception.__init__(self, t)
 
 #.
+#   .--MongoDB-------------------------------------------------------------.
+#   |             __  __                         ____  ____                |
+#   |            |  \/  | ___  _ __   __ _  ___ |  _ \| __ )               |
+#   |            | |\/| |/ _ \| '_ \ / _` |/ _ \| | | |  _ \               |
+#   |            | |  | | (_) | | | | (_| | (_) | |_| | |_) |              |
+#   |            |_|  |_|\___/|_| |_|\__, |\___/|____/|____/               |
+#   |                                |___/                                 |
+#   +----------------------------------------------------------------------+
+#   | The Event Log Archive can be stored in a MongoDB instead of files,   |
+#   | this section contains MongoDB related code.                          |
+#   '----------------------------------------------------------------------'
+
+try:
+    from pymongo.connection import Connection
+    from pymongo import DESCENDING, ASCENDING
+    from pymongo.errors import OperationFailure
+    import datetime
+except ImportError:
+    Connection = None
+g_mongo_conn = None
+g_mongo_db   = None
+
+def mongodb_local_connection_opts():
+    ip, port = None, None
+    for l in file('%s/etc/mongodb.conf' % os.environ['OMD_ROOT']):
+        if l.startswith('bind_ip'):
+            ip = l.split('=')[1].strip()
+        elif l.startswith('port'):
+            port = int(l.split('=')[1].strip())
+    return ip, port
+
+def connect_mongodb():
+    global g_mongo_conn, g_mongo_db
+    if Connection == None:
+        raise Exception('Could not initialize MongoDB (Python-Modules are missing)')
+    g_mongo_conn = Connection(*mongodb_local_connection_opts())
+    g_mongo_db   = g_mongo_conn.__getitem__(os.environ['OMD_SITE'])
+
+def flush_event_history_mongodb():
+    g_mongo_db.ec_archive.drop()
+
+def get_mongodb_max_history_age():
+    result = g_mongo_db.ec_archive.index_information()
+    if 'dt_-1' not in result or 'expireAfterSeconds' not in result['dt_-1']:
+        return -1
+    else:
+        return result['dt_-1']['expireAfterSeconds']
+
+def update_mongodb_indexes():
+    if not g_mongo_conn:
+        connect_mongodb()
+    result = g_mongo_db.ec_archive.index_information()
+
+    if 'time_-1' not in result:
+        g_mongo_db.ec_archive.ensure_index([('time', DESCENDING)])
+
+def update_mongodb_history_lifetime():
+    if not g_mongo_conn:
+        connect_mongodb()
+
+    if get_mongodb_max_history_age() == g_config['history_lifetime']:
+        return # do not update already correct index
+
+    try:
+        g_mongo_db.ec_archive.drop_index("dt_-1")
+    except OperationFailure:
+        pass # Ignore not existing index
+
+    log(repr(g_config['history_lifetime']))
+
+    # Delete messages after x days
+    g_mongo_db.ec_archive.ensure_index([('dt', DESCENDING)],
+        expireAfterSeconds = g_config['history_lifetime'],
+        unique = False
+    )
+
+    log(repr(get_mongodb_max_history_age()))
+
+def mongodb_next_id(name, first_id = 0):
+    ret = g_mongo_db.counters.find_and_modify(
+        query = { '_id': name },
+        update = { '$inc': { 'seq': 1 } },
+        new = True
+    )
+
+    if not ret:
+        # Initialize the index!
+        g_mongo_db.counters.insert({
+           '_id': name,
+           'seq': first_id
+        })
+        return first_id
+    else:
+        return ret['seq']
+
+def log_event_history_to_mongodb(event, what, who, addinfo):
+    if not g_mongo_conn:
+        connect_mongodb()
+    # We converted _id to be an auto incrementing integer. This makes the unique
+    # index compatible to history_line of the file (which is handled as integer)
+    # within mkeventd. It might be better to use the ObjectId() of MongoDB, but
+    # for the first step, we use the integer index for simplicity
+    now = time.time()
+    g_mongo_db.ec_archive.insert({
+        '_id'     : mongodb_next_id('ec_archive_id'),
+        'dt'      : datetime.datetime.fromtimestamp(now),
+        'time'    : now,
+        'event'   : event,
+        'what'    : what,
+        'who'     : who,
+        'addinfo' : addinfo,
+    })
+
+def get_event_history_from_mongodb(filters, limit):
+    history_entries = []
+    headers = [ c[0] for c in history_columns ]
+
+    if not g_mongo_conn:
+        connect_mongodb()
+
+    # Construct the mongodb filtering specification. We could fetch all information
+    # and do filtering on this data, but this would be way too inefficient.
+    query = {}
+    for filter_name, opfunc, args in filters:
+
+        if opfunc == filter_operators['=']:
+            mongo_filter = args
+        elif opfunc == filter_operators['>']:
+            mongo_filter = {'$gt': args}
+        elif opfunc == filter_operators['<']:
+            mongo_filter = {'$lt': args}
+        elif opfunc == filter_operators['>=']:
+            mongo_filter = {'$gte': args}
+        elif opfunc == filter_operators['<=']:
+            mongo_filter = {'$lte': args}
+        elif opfunc == filter_operators['~']: # case sensitive regex, find pattern in string
+            mongo_filter = {'$regex': args, '$options': ''}
+        elif opfunc == filter_operators['=~']: # case insensitive, match whole string
+            mongo_filter = {'$regex': args, '$options': 'mi'}
+        elif opfunc == filter_operators['~~']: # case insensitive regex, find pattern in string
+            mongo_filter = {'$regex': args, '$options': 'i'}
+        elif opfunc == filter_operators['in']:
+            mongo_filter = {'$in': args}
+        else:
+            raise Exception('Filter operator of filter %s not implemented for MongoDB archive' % filter_name)
+
+        if filter_name[:6] == 'event_':
+            query['event.' + filter_name[6:]] = mongo_filter
+        elif filter_name[:8] == 'history_':
+            key = filter_name[8:]
+            if key == 'line':
+                key = '_id'
+            query[key] = mongo_filter
+        else:
+            raise Exception('Filter %s not implemented for MongoDB' % filter_name)
+
+    result = g_mongo_db.ec_archive.find(query).sort('time', -1)
+    # Might be used for debugging / profiling
+    #file(os.environ['OMD_ROOT'] + '/var/log/check_mk/ec_history_debug.log', 'a').write(pprint.pformat(filters) + '\n' + pprint.pformat(result.explain()) + '\n')
+    if limit:
+        result = result.limit(limit + 1)
+
+    # now convert the MongoDB data structure to the eventd internal one
+    for entry in result:
+        item = [
+            entry['_id'],
+            entry['time'],
+            entry['what'],
+            entry['who'],
+            entry['addinfo'],
+        ]
+        for colname, defval in event_columns:
+            key = colname[6:] # drop "event_"
+            item.append(entry['event'].get(key, defval))
+        history_entries.append(item)
+
+    return headers, history_entries
+
+#.
 #   .--History-------------------------------------------------------------.
 #   |                   _   _ _     _                                      |
 #   |                  | | | (_)___| |_ ___  _ __ _   _                    |
@@ -388,6 +567,15 @@ class MKClientError(Exception):
 #   | Functions for logging the history of events                          |
 #   '----------------------------------------------------------------------'
 
+def log_event_history(event, what, who="", addinfo=""):
+    if g_config["debug_rules"]:
+        log("Event %d: %s/%s/%s - %s" % (event["id"], what, who, addinfo, event["text"]))
+
+    if g_config['archive_mode'] == 'mongodb':
+        log_event_history_to_mongodb(event, what, who, addinfo)
+    else:
+        log_event_history_to_file(event, what, who, addinfo)
+
 # Make a new entry in the event history. Each entry is tab-separated line
 # with the following columns:
 # 0: time of log entry
@@ -395,9 +583,7 @@ class MKClientError(Exception):
 # 2: user who initiated the action (for GUI actions)
 # 3: additional information about the action
 # 4-oo: event_columns
-def log_event_history(event, what, who="", addinfo=""):
-    if g_config["debug_rules"]:
-        log("Event %d: %s/%s/%s - %s" % (event["id"], what, who, addinfo, event["text"]))
+def log_event_history_to_file(event, what, who, addinfo):
     with lock_logging:
         columns = [
             str(time.time()),
@@ -491,13 +677,25 @@ def expire_logfiles(flush = False):
         log("Error expiring log files: %s" % e)
 
 def flush_event_history():
+    if g_config['archive_mode'] == 'mongodb':
+        flush_event_history_mongodb()
+    else:
+        flush_event_history_files()
+
+def flush_event_history_files():
     with lock_logging:
-       expire_logfiles(True)
+        expire_logfiles(True)
 
 grepping_filters = [ 'event_text', 'event_comment', 'event_host', 'event_host_regex',
                      'event_contact', 'event_application', 'event_rule_id', 'event_owner' ]
 
 def get_event_history(filters, limit):
+    if g_config['archive_mode'] == 'mongodb':
+        return get_event_history_from_mongodb(filters, limit)
+    else:
+        return get_event_history_from_file(filters, limit)
+
+def get_event_history_from_file(filters, limit):
     history_entries = []
     headers = [ c[0] for c in history_columns ]
     log_dir = g_state_dir + "/history"
@@ -577,14 +775,13 @@ def parse_history_file(path, headers, filters, greptexts, limit):
     cmd = 'tac "%s"' % path
     if greptexts:
         cmd += ' | grep -i -e %s' % ".*".join(greptexts)
-    grep = subprocess.Popen(cmd, shell = True, close_fds=True, stdout=subprocess.PIPE)
-    logfile = grep.stdout
+    grep = subprocess.Popen(cmd, shell=True, close_fds=True, stdout=subprocess.PIPE)
 
-    for line in logfile:
+    for line in grep.stdout:
         line_no += 1
         if limit != None and len(entries) > limit:
-            if greptexts:
-                os.kill(grep.pid, 15)
+            grep.kill()
+            grep.wait()
             break
 
         try:
@@ -1146,8 +1343,10 @@ class EventServer:
             with lock_configuration:
                 self.hk_handle_event_timeouts()
                 self.hk_check_expected_messages()
-        with lock_logging:
-            expire_logfiles()
+
+        if g_config['archive_mode'] != 'mongodb':
+            with lock_logging:
+                expire_logfiles()
 
     def hk_handle_event_timeouts(self):
         # 1. Automatically delete all events that are in state "counting"
@@ -1167,12 +1366,14 @@ class EventServer:
                 if not rule:
                     log("Deleting orphaned event %d created by obsolete rule %s" %
                             (event["id"], event["rule_id"]))
-                    events_to_delete.append(nr)
+                    event["phase"] = "closed"
                     log_event_history(event, "ORPHANED")
+                    events_to_delete.append(nr)
 
                 elif not "count" in rule and not "expect" in rule:
                     log("Count-based event %d belonging to rule %s: rule does not "
                         "count/expect anymore. Deleting event." % (event["id"], event["rule_id"]))
+                    event["phase"] = "closed"
                     log_event_history(event, "NOCOUNT")
                     events_to_delete.append(nr)
 
@@ -1197,6 +1398,7 @@ class EventServer:
                             if event["count"] == 0:
                                 log("Rule %s, event %d: again without allowed rate, dropping event" %
                                     (rule["id"], event["id"]))
+                                event["phase"] = "closed"
                                 log_event_history(event, "COUNTFAILED")
                                 events_to_delete.append(nr)
 
@@ -1204,6 +1406,7 @@ class EventServer:
                         if event["first"] + count["period"] <= now: # End of period reached
                             log("Rule %s: reached only %d out of %d events within %d seconds. "
                                 "Resetting to zero." % (rule["id"], event["count"], count["count"], count["period"]))
+                            event["phase"] = "closed"
                             log_event_history(event, "COUNTFAILED")
                             events_to_delete.append(nr)
 
@@ -1215,10 +1418,11 @@ class EventServer:
                     event["phase"] = "open"
                     log_event_history(event, "DELAYOVER")
                     if rule:
-                        do_rule_actions(rule, event)
+                        event_has_opened(rule, event)
                         if rule.get("autodelete"):
-                            events_to_delete.append(nr)
+                            event["phase"] = "closed"
                             log_event_history(event, "AUTODELETE")
+                            events_to_delete.append(nr)
 
                     else:
                         log("Cannot do rule action: rule %s not present anymore." % event["rule_id"])
@@ -1229,6 +1433,7 @@ class EventServer:
                 if now >= event["live_until"]:
                     allowed_phases = event.get("live_until_phases", ["open"])
                     if event["phase"] in allowed_phases:
+                        event["phase"] = "closed"
                         events_to_delete.append(nr)
                         log("Livetime of event %d (rule %s) exceeded. Deleting event." % (
                                 event["id"], event["rule_id"]))
@@ -1353,8 +1558,9 @@ class EventServer:
             self.rewrite_event(rule, event, ())
             g_event_status.new_event(event)
             log_event_history(event, "COUNTFAILED")
-            do_rule_actions(rule, event)
+            event_has_opened(rule, event)
             if rule.get("autodelete"):
+                event["phase"] = "closed"
                 log_event_history(event, "AUTODELETE")
                 g_event_status.remove_event(event)
 
@@ -1566,11 +1772,12 @@ class EventServer:
                                 existing_event["delay_until"] = time.time() + rule["delay"]
                                 existing_event["phase"] = "delayed"
                             else:
-                                do_rule_actions(rule, existing_event)
+                                event_has_opened(rule, existing_event)
 
                             log_event_history(existing_event, "COUNTREACHED")
 
                             if "delay" not in rule and rule.get("autodelete"):
+                                existing_event["phase"] = "closed"
                                 log_event_history(existing_event, "AUTODELETE")
                                 with lock_eventstatus:
                                     g_event_status.remove_event(existing_event)
@@ -1590,8 +1797,9 @@ class EventServer:
                         with lock_eventstatus:
                             g_event_status.new_event(event)
                         if event["phase"] == "open":
-                            do_rule_actions(rule, event)
+                            event_has_opened(rule, event)
                             if rule.get("autodelete"):
+                                event["phase"] = "closed"
                                 log_event_history(event, "AUTODELETE")
                                 with lock_eventstatus:
                                     g_event_status.remove_event(event)
@@ -2234,14 +2442,18 @@ class StatusServer:
         g_event_status.reset_counters(rule_id)
 
     def handle_command_action(self, arguments):
-        with lock_configuration:
-            event_id, user, action_id = arguments
-            event = g_event_status.event(int(event_id))
-            if action_id not in g_config["action"]:
-                raise MKClientError("The action '%s' is not defined. After adding new commands please "
-                   "make sure that you activate the changes in the Event Console." % action_id)
-            action = g_config["action"][action_id]
-        do_rule_action(action, event, user)
+        event_id, user, action_id = arguments
+        event = g_event_status.event(int(event_id))
+
+        if action_id == "@NOTIFY":
+            do_notify(event, user, is_cancelling = False)
+        else:
+            with lock_configuration:
+                if action_id not in g_config["action"]:
+                    raise MKClientError("The action '%s' is not defined. After adding new commands please "
+                       "make sure that you activate the changes in the Event Console." % action_id)
+                action = g_config["action"][action_id]
+            do_event_action(action, event, user)
 
     def handle_command_switchmode(self, arguments):
         new_mode = arguments[0]
@@ -2571,6 +2783,7 @@ class EventStatus():
         g_perfcounters.count("events")
         event["id"] = self._next_event_id
         self._next_event_id += 1
+        event["phase"] = "closed"
         log_event_history(event, "ARCHIVED")
 
 
@@ -2589,7 +2802,19 @@ class EventStatus():
             for nr, event in enumerate(self._events):
                 if event["rule_id"] == rule["id"]:
                     if self.cancelling_match(match_groups, new_event, event, rule):
+                        # Fill a few fields of the cancelled event with data from
+                        # the cancelling event so that action scripts have useful
+                        # values and the logfile entry if more relevant.
+                        event["phase"]    = "closed"
+                        event["state"]    = 0 # OK
+                        event["text"]     = new_event["text"]
+                        event["time"]     = new_event["time"]
+                        event["last"]     = new_event["time"]
+                        event["priority"] = new_event["priority"]
                         log_event_history(event, "CANCELLED")
+                        actions = rule.get("cancel_actions", [])
+                        do_event_actions(actions, event, is_cancelling = True)
+
                         to_delete.append(nr)
             for nr in to_delete[::-1]:
                 del self._events[nr]
@@ -2715,6 +2940,7 @@ class EventStatus():
     def delete_event(self, event_id, user):
         for nr, event in enumerate(self._events):
             if event["id"] == event_id:
+                event["phase"] = "closed"
                 log_event_history(event, "DELETE", user)
                 del self._events[nr]
                 return
@@ -2746,7 +2972,7 @@ class EventStatus():
 #   | executing scripts.                                                   |
 #   '----------------------------------------------------------------------'
 
-def do_rule_actions(rule, event):
+def event_has_opened(rule, event):
     # Prepare for events with a limited livetime. This time starts
     # when the event enters the open state or acked state
     if "livetime" in rule:
@@ -2754,18 +2980,28 @@ def do_rule_actions(rule, event):
         event["live_until"] = time.time() + livetime
         event["live_until_phases"] = phases
 
-    for aname in rule.get("actions", []):
-        action = g_config["action"].get(aname)
-        if not action:
-            log("Cannot execute undefined action '%s'" % aname)
-            log("We have to following actions: %s" % ", ".join(g_config["action"].keys()))
+    do_event_actions(rule.get("actions", []), event, is_cancelling = False)
+
+
+# Execute a list of actions on an event that has just been
+# opened or cancelled.
+def do_event_actions(actions, event, is_cancelling):
+    for aname in actions:
+        if aname == "@NOTIFY":
+            do_notify(event, None, is_cancelling)
         else:
-            log("Going to execute action '%s' on event %d" % (action["title"], event["id"]))
-            do_rule_action(action, event)
+            action = g_config["action"].get(aname)
+            if not action:
+                log("Cannot execute undefined action '%s'" % aname)
+                log("We have to following actions: %s" % ", ".join(g_config["action"].keys()))
+            else:
+                log("Going to execute action '%s' on event %d" % (action["title"], event["id"]))
+                do_event_action(action, event)
+
 
 # Rule actions are currently done synchronously. Actions should
 # not hang for more than a couple of ms.
-def do_rule_action(action, event, user=""):
+def do_event_action(action, event, user=""):
     if action["disabled"]:
         return
 
@@ -2786,6 +3022,80 @@ def do_rule_action(action, event, user=""):
         if opt_debug:
             raise
         log("Error during execution of action %s: %s" % (action["id"], format_exception()))
+
+
+# This function creates a Check_MK Notification for a locally running Check_MK.
+# We simulate a *service* notification.
+monitoring_state_names = [ "OK", "WARN", "CRIT", "UNKNOWN" ]
+
+def do_notify(event, username, is_cancelling):
+    # Create notification context based on event
+
+    # If the host name is the IP address, then use that. Otherwise let
+    # the variable empty.
+    if event["host"] and event["host"][0].isdigit():
+        ipaddress = event["host"]
+    else:
+        ipaddress = ""
+
+    context = {
+        "WHAT":                        "SERVICE",
+        "DATE":                        str(int(event["last"])), # -> Event: Time
+        "MICROTIME":                   str(int(event["last"] * 1000000)),
+        "HOSTADDRESS":                 ipaddress,
+        "HOSTALIAS":                   event["host"], # -> = HOSTNAME
+        "HOSTDOWNTIME":                "0",
+        "HOSTNAME":                    event["host"],
+        "HOSTTAGS":                    "", # alas, we have not host tags...
+        "LASTSERVICESTATE":            is_cancelling and "CRIT" or "OK", # better assume OK, we have no transition information
+        "LASTSERVICESTATEID":          is_cancelling and "2" or "0", # -> immer OK
+        "LASTSERVICEOK":               "0", # 1.1.1970
+        "LASTSERVICESTATECHANGE":      str(int(event["last"])),
+        "LONGSERVICEOUTPUT":           "",
+        "NOTIFICATIONAUTHOR":          username or "",
+        "NOTIFICATIONAUTHORALIAS":     username or "",
+        "NOTIFICATIONAUTHORNAME":      username or "",
+        "NOTIFICATIONCOMMENT":         "",
+        "NOTIFICATIONTYPE":            is_cancelling and "RECOVERY" or "PROBLEM",
+        "SERVICEACKAUTHOR":            "",
+        "SERVICEACKCOMMENT":           "",
+        "SERVICEATTEMPT":              "1",
+        "SERVICECHECKCOMMAND":         "ec-rule-" + event["rule_id"],
+        "SERVICEDESC":                 event["application"],
+        "SERVICENOTIFICATIONNUMBER":   "1",
+        "SERVICEOUTPUT":               event["text"],
+        "SERVICEPERFDATA":             "",
+        "SERVICEPROBLEMID":            "ec-id-" + str(event["id"]),
+        "SERVICESTATE":                monitoring_state_names[event["state"]],
+        "SERVICESTATEID":              str(event["state"]),
+        "SERVICE_EC_CONTACT":          event.get("owner", ""),
+        "SERVICE_SL":                  str(event["sl"]),
+        "SVC_SL":                      str(event["sl"]),
+
+        # Some fields only found in EC notifications
+        "EC_ID":                       str(event["id"]),
+        "EC_RULE_ID":                  event["rule_id"],
+        "EC_PRIORITY":                 str(event["priority"]),
+        "EC_FACILITY":                 str(event["facility"]),
+        "EC_PHASE":                    event["phase"],
+        "EC_COMMENT":                  event.get("comment", ""),
+        "EC_OWNER":                    event.get("owner", ""),
+        "EC_PID":                      str(event["pid"]),
+        "EC_MATCH_GROUPS":             "\t".join(event["match_groups"]),
+        "EC_CONTACT_GROUPS":           event["contact_groups"] and " ".join(event["contact_groups"]) or "",
+    }
+
+    # Send notification context via stdin.
+    context_string = "".join([ "%s=%s\n" % (varname, value.replace("\n", "\\n")) for (varname, value) in context.items() ])
+
+    p = subprocess.Popen(["cmk", "--notify", "stdin"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    response = p.communicate(input=context_string)[0]
+    status = p.returncode
+    if status:
+        log("Error notifying via Check_MK: %s" % response.strip())
+    else:
+        log("Successfully forwarded notification for event %d to Check_MK" % event["id"])
+
 
 def substitute_event_tags(text, event):
     substs = [("match_group_%d" % (nr+1), g)
@@ -3055,6 +3365,7 @@ def load_configuration():
         "eventsocket_queue_len" : 10,
         "hostname_translation"  : {},
         "archive_orphans"       : False,
+        "archive_mode"          : "file",
     }
     main_file = g_config_dir + "/mkeventd.mk"
     if not os.path.exists(main_file):
@@ -3067,6 +3378,11 @@ def load_configuration():
     list_of_files.sort()
     for path in [ main_file ] + list_of_files:
         execfile(path, g_config, g_config)
+
+    # Configure the auto deleting indexes in the DB when mongodb is enabled
+    if g_config['archive_mode'] == 'mongodb':
+        update_mongodb_indexes()
+        update_mongodb_history_lifetime()
 
     # Are we a replication slave? Parts of the configuration
     # will be overridden by values from the master.

@@ -6,7 +6,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -26,7 +26,7 @@
 
 $opt[1] = "--vertical-label 'Percent' -l0 -u100 --title \"CPU Utilization of $hostname\" ";
 
-$def[1] = "DEF:usage=$RRDFILE[1]:$DS[1]:MAX ";
+$def[1] = "DEF:usage=$RRDFILE[1]:$DS[1]:AVERAGE ";
 $def[1] .= "AREA:usage#60f020:\"CPU utilization\" ";
 $def[1] .= "LINE:usage#40d010 ";
 

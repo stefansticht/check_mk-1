@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -24,7 +24,7 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import config, wato
+import config, wato, views, dashboard
 
 #   +----------------------------------------------------------------------+
 #   |                     __        ___  _____ ___                         |
@@ -36,7 +36,7 @@ import config, wato
 #   +----------------------------------------------------------------------+
 def render_wato(mini):
     if not config.wato_enabled:
-        html.write(_("WATO is disabled in <tt>multisite.mk</tt>."))
+        html.write(_("WATO is disabled."))
         return False
     elif not config.may("wato.use"):
         html.write(_("You are not allowed to use Check_MK's web configuration GUI."))
@@ -56,7 +56,7 @@ def render_wato(mini):
             else:
                 iconlink(title, url, icon)
 
-    num_pending = wato.api.num_pending_changes()
+    num_pending = wato.num_pending_changes()
     if num_pending:
         footnotelinks([(_("%d changes") % num_pending, "wato.py?mode=changelog")])
 
@@ -197,7 +197,7 @@ def render_tree_folder(f, js_func):
 
     if not is_leaf:
         html.begin_foldable_container('wato-hosts', "/" + f[".path"], False, title)
-        for sf in wato.api.sort_by_title(subfolders.values()):
+        for sf in wato.sort_by_title(subfolders.values()):
             render_tree_folder(sf, js_func)
         html.end_foldable_container()
     else:
@@ -214,20 +214,22 @@ def render_wato_foldertree():
     #
     selected_topic, selected_target = config.load_user_file("foldertree", (_('Hosts'), 'allhosts'))
 
-    topic_views  = views_by_topic()
+    views.load_views()
+    dashboard.load_dashboards()
+    topic_views  = visuals_by_topic(views.permitted_views().items() + dashboard.permitted_dashboards().items())
     topics = [ (t, t) for t, s in topic_views ]
     html.select("topic", topics, selected_topic, onchange = 'wato_tree_topic_changed(this)')
     html.write('<span class=left>%s</span>' % _('Topic:'))
 
-    for topic, views in topic_views:
+    for topic, view_list in topic_views:
         targets = []
-        for t, title, name in views:
+        for t, title, name, is_view in view_list:
             if config.visible_views and name not in config.visible_views:
                 continue
             if config.hidden_views and name in config.hidden_views:
                 continue
             if t == topic:
-                if topic == _('Dashboards'):
+                if not is_view:
                     name = 'dashboard|' + name
                 targets.append((name, title))
 

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -68,7 +68,7 @@ The following placeholdes will be substituted by value from the actual event:
 <tr><td class=tt>$FACILITY$</td><td>Syslog Facility</td></tr>
 <tr><td class=tt>$RULE_ID$</td><td>ID of the rule</td></tr>
 <tr><td class=tt>$STATE$</td><td>State of the event (0/1/2/3)</td></tr>
-<tr><td class=tt>$PHASE$</td><td>Phase of the event (always open)</td></tr>
+<tr><td class=tt>$PHASE$</td><td>Phase of the event (open in normal situations, closed when cancelling)</td></tr>
 <tr><td class=tt>$OWNER$</td><td>Owner of the event</td></tr>
 <tr><td class=tt>$MATCH_GROUPS$</td><td>Text groups from regular expression match, separated by spaces</td></tr>
 <tr><td class=tt>$MATCH_GROUP_1$</td><td>Text of the first match group from expression match</td></tr>
@@ -88,7 +88,7 @@ class ActionList(ListOf):
         rules = load_mkeventd_rules()
         for rule in rules:
             for action_id in rule.get("actions", []):
-                if action_id not in action_ids:
+                if action_id not in action_ids + ["@NOTIFY"]:
                     raise MKUserError(varprefix, _("You are missing the action with the ID <b>%s</b>, "
                        "which is still used in some rules.") % action_id)
 
@@ -292,10 +292,10 @@ vs_mkeventd_rule = Dictionary(
           ListOf(
               GroupSelection("contact"),
               title = _("Fallback Contact Groups"),
-              help = _("When displaying events in the Check_MK GUI you can make a user only see events "
-                       "for hosts he is a contact for. When you expect this rule to reveice events from "
-                       "hosts that are <i>not</i> known to the monitoring you can specify contact groups "
-                       "for the visibility here. Note: if you activate this option and do not specify "
+              help = _("When displaying events in the Check_MK GUI, you can make a user see only events "
+                       "for hosts he is a contact for. When you expect this rule to receive events from "
+                       "hosts that are <i>not</i> known to the monitoring, you can specify contact groups "
+                       "for visibility here. Note: If you activate this option and do not specify "
                        "any group, then users with restricted permissions can never see these events."),
               movable = False,
           )
@@ -304,6 +304,13 @@ vs_mkeventd_rule = Dictionary(
           ListChoice(
             title = _("Actions"),
             help = _("Actions to automatically perform when this event occurs"),
+            choices = mkeventd.action_choices,
+          )
+        ),
+        ( "cancel_actions",
+          ListChoice(
+            title = _("Actions when cancelling"),
+            help = _("Actions to automatically perform when an event is being cancelled."),
             choices = mkeventd.action_choices,
           )
         ),
@@ -687,7 +694,7 @@ vs_mkeventd_rule = Dictionary(
         ( _("General Properties"), [ "id", "description", "disabled" ] ),
         ( _("Matching Criteria"), [ "match", "match_host", "match_application", "match_priority", "match_facility",
                                     "match_sl", "match_ok", "cancel_priority", "match_timeperiod" ]),
-        ( _("Outcome &amp; Action"), [ "state", "sl", "contact_groups", "actions", "drop", "autodelete" ]),
+        ( _("Outcome &amp; Action"), [ "state", "sl", "contact_groups", "actions", "cancel_actions", "drop", "autodelete" ]),
         ( _("Counting &amp; Timing"), [ "count", "expect", "delay", "livetime", ]),
         ( _("Rewriting"), [ "set_text", "set_host", "set_application", "set_comment", "set_contact" ]),
     ],
@@ -999,7 +1006,7 @@ def mode_mkeventd_rules(phase):
             table.cell(_("ID"), '<a href="%s">%s</a>' % (edit_url, rule["id"]))
 
             if rule.get("drop"):
-                table.cell(_("Priority"), _("DROP"), css="state statep")
+                table.cell(_("State"), _("DROP"), css="state statep")
             else:
                 if type(rule['state']) == tuple:
                     stateval = rule["state"][0]
@@ -1009,7 +1016,7 @@ def mode_mkeventd_rules(phase):
                         2: _("CRIT"), 3:_("UNKNOWN"),
                        -1: _("(syslog)"),
                        'text_pattern':_("(set by message text)") }[stateval]
-                table.cell(_("Priority"), txt,  css="state state%s" % stateval)
+                table.cell(_("State"), txt,  css="state state%s" % stateval)
 
             # Syslog priority
             if "match_priority" in rule:
@@ -1805,7 +1812,7 @@ if mkeventd_enabled:
             minvalue = 1,
             default_value = 10,
             label = "max.",
-            unit = "pending connections",
+            unit = _("pending connections"),
         ),
         domain = "mkeventd",
     )
@@ -1822,7 +1829,7 @@ if mkeventd_enabled:
             minvalue = 1,
             default_value = 10,
             label = "max.",
-            unit = "pending connections",
+            unit = _("pending connections"),
         ),
         domain = "mkeventd",
     )
@@ -2165,9 +2172,9 @@ define command {
 }
 """ % { "group" : contactgroup, "facility" : config.mkeventd_notify_facility, "remote" : remote_console })
 
-api.register_hook("pre-activate-changes", mkeventd_update_notifiation_configuration)
+register_hook("pre-activate-changes", mkeventd_update_notifiation_configuration)
 
 # Only register the reload hook when mkeventd is enabled
 if mkeventd_enabled:
-    api.register_hook("activate-changes", lambda hosts: mkeventd_reload())
+    register_hook("activate-changes", lambda hosts: mkeventd_reload())
 

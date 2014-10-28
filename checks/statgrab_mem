@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -30,7 +30,7 @@ def inventory_statgrab_mem(info):
     if len(info) > 0:
         return [(None, 'memused_default_levels')]
 
-def check_statgrab_mem(item, params, info):
+def check_statgrab_mem(_no_item, params, info):
     for var, value in info:
         if var == 'mem.used':     memused_kb   = int(value) / 1024
         elif var == 'mem.total':  totalmem_kb  = int(value) / 1024
@@ -79,8 +79,9 @@ def check_statgrab_mem(item, params, info):
 
 
 check_info["statgrab_mem"] = {
-    'check_function':          check_statgrab_mem,
-    'inventory_function':      inventory_statgrab_mem,
-    'service_description':     'Memory used',
-    'has_perfdata':            True,
+    'check_function'      : check_statgrab_mem,
+    'inventory_function'  : inventory_statgrab_mem,
+    'service_description' : 'Memory used',
+    'has_perfdata'        : True,
+    'group'               : "statgrab_mem",      
 }

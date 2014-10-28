@@ -5,7 +5,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -149,8 +149,8 @@ mkdir -p $R/var/lib/check_mk_agent/job
 # logwatch and oracle extension
 install -m 755 $R/usr/share/check_mk/agents/plugins/mk_logwatch $R/usr/lib/check_mk_agent/plugins
 install -m 755 $R/usr/share/check_mk/agents/plugins/mk_oracle $R/usr/lib/check_mk_agent/plugins
-install -m 644 $R/usr/share/check_mk/agents/logwatch.cfg $R/etc/check_mk
-install -m 755 $R/usr/share/check_mk/agents/sqlplus.sh   $R/etc/check_mk
+install -m 644 $R/usr/share/check_mk/agents/cfg_examples/logwatch.cfg $R/etc/check_mk
+install -m 755 $R/usr/share/check_mk/agents/cfg_examples/sqlplus.sh   $R/etc/check_mk
 
 %clean
 rm -rf $RPM_BUILD_ROOT

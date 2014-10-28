@@ -5,7 +5,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -22,10 +22,10 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-all: check_mkevents_c
+all: check_mkevents
 
-check_mkevents_c: check_mkevents.cc
-	g++ -O2 -o check_mkevents_c check_mkevents.cc
+check_mkevents: check_mkevents.cc
+	g++ -O2 -s -o check_mkevents check_mkevents.cc
 
 clean:
-	rm -f check_mkevents_c
+	rm -f check_mkevents

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -36,4 +36,4 @@ def sync_pre_activate_changes(_unused):
     if do_sync:
         userdb.hook_sync()
 
-api.register_hook('pre-activate-changes', sync_pre_activate_changes)
+register_hook('pre-activate-changes', sync_pre_activate_changes)

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -706,7 +706,6 @@ multisite_builtin_views.update({
                                'sorters': [('log_time', False), ('log_lineno', False)],
                                'title': _('Service Notifications'),
                                'topic': _('Other')}),
-
 
 })
 

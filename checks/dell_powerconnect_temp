@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -56,7 +56,7 @@ def inventory_dell_powerconnect_temp(checkname, info):
     return inventory
 
 # Execute a check against each sensor.
-def check_dell_powerconnect_temp(item, params, info):
+def check_dell_powerconnect_temp(_no_item, params, info):
     warn, crit = params
     sensor_info = ""
     temp_info = ""
@@ -78,7 +78,7 @@ def check_dell_powerconnect_temp(item, params, info):
         else:
             status = dell_powerconnect_temp_status2nagios_map[dell_powerconnect_status]
 
-        return (status, 'The temperature sensor is currently (%s)%s, and the current temperature is %sC%s' %
+        return (status, 'The temperature sensor is currently (%s)%s, and the current temperature is %s °C%s' %
                         (dell_powerconnect_temp_status_map[state], sensor_info, temp, temp_info), [
                ("temperature", int(temp), warn, crit, 0, 200),
                ])
@@ -96,5 +96,5 @@ check_info["dell_powerconnect_temp"] = {
     'snmp_info':               ('.1.3.6.1.4.1.89.53.15.1', ['9', '10']),
     'snmp_scan_function':      \
      lambda oid: ".1.3.6.1.4.1.674.10895" in oid(".1.3.6.1.2.1.1.2.0"),
-    'group':                   'hw_temperature',
+    'group':                   'hw_temperature_single',
 }

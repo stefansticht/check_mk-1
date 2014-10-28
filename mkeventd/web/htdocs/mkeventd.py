@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -81,6 +81,7 @@ phase_names = {
     'delayed'  : _("delayed"),
     'open'     : _("open"),
     'ack'      : _("acknowledged"),
+    'closed'   : _("closed"),
 }
 
 action_whats = {
@@ -111,7 +112,8 @@ def action_choices(omit_hidden = False):
     # not in multisite.mk (like the service levels). That
     # way we have not direct access to them but need
     # to load them from the configuration.
-    return [ (a["id"], a["title"])
+    return [ ( "@NOTIFY", _("Send monitoring notification")) ] + \
+           [ (a["id"], a["title"])
              for a in eventd_configuration().get("actions", [])
              if not omit_hidden or not a.get("hidden") ]
 

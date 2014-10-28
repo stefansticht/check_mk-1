@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -35,7 +35,10 @@ perfometers["check_tcp"]           = perfometer_check_tcp
 perfometers["check_mk_active-tcp"] = perfometer_check_tcp
 
 def perfometer_check_http(row, check_command, perfdata):
-    time_ms = float(perfdata[0][1]) * 1000.0
+    try:
+        time_ms = float(perfdata[0][1]) * 1000.0
+    except:
+        time_ms = 0
     return "%.1f ms" % time_ms, \
         perfometer_logarithmic(time_ms, 1000, 10, "#66ccff")
 

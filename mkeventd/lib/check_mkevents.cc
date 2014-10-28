@@ -5,7 +5,7 @@
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 // |                                                                  |
-// | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+// | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
 // This file is part of Check_MK.
@@ -22,7 +22,6 @@
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-
 #include <stdlib.h>
 #include <errno.h>
 #include <stdio.h>
@@ -33,6 +32,8 @@
 #include <unistd.h>
 #include <sstream>
 #include <vector>
+#include <netdb.h>
+
 using namespace std;
 
 #ifndef AF_LOCAL
@@ -48,12 +49,14 @@ void usage()
     printf("\n -a    do not take into account acknowledged events.\n");
 }
 
+
 int main(int argc, char** argv)
 {
     // Parse arguments
     char *host                = NULL;
     char *remote_host         = NULL;
     char *remote_hostaddress  = NULL;
+    char  remote_hostipaddress[64];
     int   remote_port         = 6558;
     char *application         = NULL;
     bool  ignore_acknowledged = false;
@@ -64,7 +67,8 @@ int main(int argc, char** argv)
             remote_host = argv[i+1];
             i++;
             argc_count -= 2;
-        } else if (!strcmp("-a", argv[i])) {
+        }
+        else if (!strcmp("-a", argv[i])) {
             ignore_acknowledged = true;
             argc_count--;
         }
@@ -72,7 +76,8 @@ int main(int argc, char** argv)
             host        = argv[i];
             application = argv[i+1];
             break;
-        } else if (argc_count > 1) {
+        }
+        else if (argc_count > 1) {
             host        = argv[i];
             break;
         }
@@ -94,7 +99,21 @@ int main(int argc, char** argv)
     }
 
     if (remote_host) {
+        struct hostent *he;
+        struct in_addr **addr_list;
+
         remote_hostaddress = strtok(remote_host, ":");
+        if ( (he = gethostbyname( remote_hostaddress ) ) == NULL)
+        {
+            printf("UNKNOWN - Unable to resolve remote host address: %s\n", remote_hostaddress);
+            return 3;
+        }
+        addr_list = (struct in_addr **) he->h_addr_list;
+        for(int i = 0; addr_list[i] != NULL; i++)
+        {
+            strcpy(remote_hostipaddress, inet_ntoa(*addr_list[i]) );
+        }
+
         char *port_str     = strtok(NULL, ":");
         if (port_str)
             remote_port    = atoi(port_str);
@@ -104,22 +123,26 @@ int main(int argc, char** argv)
     int sock;
     struct timeval tv;
     if (remote_host) {
-        sock = socket(AF_INET ,SOCK_STREAM ,0);
+        sock = socket(AF_INET, SOCK_STREAM, 0);
         tv.tv_sec = 10;
-        setsockopt(sock, SOL_SOCKET,SO_RCVTIMEO, (struct timeval *)&tv, sizeof(struct timeval));
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *)&tv, sizeof(struct timeval));
+        // Right now, there is no send timeout..
+        // setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *)&tv, sizeof(struct timeval));
 
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
-        inet_aton(remote_hostaddress, &addr.sin_addr);
+        inet_aton(remote_hostipaddress, &addr.sin_addr);
         addr.sin_port = htons(remote_port);
 
-        if(0 > connect(sock, (struct sockaddr*) &addr, sizeof(struct sockaddr_in))){
+        if (0 > connect(sock, (struct sockaddr*) &addr, sizeof(struct sockaddr_in)))
+        {
             printf("UNKNOWN - Cannot connect to event daemon via TCP %s:%d (%s)\n",
-                   remote_hostaddress, remote_port, strerror(errno));
+                   remote_hostipaddress, remote_port, strerror(errno));
             exit(3);
         }
-    } else {
+    }
+    else {
         sock = socket(PF_LOCAL, SOCK_STREAM , 0);
         if (sock < 0) {
             printf("UNKNOWN - Cannot create client socket: %s\n", strerror(errno));
@@ -158,11 +181,18 @@ int main(int argc, char** argv)
     int length = write(sock, query_message.c_str(), query_message.length());
 
     // Get response
-    char response_chunk[2048];
+    char response_chunk[4096];
     memset(response_chunk, 0, sizeof(response_chunk));
     stringstream response_stream;
-    while (read(sock, response_chunk, sizeof(response_chunk))){
-        response_stream << response_chunk;
+    int read_length;
+    while (0 < (read_length = read(sock, response_chunk, sizeof(response_chunk))))
+    {
+        // replace binary 0 in response with space
+        for (int i=0; i<read_length; i++) {
+            if (response_chunk[i] == 0)
+                response_chunk[i] = ' ';
+        }
+        response_stream << string(response_chunk, read_length);
         memset(response_chunk, 0, sizeof(response_chunk));
     }
     close(sock);
@@ -202,6 +232,8 @@ int main(int argc, char** argv)
     // Get data
     vector< vector<string> > data;
     while (getline(response_stream, line)) {
+        if (line.size() < headers.size())
+            break; // broken / empty line
         linestream.str("");
         linestream.clear();
         linestream << line;
@@ -251,5 +283,5 @@ int main(int argc, char** argv)
             printf(", worst state is %s (Last line: %s)", state_text, worst_row_event_text.c_str());
         printf("\n");
     }
-    return 0;
+    return worst_state;
 }

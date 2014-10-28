@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -31,7 +31,7 @@ filesystem_levels         = [] # obsolete. Just here to check config and warn if
 filesystem_default_levels = {} # can also be dropped some day in future
 
 # Filesystems to ignore (shouldn't be sent by agent anyway)
-inventory_df_exclude_fs            = [ 'nfs', 'smbfs', 'cifs', 'iso9660' ]
+inventory_df_exclude_fs            = [ 'tmpfs', 'nfs', 'smbfs', 'cifs', 'iso9660' ]
 inventory_df_exclude_mountpoints   = [ '/dev' ]
 
 # Grouping of filesystems into groups that are monitored as one entity
@@ -483,7 +483,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                     problems.append("less than %0.2f%% inodes available(!!)" % inodes_crit)
                 elif inodes_warn > inodes_avail_perc:
                     status = max(1, status)
-                    problems.append("less than %.02f%% inodes available(!!)" % inodes_warn)
+                    problems.append("less than %.02f%% inodes available(!)" % inodes_warn)
         infotext += ", inodes available %dk/%0.2f %%" % (inodes_avail / 1000, inodes_avail_perc)
 
     if problems:

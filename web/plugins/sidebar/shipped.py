@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -66,31 +66,22 @@ sidebar_snapins["about"] = {
 #      \_/  |_|\___| \_/\_/ |___/
 #
 # --------------------------------------------------------------
-visible_views = [ "allhosts", "searchsvc" ]
 
-def views_by_topic():
-    s = [ (view.get("topic") or _("Other"), view.get("title"), name)
-          for name, view
-          in html.available_views.items()
-          if not view["hidden"] and not view.get("mobile")]
-
-    # Add all the dashboards to the views list
-    s += [ (_('Dashboards'), d['title'] and d['title'] or d_name, d_name)
-           for d_name, d
-           in dashboard.permitted_dashboards()
-    ]
+def visuals_by_topic(permitted_visuals,
+        default_order = [ _("Overview"), _("Hosts"), _("Hostgroups"), _("Services"), _("Servicegroups"),
+                         _("Business Intelligence"), _("Problems"), _("Addons") ]):
+    s = [ (_u(visual.get("topic") or _("Other")), _u(visual.get("title")), name, 'painters' in visual)
+          for name, visual
+          in permitted_visuals
+          if not visual["hidden"] and not visual.get("mobile")]
 
     s.sort()
 
-    # Enforce a certain order on the topics
-    known_topics = [ _('Dashboards'), _("Hosts"), _("Hostgroups"), _("Services"), _("Servicegroups"),
-                     _("Business Intelligence"), _("Problems"), _("Addons") ]
-
     result = []
-    for topic in known_topics:
+    for topic in default_order:
         result.append((topic, s))
 
-    rest = list(set([ t for (t, _t, _v) in s if t not in known_topics ]))
+    rest = list(set([ t for (t, _t, _v, _i) in s if t not in default_order ]))
     rest.sort()
     for topic in rest:
         if topic:
@@ -99,25 +90,28 @@ def views_by_topic():
     return result
 
 def render_views():
+    views.load_views()
+    dashboard.load_dashboards()
+
     def render_topic(topic, s):
         first = True
-        for t, title, name in s:
-            if config.visible_views and name not in config.visible_views:
+        for t, title, name, is_view in s:
+            if is_view and config.visible_views and name not in config.visible_views:
                 continue
-            if config.hidden_views and name in config.hidden_views:
+            if is_view and config.hidden_views and name in config.hidden_views:
                 continue
             if t == topic:
                 if first:
                     html.begin_foldable_container("views", topic, False, topic, indent=True)
                     first = False
-                if topic == _('Dashboards'):
-                    bulletlink(title, 'dashboard.py?name=%s' % name, onclick = "return wato_views_clicked(this)")
-                else:
+                if is_view:
                     bulletlink(title, "view.py?view_name=%s" % name, onclick = "return wato_views_clicked(this)")
+                else:
+                    bulletlink(title, 'dashboard.py?name=%s' % name, onclick = "return wato_views_clicked(this)")
         if not first: # at least one item rendered
             html.end_foldable_container()
 
-    for topic, s in views_by_topic():
+    for topic, s in visuals_by_topic(views.permitted_views().items() + dashboard.permitted_dashboards().items()):
         render_topic(topic, s)
 
     links = []
@@ -129,9 +123,65 @@ def render_views():
 
 sidebar_snapins["views"] = {
     "title" : _("Views"),
-    "description" : _("Links to all views"),
+    "description" : _("Links to global views and dashboards"),
     "render" : render_views,
     "allowed" : [ "user", "admin", "guest" ],
+}
+
+#   .--Dashboards----------------------------------------------------------.
+#   |        ____            _     _                         _             |
+#   |       |  _ \  __ _ ___| |__ | |__   ___   __ _ _ __ __| |___         |
+#   |       | | | |/ _` / __| '_ \| '_ \ / _ \ / _` | '__/ _` / __|        |
+#   |       | |_| | (_| \__ \ | | | |_) | (_) | (_| | | | (_| \__ \        |
+#   |       |____/ \__,_|___/_| |_|_.__/ \___/ \__,_|_|  \__,_|___/        |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |                                                                      |
+#   '----------------------------------------------------------------------'
+
+def render_dashboards():
+    dashboard.load_dashboards()
+
+    def render_topic(topic, s, foldable = True):
+        first = True
+        for t, title, name, is_view in s:
+            if t == topic:
+                if first:
+                    if foldable:
+                        html.begin_foldable_container("dashboards", topic, False, topic, indent=True)
+                    else:
+                        html.write('<ul>')
+                    first = False
+                bulletlink(title, 'dashboard.py?name=%s' % name, onclick = "return wato_views_clicked(this)")
+
+        if not first: # at least one item rendered
+            if foldable:
+                html.end_foldable_container()
+            else:
+                html.write('<ul>')
+
+    by_topic = visuals_by_topic(dashboard.permitted_dashboards().items(), default_order = [ _('Overview') ])
+    topics = [ topic for topic, entry in by_topic ]
+
+    if len(topics) < 2:
+        render_topic(by_topic[0][0], by_topic[0][1], foldable = False)
+
+    else:
+        for topic, s in by_topic:
+            render_topic(topic, s)
+
+    links = []
+    if config.may("general.edit_dashboards"):
+        if config.debug:
+            links.append((_("EXPORT"), "export_dashboards.py"))
+        links.append((_("EDIT"), "edit_dashboards.py"))
+        footnotelinks(links)
+
+sidebar_snapins["dashboards"] = {
+    "title"       : _("Dashboards"),
+    "description" : _("Links to all dashboards"),
+    "render"      : render_dashboards,
+    "allowed"     : [ "user", "admin", "guest" ],
 }
 
 # --------------------------------------------------------------
@@ -193,8 +243,17 @@ def render_hosts(mode):
         query += "Filter: custom_variable_names < _REALNAME\n"
 
     if mode == "problems":
-        query += "Filter: state > 0\nFilter: worst_service_state > 0\nOr: 2\n"
         view = "problemsofhost"
+        # Exclude hosts and services in downtime
+        svc_query = "GET services\nColumns: host_name\n"\
+                    "Filter: state > 0\nFilter: scheduled_downtime_depth = 0\n"\
+                    "Filter: host_scheduled_downtime_depth = 0\nAnd: 3"
+        problem_hosts = set(map(lambda x: x[1], html.live.query(svc_query)))
+
+        query += "Filter: state > 0\nFilter: scheduled_downtime_depth = 0\nAnd: 2\n"
+        for host in problem_hosts:
+            query += "Filter: name = %s\n" % host
+        query += "Or: %d\n" % (len(problem_hosts) + 1)
 
     hosts = html.live.query(query)
     html.live.set_prepend_site(False)
@@ -373,13 +432,7 @@ def render_sitestatus():
     if config.is_multisite():
         html.write("<table cellspacing=0 class=sitestate>")
 
-        # Sort the list of sitenames by sitealias
-        sitenames = []
-        for sitename, site in config.allsites().iteritems():
-            sitenames.append((sitename, site['alias']))
-        sitenames = sorted(sitenames, key=lambda k: k[1], cmp = lambda a,b: cmp(a.lower(), b.lower()))
-
-        for sitename, sitealias in sitenames:
+        for sitename, sitealias in config.sorted_sites():
             site = config.site(sitename)
             if sitename not in html.site_status or "state" not in html.site_status[sitename]:
                 state = "missing"
@@ -1205,6 +1258,11 @@ if defaults.omd_root:
 #   |                                                                      |
 #   '----------------------------------------------------------------------'
 
+def parse_hosttag_title(title):
+    if '/' in title:
+        return title.split('/', 1)
+    else:
+        return None, title
 
 def compute_tag_tree(taglist):
     html.live.set_prepend_site(True)
@@ -1226,11 +1284,17 @@ def compute_tag_tree(taglist):
         # No empty entry found -> get default (i.e. first entry)
         return groupentries[0][:2]
 
+    # Prepare list of host tag groups and topics
     taggroups = {}
+    topics = {}
     for entry in config.wato_host_tags:
-        groupname = entry[0]
-        grouptitle = entry[1]
-        group = entry[2]
+        grouptitle           = entry[1]
+        if '/' in grouptitle:
+            topic, grouptitle = grouptitle.split("/", 1)
+            topics.setdefault(topic, []).append(entry)
+
+        groupname            = entry[0]
+        group                = entry[2]
         taggroups[groupname] = group
 
     tree = {}
@@ -1252,24 +1316,53 @@ def compute_tag_tree(taglist):
             have_svc_problems = True
 
         tags = custom_variables.get("TAGS", []).split()
-        tree_entry = tree
-        for tag in taglist:
-            if tag not in taggroups:
-                continue # Configuration error. User deleted tag group after configuring his tree
-            tag_value, tag_title = get_tag_group_value(taggroups[tag], tags)
-            tree_entry = tree_entry.setdefault((tag_title, tag_value), {})
 
-        if not tree_entry:
-            tree_entry.update({
-                "_num_hosts" : 0,
-                "_state"     : 0,
-            })
-        tree_entry["_num_hosts"] += 1
-        tree_entry["_svc_problems"] = tree_entry.get("_svc_problems", False) or have_svc_problems
-        if state == 2 or tree_entry["_state"] == 2:
-            tree_entry["_state"] = 2
-        else:
-            tree_entry["_state"] = max(state, tree_entry["_state"])
+        tree_entry = tree # Start at top node
+
+        # Now go through the levels of the tree. Each level may either be
+        # - a tag group id, or
+        # - "topic:" plus the name of a tag topic. That topic should only contain
+        #   checkbox tags.
+        # The problem with the "topic" entries is, that a host may appear several
+        # times!
+
+        current_branches = [ tree ]
+
+        for tag in taglist:
+            new_current_branches = []
+            for tree_entry in current_branches:
+                if tag.startswith("topic:"):
+                    topic = tag[6:]
+                    if topic in topics: # Could have vanished
+                        # Iterate over all host tag groups with that topic
+                        for entry in topics[topic]:
+                            grouptitle  = entry[1].split("/", 1)[1]
+                            group       = entry[2]
+                            for tagentry in group:
+                                tag_value, tag_title = tagentry[:2]
+                                if tag_value in tags:
+                                    new_current_branches.append(tree_entry.setdefault((tag_title, tag_value), {}))
+
+                else:
+                    if tag not in taggroups:
+                        continue # Configuration error. User deleted tag group after configuring his tree
+                    tag_value, tag_title = get_tag_group_value(taggroups[tag], tags)
+                    new_current_branches.append(tree_entry.setdefault((tag_title, tag_value), {}))
+
+            current_branches = new_current_branches
+
+        for tree_entry in new_current_branches:
+            if not tree_entry:
+                tree_entry.update({
+                    "_num_hosts" : 0,
+                    "_state"     : 0,
+                })
+            tree_entry["_num_hosts"] += 1
+            tree_entry["_svc_problems"] = tree_entry.get("_svc_problems", False) or have_svc_problems
+            if state == 2 or tree_entry["_state"] == 2:
+                tree_entry["_state"] = 2
+            else:
+                tree_entry["_state"] = max(state, tree_entry["_state"])
 
     return tree
 
@@ -1296,10 +1389,22 @@ def tag_tree_url(taggroups, taglist, viewname):
     urlvars = [("view_name", viewname), ("filled_in", "filter")]
     if viewname == "svcproblems":
         urlvars += [ ("st1", "on"), ("st2", "on"), ("st3", "on") ]
+
     for nr, (group, tag) in enumerate(zip(taggroups, taglist)):
-        urlvars.append(("host_tag_%d_grp" % nr, group))
-        urlvars.append(("host_tag_%d_op" % nr, "is"))
-        urlvars.append(("host_tag_%d_val" % nr, tag or ""))
+        if group.startswith("topic:"):
+            # Find correct tag group for this tag
+            for entry in config.wato_host_tags:
+                for tagentry in entry[2]:
+                    if tagentry[0] == tag: # Found our tag
+                        taggroup = entry[0]
+                        urlvars.append(("host_tag_%d_grp" % nr, taggroup))
+                        urlvars.append(("host_tag_%d_op" % nr, "is"))
+                        urlvars.append(("host_tag_%d_val" % nr, tag))
+                        break
+        else:
+            urlvars.append(("host_tag_%d_grp" % nr, group))
+            urlvars.append(("host_tag_%d_op" % nr, "is"))
+            urlvars.append(("host_tag_%d_val" % nr, tag or ""))
     return html.makeuri_contextless(urlvars, "view.py")
 
 def tag_tree_bullet(state, path, leaf):
@@ -1344,7 +1449,7 @@ def render_tag_tree_level(taggroups, path, cwd, title, tree):
     items.sort()
 
     for nr, ((title, tag), subtree) in enumerate(items):
-        subpath = path + [tag]
+        subpath = path + [tag or ""]
         url = tag_tree_url(taggroups, subpath, "allhosts")
         if "_num_hosts" in subtree:
             title += " (%d)" % subtree["_num_hosts"]
@@ -1410,8 +1515,6 @@ def render_tag_tree():
     title, taggroups = config.virtual_host_trees[tree_conf["tree"]]
 
     tree = compute_tag_tree(taggroups)
-
-
     render_tag_tree_level(taggroups, [], cwd, _("Virtual Host Tree"), tree)
 
 sidebar_snapins["tag_tree"] = {

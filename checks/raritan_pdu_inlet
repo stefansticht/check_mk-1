@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -24,124 +24,46 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-capabilities = {
-    0: "rmsCurrent",
-    2: "unbalancedCurrent",
-    3: "rmsVoltage",
-    4: "activePower",
-    5: "apparentPower",
-    6: "powerFactor",
-    7: "activeEnergy",
-    8: "apparentEnergy"
-}
-
-units = {
-    -1: "",
-    0: "",
-    1: "V",
-    2: "A",
-    3: "W",
-    4: "VA",
-    5: "Wh",
-    6: "VAh",
-    7: "C",
-    8: "Hz",
-    9: "%",
-    10: "m/s",
-    11: "Pascal",
-    12: "psi",
-    13: "g",
-    14: "F",
-    15: "ft",
-    16: "in",
-    17: "cm",
-    18: "m",
-    19: "rpm",
-    }
-
-states = {
-    -1 :  "unavailable",
-     0 :  "open",
-     1 :  "closed",
-     2 :  "belowLowerCritical",
-     3 :  "belowLowerWarning",
-     4 :  "normal",
-     5 :  "aboveUpperWarning",
-     6 :  "aboveUpperCritical",
-     7 :  "on",
-     8 :  "off",
-     9 :  "detected",
-     10:  "notDetected",
-     11:  "alarmed",
-    }
-
-def get_capability(cap_entry, id):
-    bit = bin(ord(cap_entry))[2:][id]
-    if bit == "1":
-        return capabilities[id]
+def raritan_pdu_inlet_convert(info):
+    # List of tuples, sorting like the snmp output,
+    # each tuple contains: capabilities, digits
+    translation = (
+      ( '2',  1 ),
+      ( '1',  0 ),
+      ( '3',  0 ),
+      ( '4',  0 ),
+      ( '-1', 2 ),
+      ( '5',  0 ),
+    )
+    phases = [ 'L1', 'L2', 'L3' ]
+    i = 0
+    state = 4 # We dont know the senosr state, so we assume normal
+    for line in info:
+        y = 0
+        # loop over the current Sensor values.
+        # We know the units cause of the translation list
+        for value in line[1:]:
+            item = phases[i] + '-' + capabilities[translation[y][0]]
+            unit = translation[y][0]
+            digits = translation[y][1]
+            yield item, unit, digits, '1', state, value
+            y += 1
+        i += 1
 
 def inventory_raritan_pdu_inlet(info):
-    inventory = []
-    for line in info[1]:
-        i = int(line[0].split(".")[2]) -1
-        cap = get_capability(info[0][0][2][0],i)
-        if line[3] == "1" and cap:
-            item = info[0][0][0] + "-" + cap
-            inventory.append((item, None))
-    return inventory
+    return inventory_raritan_pdu_inlet_generic( raritan_pdu_inlet_convert(info) )
 
-def check_raritan_pdu_inlet(item, params, info):
-    state = 3
-    message = "Sensor not found"
-
-    label = info[0][0][0]
-    name = info[0][0][1]
-    for line in info[1]:
-        i = int(line[0].split(".")[2]) - 1
-        cap = get_capability(info[0][0][2][0],i)
-        if label + "-" + cap == item:
-            unit = units[int(line[1])]
-            digits = int(line[2])
-            avail = line[3]
-            status = int(line[4])
-            status_txt = states[status]
-            value = float(line[5]) / 10.0**digits
-            message = "sensor " + name
-            message += "status \"%s\", value %.2f %s" % (status_txt,value,unit)
-            perfdata = [ (cap, str(value)+unit) ]
-            if avail != "1" or status in ( 2, 6 ):
-                state = 2
-            elif status == 4:
-                state = 0
-            else:
-                state = 1
-
-    return (state, message, perfdata)
+def check_raritan_pdu_inlet(item, _no_params, info):
+    return check_raritan_pdu_inlet_generic( item, _no_params, raritan_pdu_inlet_convert(info) )
 
 check_info['raritan_pdu_inlet'] = {
   "inventory_function"  : inventory_raritan_pdu_inlet,
   "check_function"      : check_raritan_pdu_inlet,
-  "service_description" : "Inlet Sensor %s",
+  "service_description" : "Inlet %s",
   "has_perfdata"        : True,
-  "snmp_info"           : [
-            (".1.3.6.1.4.1.13742.6",  # General properties of the inlet
-                 [
-                 "3.3.3.1.2", # label
-                 "3.3.3.1.3", # name
-                 "3.3.3.1.10", # capabilites
-                 ]
-            ),
-            ( ".1.3.6.1.4.1.13742.6",  # Properties of the sensors
-                [
-                 OID_END,
-                 "3.3.4.1.6", # inletSensorUnits
-                 "3.3.4.1.7", # inletDecimalDigits
-                 "5.2.3.1.2", # inlet sensor availability
-                 "5.2.3.1.3", # inlet sensor state
-                 "5.2.3.1.4", # inlet sensor value
-                 ]
-            )],
-  "snmp_scan_function"  : lambda oid: \
-                            oid(".1.3.6.1.4.1.13742.6.3.2.1.1.3.1").startswith("PX2-2")
-
+  "snmp_info"           : ( ".1.3.6.1.4.1.13742.6.5.2.4.1.4.1.1",
+                                                [ 1, 2, 3 ],
+                                                [ OID_END, 1, 4, 5, 6, 7, 8 ]),
+  "snmp_scan_function"  : lambda oid: oid(".1.3.6.1.2.1.1.2.0") == ".1.3.6.1.4.1.13742.6",
+  "includes"            : [ 'raritan_pdu_inlet.include']
 }

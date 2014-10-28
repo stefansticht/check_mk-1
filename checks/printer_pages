@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -29,7 +29,7 @@ def inventory_printer_pages(info):
 
 def check_printer_pages(_no_item, _no_params, info):
     pages = saveint(info[0][0])
-    infotext = "%d Pages printed" % pages
+    infotext = "%d pages printed" % pages
     perfdata = [ ( "pages", pages ) ]
     return (0, "%s" % infotext, perfdata)
 

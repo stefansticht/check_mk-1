@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -114,7 +114,7 @@ def fileinfo_groups_precompile(hostname, item, params):
         for group_name, pattern in line:
             if group_name == item:
                 if type(pattern) == str: # support old format
-                    pattern = ( pattern, '' )
+                    pattern = (pattern, '')
                 patterns.append(pattern)
     params['precompiled_patterns'] = patterns
     return params

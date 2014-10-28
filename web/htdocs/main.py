@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -28,6 +28,11 @@ import defaults, config
 
 def page_index():
     start_url = html.var("start_url", config.start_url)
+    # Prevent redirecting to absolute URL which could be used to redirect
+    # users to compromised pages
+    if '://' in start_url:
+        start_url = config.start_url
+
     # Do not cache the index page -> caching problems when page is accessed
     # while not logged in
     #html.req.headers_out.add("Cache-Control", "max-age=7200, public");

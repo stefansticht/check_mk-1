@@ -6,7 +6,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2010             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -48,7 +48,7 @@ fi
 
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.5i4
+echo Version: 1.2.5i6
 echo AgentOS: hpux
 echo PluginsDirectory: $PLUGINSDIR
 echo LocalDirectory: $LOCALDIR
@@ -86,8 +86,8 @@ netstat -f inet -n | awk ' /^tcp/ { c[$6]++; } END { for (x in c) { print x, c[x
 
 # Network interfaces
 echo '<<<hpux_if>>>'
-for nic in `nwmgr -g | sed -n '/^lan/s/\(^[^ ]* \).*/\1/p'` 
-do 
+for nic in `nwmgr -g | sed -n '/^lan/s/\(^[^ ]* \).*/\1/p'`
+do
     nwmgr -g --st mib -c $nic
 done
 

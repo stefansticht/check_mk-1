@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -34,7 +34,7 @@ def ajax_action():
         if action == "reschedule":
             action_reschedule()
         else:
-            raise MKGeneralException("Invalid action '%s'" % action)
+            raise MKGeneralException("Invalid action.")
     except Exception, e:
         html.write("['ERROR', %r]\n" % str(e))
 

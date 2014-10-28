@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -70,9 +70,6 @@ def load_plugins():
     global loaded_with_language
     if loaded_with_language == current_language:
         return
-
-    global g_message_path
-    g_message_path = config.user_confdir + '/messages.mk'
 
     global notify_methods
     notify_methods = {
@@ -225,7 +222,7 @@ def page_notify():
         message += "</table>"
 
         message += ' <a href="%s">%s</a>' % (html.makeuri([]), _('Back to previous page'))
-        message += '<p>Sent notification to: %s</p>' % ', '.join(recipients)
+        message += _('<p>Sent notification to: %s</p>') % ', '.join(recipients)
         html.message(message)
 
         if errors:

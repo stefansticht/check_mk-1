@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -65,10 +65,12 @@ def check_windows_tasks(item, _no_params, info):
             state = 0
             label = ""
             msg = []
-            if last_result != 0:
+            if last_result not in [ 0, 0x00041301 ]: # SCHED_S_TASK_RUNNING
                 state = 2
                 label = "(!!)"
             msg.append("Service in state: %s%s" % ( last_result, label ) )
+            if last_result == 0x00041301:
+                msg[-1] += " (currently running)"
 
             if values['Scheduled Task State'] != 'Enabled':
                 msg.append("Task not Enabled(!!)")

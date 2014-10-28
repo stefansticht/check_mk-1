@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -206,6 +206,7 @@ def perfometer_check_mk_mem_used(row, check_command, perf_data):
     return "%d%%" % (100 * (virt_used / ram_total)), h
 
 perfometers["check_mk-mem.used"] = perfometer_check_mk_mem_used
+perfometers["check_mk-aix_memory"] = perfometer_check_mk_mem_used
 perfometers["check_mk-hr_mem"] = perfometer_check_mk_mem_used
 
 def perfometer_check_mk_mem_win(row, check_command, perf_data):
@@ -218,7 +219,6 @@ def perfometer_check_mk_mem_win(row, check_command, perf_data):
     return "%d%%" % perc, perfometer_linear(perc, color)
 
 perfometers["check_mk-mem.win"] = perfometer_check_mk_mem_win
-perfometers["check_mk-juniper_trpz_mem"] = perfometer_check_mk_mem_win
 
 def perfometer_check_mk_cpu_threads(row, check_command, perf_data):
     color = { 0: "#a4f", 1: "#ff2", 2: "#f22", 3: "#fa2" }[row["service_state"]]
@@ -268,10 +268,11 @@ def perfometer_check_mk_ntp(row, check_command, perf_data, unit = "ms"):
         h += perfometer_td(50, "#fff")
     h += '</tr></table>'
 
-    return "%.1f %s" % (offset, unit), h
+    return "%.2f %s" % (offset, unit), h
 
 perfometers["check_mk-ntp"]        = perfometer_check_mk_ntp
 perfometers["check_mk-ntp.time"]   = perfometer_check_mk_ntp
+perfometers["check_mk-chrony"]     = perfometer_check_mk_ntp
 perfometers["check_mk-systemtime"] = lambda r, c, p: perfometer_check_mk_ntp(r, c, p, "s")
 
 def perfometer_ipmi_sensors(row, check_command, perf_data):
@@ -309,8 +310,7 @@ def perfometer_temperature(row, check_command, perf_data):
     state = row["service_state"]
     color = "#39f"
     value = float(perf_data[0][1])
-    crit = savefloat(perf_data[0][4])
-    return u"%d°C" % int(value), perfometer_logarithmic(value, 40, 1.2, color)
+    return u"%d °C" % int(value), perfometer_logarithmic(value, 40, 1.2, color)
 
 perfometers["check_mk-nvidia.temp"] = perfometer_temperature
 perfometers["check_mk-cisco_temp_sensor"] = perfometer_temperature
@@ -336,6 +336,15 @@ perfometers["check_mk-ibm_svc_enclosurestats.temp"] = perfometer_temperature
 perfometers["check_mk-wagner_titanus_topsense.temp"] = perfometer_temperature
 perfometers["check_mk-enterasys_temp"] = perfometer_temperature
 perfometers["check_mk-adva_fsp_temp"] = perfometer_temperature
+perfometers["check_mk-allnet_ip_sensoric.temp"] = perfometer_temperature
+perfometers["check_mk-qlogic_sanbox.temp"] = perfometer_temperature
+perfometers["check_mk-bintec_sensors.temp"] = perfometer_temperature
+perfometers["check_mk-knuerr_rms_temp"] = perfometer_temperature
+perfometers["check_mk-arris_cmts_temp"] = perfometer_temperature
+perfometers["check_mk-casa_cpu_temp"] = perfometer_temperature
+perfometers["check_mk-rms200_temp"] = perfometer_temperature
+perfometers["check_mk-juniper_screenos_temp"] = perfometer_temperature
+perfometers["check_mk-lnx_thermal"] = perfometer_temperature
 
 def perfometer_temperature_multi(row, check_command, perf_data):
     display_value = -1
@@ -375,6 +384,15 @@ def perfometer_power(row, check_command, perf_data):
 perfometers["check_mk-dell_poweredge_amperage.power"] = perfometer_power
 perfometers["check_mk-dell_chassis_power"] = perfometer_power
 perfometers["check_mk-dell_chassis_powersupplies"] = perfometer_power
+perfometers["check_mk-hp-proliant_power"] = perfometer_power
+
+def perfometer_power_simple(row, check_command, perf_data):
+    watt = int(perf_data[0][1])
+    text = "%s Watt" % watt
+    return text, perfometer_logarithmic(watt, 150, 2, "#60f020")
+
+perfometers["check_mk-ibm_svc_enclosurestats.power"] = perfometer_power_simple
+perfometers["check_mk-sentry_pdu"] = perfometer_power_simple
 
 def perfometer_users(row, check_command, perf_data):
     state = row["service_state"]
@@ -455,6 +473,17 @@ perfometers["check_mk-mcdata_fcport"] = perfometer_check_mk_if
 perfometers["check_mk-esx_vsphere_counters.if"] = perfometer_check_mk_if
 perfometers["check_mk-hitachi_hnas_fc_if"] = perfometer_check_mk_if
 
+def perfometer_check_mk_fc_port(row, check_command, perf_data):
+    unit = "B"
+    return perfometer_bandwidth(
+        in_traffic  = savefloat(perf_data[0][1]),
+        out_traffic = savefloat(perf_data[1][1]),
+        in_bw     = savefloat(perf_data[0][6]),
+        out_bw    = savefloat(perf_data[1][6]),
+        unit      = unit
+    )
+perfometers["check_mk-fc_port"] = perfometer_check_mk_fc_port
+
 
 def perfometer_check_mk_brocade_fcport(row, check_command, perf_data):
     return perfometer_bandwidth(
@@ -465,6 +494,7 @@ def perfometer_check_mk_brocade_fcport(row, check_command, perf_data):
     )
 
 perfometers["check_mk-brocade_fcport"] = perfometer_check_mk_brocade_fcport
+perfometers["check_mk-qlogic_fcport"] = perfometer_check_mk_brocade_fcport
 
 def perfometer_check_mk_cisco_qos(row, check_command, perf_data):
     unit =  "Bit/s" in row["service_plugin_output"] and "Bit" or "B"
@@ -494,9 +524,34 @@ def perfometer_oracle_tablespaces(row, check_command, perf_data):
 
 perfometers["check_mk-oracle_tablespaces"] = perfometer_oracle_tablespaces
 
+def perfometer_check_oracle_dataguard_stats(row, check_command, perf_data):
+    perfdata_found = False
+    perfdata1 = ''
+
+    for data in perf_data:
+        if data[0] == "apply_lag":
+            color = '#80F000'
+
+            perfdata_found = True
+            days,    rest    = divmod(int(data[1]), 60*60*24)
+            hours,   rest    = divmod(rest,   60*60)
+            minutes, seconds = divmod(rest,      60)
+            perfdata1 = data[1]
+
+
+    if perfdata_found == False:
+        days = 0
+        hours = 0
+        minutes = 0
+        color = "#008f48";
+
+    return "%02dd %02dh %02dm" % (days, hours, minutes), perfometer_logarithmic(perfdata1, 2592000, 2, color)
+
+perfometers["check_mk-oracle_dataguard_stats"]      = perfometer_check_oracle_dataguard_stats
+
 def perfometer_oracle_sessions(row, check_command, perf_data):
-    if check_command == "check_mk-oracle_sessions":
-	color = "#00ff48";
+    if check_command != "check_mk-oracle_sessions":
+	color = "#008f48";
         unit = "";
     else:
 	color = "#4800ff";
@@ -506,10 +561,11 @@ def perfometer_oracle_sessions(row, check_command, perf_data):
 
 perfometers["check_mk-oracle_sessions"] = perfometer_oracle_sessions
 perfometers["check_mk-oracle_logswitches"] = perfometer_oracle_sessions
+perfometers["check_mk-oracle_processes"] = perfometer_oracle_sessions
 
 def perfometer_cpu_utilization(row, check_command, perf_data):
     util = float(perf_data[0][1]) # is already percentage
-    color = "#60f020"
+    color = "#60c080"
     return "%.0f %%" % util, perfometer_linear(util, color)
 
 #perfometer_linear(perc, color)
@@ -527,6 +583,9 @@ perfometers["check_mk-enterasys_cpu_util"] = perfometer_cpu_utilization
 perfometers["check_mk-juniper_trpz_cpu_util"] = perfometer_cpu_utilization
 perfometers["check_mk-ibm_svc_nodestats.cpu_util"] = perfometer_cpu_utilization
 perfometers["check_mk-ibm_svc_systemstats.cpu_util"] = perfometer_cpu_utilization
+perfometers["check_mk-sni_octopuse_cpu"] = perfometer_cpu_utilization
+perfometers["check_mk-casa_cpu_util"] = perfometer_cpu_utilization
+perfometers["check_mk-juniper_screenos_cpu"] = perfometer_cpu_utilization
 
 def perfometer_ps_perf(row, check_command, perf_data):
     perf_dict = dict([(p[0], float(p[1])) for p in perf_data])
@@ -562,6 +621,7 @@ def perfometer_check_mk_uptime(row, check_command, perf_data):
 perfometers["check_mk-uptime"]      = perfometer_check_mk_uptime
 perfometers["check_mk-snmp_uptime"] = perfometer_check_mk_uptime
 perfometers["check_mk-esx_vsphere_counters.uptime"] = perfometer_check_mk_uptime
+perfometers["check_mk-oracle_instance"] = perfometer_check_mk_uptime
 
 
 def perfometer_check_mk_diskstat(row, check_command, perf_data):
@@ -581,6 +641,7 @@ def perfometer_check_mk_diskstat(row, check_command, perf_data):
 perfometers["check_mk-diskstat"] = perfometer_check_mk_diskstat
 perfometers["check_mk-winperf_phydisk"] = perfometer_check_mk_diskstat
 perfometers["check_mk-hpux_lunstats"] = perfometer_check_mk_diskstat
+perfometers["check_mk-aix_diskiod"] = perfometer_check_mk_diskstat
 perfometers["check_mk-mysql.innodb_io"] = perfometer_check_mk_diskstat
 perfometers["check_mk-esx_vsphere_counters.diskio"] = perfometer_check_mk_diskstat
 perfometers["check_mk-emcvnx_disks"] = perfometer_check_mk_diskstat
@@ -588,9 +649,9 @@ perfometers["check_mk-ibm_svc_nodestats.diskio"] = perfometer_check_mk_diskstat
 perfometers["check_mk-ibm_svc_systemstats.diskio"] = perfometer_check_mk_diskstat
 
 def perfometer_check_mk_iops_r_w(row, check_command, perf_data):
-    iops_r = int(perf_data[0][1])
-    iops_w = int(perf_data[1][1])
-    text = "%d IO/s %s IO/s" % (iops_r, iops_w)
+    iops_r = float(perf_data[0][1])
+    iops_w = float(perf_data[1][1])
+    text = "%.0f IO/s %.0f IO/s" % (iops_r, iops_w)
 
     return text, perfometer_logarithmic_dual(
             iops_r, "#60e0a0", iops_w, "#60a0e0", 100000, 10)
@@ -598,9 +659,9 @@ perfometers["check_mk-ibm_svc_nodestats.iops"] = perfometer_check_mk_iops_r_w
 perfometers["check_mk-ibm_svc_systemstats.iops"] = perfometer_check_mk_iops_r_w
 
 def perfometer_check_mk_disk_latency_r_w(row, check_command, perf_data):
-    latency_r = int(perf_data[0][1])
-    latency_w = int(perf_data[1][1])
-    text = "%d ms %s ms" % (latency_r, latency_w)
+    latency_r = float(perf_data[0][1])
+    latency_w = float(perf_data[1][1])
+    text = "%.1f ms %.1f ms" % (latency_r, latency_w)
 
     return text, perfometer_logarithmic_dual(
             latency_r, "#60e0a0", latency_w, "#60a0e0", 20, 10)
@@ -653,18 +714,18 @@ def perfometer_check_mk_printer_supply(row, check_command, perf_data):
     s = row['service_description'].lower()
 
     fg_color = '#000000'
-    if 'black' in s or s[-1] == 'k':
+    if 'black' in s or ("ink" not in s and s[-1] == 'k'):
         colors   = [ '#000000', '#6E6F00', '#6F0000' ]
         if left >= 60:
-            fg_color = '#ffffff'
+            fg_color = '#FFFFFF'
     elif 'magenta' in s or s[-1] == 'm':
-        colors = [ '#fc00ff', '#FC7FFF', '#FEDFFF' ]
+        colors = [ '#FC00FF', '#FC7FFF', '#FEDFFF' ]
     elif 'yellow' in s or s[-1] == 'y':
-        colors = [ '#ffff00', '#FEFF7F', '#FFFFCF' ]
+        colors = [ '#FFFF00', '#FEFF7F', '#FFFFCF' ]
     elif 'cyan' in s or s[-1] == 'c':
-        colors = [ '#00ffff', '#7FFFFF', '#DFFFFF' ]
+        colors = [ '#00FFFF', '#7FFFFF', '#DFFFFF' ]
     else:
-        colors = [ '#cccccc', '#ffff00', '#ff0000' ]
+        colors = [ '#CCCCCC', '#ffff00', '#ff0000' ]
 
     st = min(2, row['service_state'])
     color = colors[st]
@@ -673,6 +734,13 @@ def perfometer_check_mk_printer_supply(row, check_command, perf_data):
 
 perfometers["check_mk-printer_supply"] = perfometer_check_mk_printer_supply
 perfometers["check_mk-printer_supply_ricon"] = perfometer_check_mk_printer_supply
+
+def perfometer_printer_pages(row, check_command, perf_data):
+    color = "#909090"
+    return "%d" % int(perf_data[0][1]), perfometer_logarithmic(perf_data[0][1], 50000, 6, color)
+
+perfometers["check_mk-printer_pages"] = perfometer_printer_pages
+perfometers["check_mk-canon_pages"] = perfometer_printer_pages
 
 def perfometer_msx_queues(row, check_command, perf_data):
     length = int(perf_data[0][1])
@@ -831,10 +899,12 @@ perfometers["check_mk-cmc_lcp"] = perfometer_cmc_lcp
 
 def perfometer_humidity(row, check_command, perf_data):
     humidity = float(perf_data[0][1])
-    return "%3.1f%%" % humidity, perfometer_linear(humidity, '#6f2')
+    return "%3.1f% %" % humidity, perfometer_linear(humidity, '#6f2')
 
 perfometers['check_mk-carel_uniflair_cooling'] = perfometer_humidity
 perfometers['check_mk-cmciii.humidity'] = perfometer_humidity
+perfometers['check_mk-allnet_ip_sensoric.humidity'] = perfometer_humidity
+perfometers['check_mk-knuerr_rms_humidity'] = perfometer_humidity
 
 def perfometer_eaton(row, command, perf):
     return u"%s°C" % str(perf[0][1]), perfometer_linear(float(perf[0][1]), 'silver')
@@ -867,6 +937,9 @@ perfometers['check_mk-db2_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-esx_vsphere_hostsystem.mem_usage'] = perfometer_simple_mem_usage
 perfometers['check_mk-brocade_mlx.module_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-innovaphone_mem'] = perfometer_simple_mem_usage
+perfometers['check_mk-juniper_screenos_mem'] = perfometer_simple_mem_usage
+perfometers['check_mk-arris_cmts_mem'] = perfometer_simple_mem_usage
+perfometers["check_mk-juniper_trpz_mem"] = perfometer_simple_mem_usage
 
 def perfometer_vmguest_mem_usage(row, command, perf):
     used = float(perf[0][1])
@@ -885,6 +958,8 @@ def perfometer_mq_queues(row, command, perf):
     return "%s Messages" % size, perfometer_logarithmic(size, 1, 2, "#701141")
 
 perfometers['check_mk-mq_queues'] = perfometer_mq_queues
+perfometers['check_mk-websphere_mq_channels'] = perfometer_mq_queues
+perfometers['check_mk-websphere_mq_queues'] = perfometer_mq_queues
 
 def perfometer_apc_mod_pdu_modules(row, check_command, perf_data):
     value = int(savefloat(perf_data[0][1]) * 100)
@@ -917,6 +992,7 @@ def perfometer_fanspeed_logarithmic(row, check_command, perf_data):
     return "%d rpm" % value, perfometer_logarithmic(value, 5000, 2, "silver")
 
 perfometers["check_mk-hitachi_hnas_fan"]  = perfometer_fanspeed_logarithmic
+perfometers["check_mk-bintec_sensors.fan"]  = perfometer_fanspeed_logarithmic
 
 def perfometer_check_mk_arcserve_backup(row, check_command, perf_data):
     bytes = int(perf_data[2][1])
@@ -983,11 +1059,6 @@ def perfometer_check_mk_ibm_svc_cache(row, check_command, perf_data):
 perfometers["check_mk-ibm_svc_nodestats.cache"] = perfometer_check_mk_ibm_svc_cache
 perfometers["check_mk-ibm_svc_systemstats.cache"] = perfometer_check_mk_ibm_svc_cache
 
-def perfometer_check_mk_ibm_svc_power(row, check_command, perf_data):
-    watt = int(perf_data[0][1])
-    text = "%s Watt" % watt
-    return text, perfometer_logarithmic(watt, 150, 2, "#60f020")
-perfometers["check_mk-ibm_svc_enclosurestats.power"] = perfometer_check_mk_ibm_svc_power
 
 def perfometer_licenses_percent(row, check_command, perf_data):
     licenses = float(perf_data[0][1])
@@ -1043,21 +1114,21 @@ def perfometer_raritan_pdu_inlet(row, check_command, perf_data):
     unit = perf_data[0][2]
     display_str = perf_data[0][1] + " " + unit
 
-    if cap == "rmsCurrent":
+    if cap.startswith("rmsCurrent"):
         return display_str, perfometer_logarithmic(value, 1, 2, display_color)
-    elif cap == "unbalancedCurrent":
+    elif cap.startswith("unbalancedCurrent"):
         return display_str, perfometer_linear(value, display_color)
-    elif cap == "rmsVoltage":
+    elif cap.startswith("rmsVoltage"):
         return display_str, perfometer_logarithmic(value, 500, 2, display_color)
-    elif cap == "activePower":
+    elif cap.startswith("activePower"):
         return display_str, perfometer_logarithmic(value, 20, 2, display_color)
-    elif cap == "apparentPower":
+    elif cap.startswith("apparentPower"):
         return display_str, perfometer_logarithmic(value, 20, 2, display_color)
-    elif cap == "powerFactor":
+    elif cap.startswith("powerFactor"):
         return display_str, perfometer_linear(value * 100, display_color)
-    elif cap == "activeEnergy":
+    elif cap.startswith("activeEnergy"):
         return display_str, perfometer_logarithmic(value, 100000, 2, display_color)
-    elif cap == "apparentEnergy":
+    elif cap.startswith("apparentEnergy"):
         return display_str, perfometer_logarithmic(value, 100000, 2, display_color)
 
     return "unimplemented" , perfometer_linear(0, "#ffffff")
@@ -1065,3 +1136,52 @@ def perfometer_raritan_pdu_inlet(row, check_command, perf_data):
 perfometers["check_mk-raritan_pdu_inlet"] = perfometer_raritan_pdu_inlet
 
 
+def perfometer_raritan_pdu_outletcount(row, check_command, perf_data):
+    outletcount = float(perf_data[0][1])
+    return "%d" % outletcount, perfometer_logarithmic(outletcount, 20, 2, "#da6")
+
+perfometers["check_mk-raritan_pdu_outletcount"] = perfometer_raritan_pdu_outletcount
+
+def perfometer_allnet_ip_sensoric_tension(row, check_command, perf_data):
+    display_color = "#50f020"
+    value = float(perf_data[0][1])
+    return value, perfometer_linear(value, display_color)
+
+perfometers["check_mk-allnet_ip_sensoric.tension"] = perfometer_allnet_ip_sensoric_tension
+
+def perfometer_pressure(row, check_command, perf_data):
+    pressure = float(perf_data[0][1])
+    return "%0.5f bars" % pressure, perfometer_logarithmic(pressure, 1, 2, "#da6")
+
+perfometers['check_mk-allnet_ip_sensoric.pressure'] = perfometer_pressure
+
+def perfometer_voltage(row, check_command, perf_data):
+    color = "#808000"
+    value = float(perf_data[0][1])
+    return "%0.3f V" % value, perfometer_logarithmic(value, 12, 2, color)
+
+perfometers["check_mk-bintec_sensors.voltage"] = perfometer_voltage
+
+def perfometer_dbmv(row, check_command, perf_data):
+    dbmv = float(perf_data[0][1])
+    return "%.1f dBmV" % dbmv, perfometer_logarithmic(dbmv, 50, 2, "#da6")
+
+perfometers["check_mk-docsis_channels_downstream"] = perfometer_dbmv
+
+def perfometer_docsis_snr(row, check_command, perf_data):
+    dbmv = float(perf_data[0][1])
+    return "%.1f dB" % dbmv, perfometer_logarithmic(dbmv, 50, 2, "#ad6")
+
+perfometers["check_mk-docsis_channels_upstream"] = perfometer_docsis_snr
+
+def perfometer_veeam_client(row, check_command, perf_data):
+    avgspeed_bytes = int(perf_data[4][1])
+    duration_secs = int(perf_data[3][1])
+    h = perfometer_logarithmic_dual_independent(avgspeed_bytes, '#54b948', 10000000, 2, duration_secs, '#2098cb', 1000, 2)
+
+    avgspeed = bytes_human_readable(avgspeed_bytes)
+    duration = age_human_readable(duration_secs)
+
+    return "%s/s&nbsp;&nbsp;&nbsp;%s" % (avgspeed, duration), h
+
+perfometers["check_mk-veeam_client"] = perfometer_veeam_client

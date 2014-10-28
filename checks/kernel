@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -23,6 +23,17 @@
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+#   .--kernel--Counters----------------------------------------------------.
+#   |                ____                  _                               |
+#   |               / ___|___  _   _ _ __ | |_ ___ _ __ ___                |
+#   |              | |   / _ \| | | | '_ \| __/ _ \ '__/ __|               |
+#   |              | |__| (_) | |_| | | | | ||  __/ |  \__ \               |
+#   |               \____\___/ \__,_|_| |_|\__\___|_|  |___/               |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |  Check page faults, context switches and process creations           |
+#   '----------------------------------------------------------------------'
 
 # Inventory creates three checks per default:
 inventory_kernel_counters = [ "pgmajfault", "ctxt", "processes" ]
@@ -72,12 +83,32 @@ def check_kernel(item, params, info):
         infotext += ", " + text
     return state, infotext, perfdata
 
+check_info["kernel"] = {
+    'check_function':          check_kernel,
+    'inventory_function':      inventory_kernel,
+    'service_description':     'Kernel %s',
+    'has_perfdata':            True,
+    'group':                   'vm_counter',
+}
+
+#.
+#   .--kernel.util--CPU Utilization----------------------------------------.
+#   |             _   _ _   _ _ _          _   _                           |
+#   |            | | | | |_(_) (_)______ _| |_(_) ___  _ __                |
+#   |            | | | | __| | | |_  / _` | __| |/ _ \| '_ \               |
+#   |            | |_| | |_| | | |/ / (_| | |_| | (_) | | | |              |
+#   |             \___/ \__|_|_|_/___\__,_|\__|_|\___/|_| |_|              |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |  Check system/user/io-wait                                           |
+#   '----------------------------------------------------------------------'
+
 kernel_util_default_levels = None
 
 def inventory_cpu_utilization(info):
     for x in info:
         if len(x) > 0 and x[0] == 'cpu':
-            return [(None, "kernel_util_default_levels")]
+            return [(None, {})]
 
 # Columns of cpu usage /proc/stat:
 # - cpuX: number of CPU or only 'cpu' for aggregation
@@ -90,11 +121,16 @@ def inventory_cpu_utilization(info):
 # - softirq: servicing softirqs
 # - steal: involuntary wait
 def kernel_check_cpu_utilization(item, params, info):
-    global g_counters
+
+    # Convert old style tuple-parameter to new dict
+    if type(params) != dict:
+        params = { "iowait": params }
+
     # Look for entry beginning with "cpu"
     f = [ l for l in info if l[0] == "cpu" ]
     if len(f) != 1:
-        return (3, "invalid output from plugin")
+        return 3, "More than one line with CPU info found. This check is not cluster-enabled."
+
     line = f[0]
     if len(line) < 8:
         line = line + ['0', '0', '0', '0'] # needed for Linux 2.4
@@ -103,63 +139,22 @@ def kernel_check_cpu_utilization(item, params, info):
     # 'cpu' user nice system idle wait hw-int sw-int (steal ...)
     # convert number to int
     values = [ int(x) for x in line[1:8] ]
-    this_time = int(time.time())
-    diff_values = []
-    n = 0
-    for v in values:
-        n += 1
-        countername = "cpu.util.%d" % n
-        last_time, last_val = g_counters.get(countername, (0, 0))
-        diff_values.append(v - last_val)
-        g_counters[countername] = (this_time, v)
-
-    sum_jiffies = sum(diff_values[0:7]) # do not account for steal!
-    if sum_jiffies == 0:
-        return (0, "too short interval")
-    user        = diff_values[0] + diff_values[1] # add user + nice
-    system      = diff_values[2]
-    wait        = diff_values[4]
-    user_perc   = 100.0 * float(user)   / float(sum_jiffies)
-    system_perc = 100.0 * float(system) / float(sum_jiffies)
-    wait_perc   = 100.0 * float(wait)   / float(sum_jiffies)
-    perfdata = [
-          ( "user",   "%.3f" % user_perc ),
-          ( "system", "%.3f" % system_perc ),
-          ( "wait",   "%.3f" % wait_perc ) ]
-
-    infotext = "user: %2.1f%%, system: %2.1f%%, wait: %2.1f%%" % (user_perc, system_perc, wait_perc)
-
-    # You may set a warning/critical level on the io wait
-    # percentage. This can be done by setting params to
-    # a pair of (warn, crit)
-    result = 0
-    try:
-        warn, crit = params
-        if wait_perc >= crit:
-            result = 2
-            infotext += "(!!)"
-        elif wait_perc >= warn:
-            result = 1
-            infotext += "(!)"
-    except:
-        pass
-
-    return (result, infotext, perfdata)
-
-
+    user = values[0]
+    nice = values[1]
+    system = values[2]
+    wait  = values[4]
+    hw_int = values[5]
+    sw_int = values[6]
+    idle = 100 - user - system - nice - wait
+    return check_cpu_util_unix([user, nice, system, wait, hw_int, sw_int, idle], params)
 
 check_info["kernel.util"] = {
-    'check_function':          kernel_check_cpu_utilization,
-    'inventory_function':      inventory_cpu_utilization,
-    'service_description':     'CPU utilization',
-    'has_perfdata':            True,
-    'group':                   'cpu_iowait',
+    'check_function':           kernel_check_cpu_utilization,
+    'inventory_function':       inventory_cpu_utilization,
+    'service_description':      'CPU utilization',
+    'has_perfdata':             True,
+    'default_levels_variable':  'kernel_util_default_levels',
+    'group':                    'cpu_iowait',
+    'includes':                 ['cpu_util.include'],
 }
 
-check_info["kernel"] = {
-    'check_function':          check_kernel,
-    'inventory_function':      inventory_kernel,
-    'service_description':     'Kernel %s',
-    'has_perfdata':            True,
-    'group':                   'vm_counter',
-}

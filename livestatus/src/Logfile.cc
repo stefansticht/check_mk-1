@@ -5,7 +5,7 @@
 // |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 // |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 // |                                                                  |
-// | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+// | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 // +------------------------------------------------------------------+
 //
 // This file is part of Check_MK.
@@ -310,7 +310,7 @@ char *Logfile::readIntoBuffer(int *size)
         close(fd);
         return 0;
     }
-    buffer[0]       = 0; 
+    buffer[0]       = 0;
     buffer[*size+1] = 0; // zero-terminate
 
     close(fd);

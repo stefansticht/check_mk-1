@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -29,14 +29,14 @@ register_notification_parameters("mail",
         elements = [
             ( "from",
               TextAscii(
-                  title = _("From: Adress"),
+                  title = _("From: Address"),
                   size = 40,
                   allow_empty = False,
               )
             ),
             ( "reply_to",
               TextAscii(
-                  title = _("Reply-To: Adress"),
+                  title = _("Reply-To: Address"),
                   size = 40,
                   allow_empty = False,
               )
@@ -63,12 +63,15 @@ register_notification_parameters("mail",
               ListChoice(
                   title = _("Information to be displayed in the email body"),
                   choices = [
-                      ( "address",  _("IP Address of Host") ),
-                      ( "abstime",  _("Absolute Time of Alert") ),
-                      ( "reltime",  _("Relative Time of Alert") ),
-                      ( "longoutput", _("Additional Plugin Output") ),
-                      ( "perfdata", _("Performance Data") ),
-                      ( "graph",    _("Performance Graphs") ),
+                      ( "address",      _("IP Address of Host") ),
+                      ( "abstime",      _("Absolute Time of Alert") ),
+                      ( "reltime",      _("Relative Time of Alert") ),
+                      ( "longoutput",   _("Additional Plugin Output") ),
+                      ( "ack_author",   _("Acknowledgement Author") ),
+                      ( "ack_comment",  _("Acknowledgement Comment") ),
+                      ( "perfdata",     _("Performance Data") ),
+                      ( "graph",        _("Performance Graphs") ),
+                      ( "context",      _("Complete variable list (for testing)" ) ),
                   ],
                   default_value = [ "perfdata", "graph", "abstime", "address", "longoutput" ],
               )
@@ -96,15 +99,15 @@ register_notification_parameters("asciimail",
     Dictionary(
         elements = [
             ( "from",
-              TextAscii(
-                  title = _("From: Adress"),
+              EmailAddress(
+                  title = _("From: Address"),
                   size = 40,
                   allow_empty = False,
               )
             ),
             ( "reply_to",
-              TextAscii(
-                  title = _("Reply-To: Adress"),
+              EmailAddress(
+                  title = _("Reply-To: Address"),
                   size = 40,
                   allow_empty = False,
               )
@@ -194,3 +197,23 @@ register_notification_parameters("mkeventd",
         ]
     )
 )
+
+
+register_notification_parameters("spectrum",
+    Dictionary(
+        optional_keys = None,
+        elements = [
+            ("destination",
+             IPv4Address(
+                title = _("Destination IP"),
+                help = _("IP Address of the Spectrum server receiving the SNMP trap")
+             ),
+            ),
+            ("community",
+             TextAscii(
+                title = _("SNMP Community"),
+                help = _("SNMP Community for the SNMP trap")
+             ),
+            ),
+        ])
+    )

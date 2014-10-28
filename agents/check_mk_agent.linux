@@ -6,7 +6,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -65,6 +65,7 @@ fi
 
 # Runs a command asynchronous by use of a cache file
 function run_cached () {
+    local section=
     if [ "$1" = -s ] ; then local section="echo '<<<$2>>>' ; " ; shift ; fi
     local NAME=$1
     local MAXAGE=$2
@@ -74,12 +75,12 @@ function run_cached () {
     if [ ! -d $MK_CONFDIR/cache ]; then mkdir -p $MK_CONFDIR/cache ; fi
     CACHEFILE="$MK_CONFDIR/cache/$NAME.cache"
 
-    # Check if the creation of the cache takes suspiciously long and return 
+    # Check if the creation of the cache takes suspiciously long and return
     # nothing if the age (access time) of $CACHEFILE.new is twice the MAXAGE
     local NOW=$(date +%s)
     if [ -e "$CACHEFILE.new" ] ; then
         local CF_ATIME=$(stat -c %X "$CACHEFILE.new")
-        if [ $((NOW - CF_ATIME)) -ge $((MAXAGE * 2)) ] ; then 
+        if [ $((NOW - CF_ATIME)) -ge $((MAXAGE * 2)) ] ; then
             return
         fi
     fi
@@ -99,8 +100,11 @@ function run_cached () {
     fi
 }
 
+# Make run_cached available for subshells (plugins, local checks, etc.)
+export -f run_cached
+
 echo '<<<check_mk>>>'
-echo Version: 1.2.5i4
+echo Version: 1.2.5i6
 echo AgentOS: linux
 echo PluginsDirectory: $PLUGINSDIR
 echo LocalDirectory: $LOCALDIR
@@ -124,7 +128,7 @@ fi
 echo '<<<df>>>'
 # The exclusion list is getting a bit of a problem. -l should hide any remote FS but seems
 # to be all but working.
-excludefs="-x smbfs -x tmpfs -x cifs -x iso9660 -x udf -x nfsv4 -x nfs -x mvfs -x zfs"
+excludefs="-x smbfs -x cifs -x iso9660 -x udf -x nfsv4 -x nfs -x mvfs -x zfs"
 df -PTlk $excludefs | sed 1d
 
 # df inodes information
@@ -222,21 +226,11 @@ echo '<<<tcp_conn_stats>>>'
 # New implementation: netstat is very slow for large TCP tables
 cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk ' /:/ { c[$4]++; } END { for (x in c) { print x, c[x]; } }'
 
-# Platten- und RAID-Status von LSI-Controlleren, falls vorhanden
-if type cfggen > /dev/null ; then
-   echo '<<<lsi>>>'
-   cfggen 0 DISPLAY | egrep '(Target ID|State|Volume ID|Status of volume)[[:space:]]*:' | sed -e 's/ *//g' -e 's/:/ /'
-fi
-
-# Multipathgeraete
+# Linux Multipathing
 if type multipath >/dev/null ; then
     echo '<<<multipath>>>'
     multipath -l
 fi
-
-# Soft-RAID
-echo '<<<md>>>'
-cat /proc/mdstat
 
 # Performancecounter Platten
 echo '<<<diskstat>>>'
@@ -309,26 +303,61 @@ then
     ) 200>>"$sdrcache"
 fi
 
-# State of LSI MegaRAID controller via MegaCli. You can download that tool from:
-# http://www.lsi.com/downloads/Public/MegaRAID%20Common%20Files/8.02.16_MegaCLI.zip
+# RAID status of Linux software RAID
+echo '<<<md>>>'
+cat /proc/mdstat
 
+# RAID status of Linux RAID via device mapper
+if type dmraid >/dev/null && DMSTATUS=$(dmraid -r)
+then
+    echo '<<<dmraid>>>'
+
+    # Output name and status
+    dmraid -s | grep -e ^name -e ^status
+
+    # Output disk names of the RAID disks
+    DISKS=$(echo "$DMSTATUS" | cut -f1 -d\:)
+
+    for disk in $DISKS ; do
+        device=$(cat /sys/block/$(basename $disk)/device/model )
+        status=$(echo "$DMSTATUS" | grep ^${disk})
+        echo "$status Model: $device"
+    done
+fi
+
+# RAID status of LSI controllers via cfggen
+if type cfggen > /dev/null ; then
+   echo '<<<lsi>>>'
+   cfggen 0 DISPLAY | egrep '(Target ID|State|Volume ID|Status of volume)[[:space:]]*:' | sed -e 's/ *//g' -e 's/:/ /'
+fi
+
+# RAID status of LSI MegaRAID controller via MegaCli. You can download that tool from:
+# http://www.lsi.com/downloads/Public/MegaRAID%20Common%20Files/8.02.16_MegaCLI.zip
 if type MegaCli >/dev/null ; then
+    MegaCli_bin="MegaCli"
+elif type MegaCli64 >/dev/null ; then
+    MegaCli_bin="MegaCli64"
+else
+    MegaCli_bin="unknown"
+fi
+
+if [ "$MegaCli_bin" != "unknown" ]; then
     echo '<<<megaraid_pdisks>>>'
-    for part in $(MegaCli -EncInfo -aALL -NoLog < /dev/null \
+    for part in $($MegaCli_bin -EncInfo -aALL -NoLog < /dev/null \
         | sed -rn 's/:/ /g; s/[[:space:]]+/ /g; s/^ //; s/ $//; s/Number of enclosures on adapter ([0-9]+).*/adapter \1/g; /^(Enclosure|Device ID|adapter) [0-9]+$/ p'); do
         [ $part = adapter ] && echo ""
         [ $part = 'Enclosure' ] && echo -ne "\ndev2enc"
         echo -n " $part"
     done
     echo
-    MegaCli -PDList -aALL -NoLog < /dev/null | egrep 'Enclosure|Raw Size|Slot Number|Device Id|Firmware state|Inquiry|Adapter'
+    $MegaCli_bin -PDList -aALL -NoLog < /dev/null | egrep 'Enclosure|Raw Size|Slot Number|Device Id|Firmware state|Inquiry|Adapter'
     echo '<<<megaraid_ldisks>>>'
-    MegaCli -LDInfo -Lall -aALL -NoLog < /dev/null | egrep 'Size|State|Number|Adapter|Virtual'
+    $MegaCli_bin -LDInfo -Lall -aALL -NoLog < /dev/null | egrep 'Size|State|Number|Adapter|Virtual'
     echo '<<<megaraid_bbu>>>'
-    MegaCli -AdpBbuCmd -GetBbuStatus -aALL -NoLog < /dev/null | grep -v Exit
+    $MegaCli_bin -AdpBbuCmd -GetBbuStatus -aALL -NoLog < /dev/null | grep -v Exit
 fi
 
-# 3WARE disk controller (by Radoslaw Bak)
+# RAID status of 3WARE disk controller (by Radoslaw Bak)
 if type tw_cli > /dev/null ; then
     for C in $(tw_cli show | awk 'NR < 4 { next } { print $1 }'); do
         echo '<<<3ware_info>>>'
@@ -340,11 +369,17 @@ if type tw_cli > /dev/null ; then
     done
 fi
 
+# RAID controllers from areca (Taiwan)
+# cli64 can be found at ftp://ftp.areca.com.tw/RaidCards/AP_Drivers/Linux/CLI/
+if type cli64 >/dev/null ; then
+    run_cached -s arc_raid_status 300 "cli64 rsf info | tail -n +3 | head -n -2"
+fi
+
 # VirtualBox Guests. Section must always been output. Otherwise the
 # check would not be executed in case no guest additions are installed.
 # And that is something the check wants to detect
 echo '<<<vbox_guest>>>'
-if type VBoxControl > /dev/null 2>&1 ; then
+if type VBoxControl >/dev/null 2>&1 ; then
     VBoxControl -nologo guestproperty enumerate | cut -d, -f1,2
     [ ${PIPESTATUS[0]} = 0 ] || echo "ERROR"
 fi
@@ -353,12 +388,19 @@ fi
 # /etc/openvpn. We might find a safer way to find the configuration later.
 if [ -e /etc/openvpn/openvpn-status.log ] ; then
     echo '<<<openvpn_clients:sep(44)>>>'
-    sed -n -e '/CLIENT LIST/,/ROUTING TABLE/p' < /etc/openvpn/openvpn-status.log  | sed -e 1,3d -e '$d' 
+    sed -n -e '/CLIENT LIST/,/ROUTING TABLE/p' < /etc/openvpn/openvpn-status.log  | sed -e 1,3d -e '$d'
 fi
 
+# Time synchronization with NTP
 if type ntpq > /dev/null 2>&1 ; then
    # remove heading, make first column space separated
    run_cached -s ntp 30 "waitmax 5 ntpq -np | sed -e 1,2d -e 's/^\(.\)/\1 /' -e 's/^ /%/'"
+fi
+
+# Time synchronization with Chrony
+if type chronyc > /dev/null 2>&1 ; then
+    # Force successful exit code. Otherwise section will be missing if daemon not running
+    run_cached -s chrony 30 "waitmax 5 chronyc tracking || true"
 fi
 
 if type nvidia-settings >/dev/null && [ -S /tmp/.X11-unix/X0 ]
