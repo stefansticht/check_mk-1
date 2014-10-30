@@ -56,7 +56,7 @@ class FilterText(Filter):
 
 class FilterHostgroupVisibility(Filter):
     def __init__(self, name, title):
-        Filter.__init__(self, name, title, "hostgroups", [ "hostgroupshowempty" ], [])
+        Filter.__init__(self, name, title, "hostgroup_summary", [ "hostgroupshowempty" ], [])
 
     def display(self):
         html.checkbox("hostgroupshowempty", False, label="Show empty groups")
@@ -155,7 +155,7 @@ class FilterMultigroup(Filter):
         return True
 
     def valuespec(self):
-        return DualListChoice(choices = all_groups(self.what), autoheight=False)
+        return DualListChoice(choices = all_groups(self.what), autoheight=False, enlarge_active=True)
 
     def selection(self):
         current = html.var(self.htmlvar, "").strip().split("|")

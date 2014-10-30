@@ -44,16 +44,25 @@ infos['service'] = {
 
 infos['hostgroup'] = {
     'title'       : _('Hostgroup'),
-    'single_spec' : [ 
+    'single_spec' : [
         ('hostgroup', TextUnicode(
             title = _('Hostgroup Name'),
-        )), 
+        )),
+    ],
+}
+
+infos['hostgroup_summary'] = {
+    'title'       : _('Hostgroup Summary'),
+    'single_spec' : [
+        ('hostgroup', TextUnicode(
+            title = _('Hostgroup Name'),
+        )),
     ],
 }
 
 infos['servicegroup'] = {
     'title'       : _('Servicegroup'),
-    'single_spec' : [ 
+    'single_spec' : [
         ('servicegroup', TextUnicode(
             title = _('Servicegroup Name'),
         )),

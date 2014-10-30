@@ -1137,14 +1137,15 @@ register_rule(group + '/' + subgroup_storage,
             elements = [
                 TextAscii(
                      title = _("Name of group"),
+                     size = 10,
                 ),
                 Transform(
                     Tuple(
                         show_titles = True,
                         orientation = "vertical",
                         elements = [
-                            TextAscii(title = _("Include Pattern")),
-                            TextAscii(title = _("Exclude Pattern"))
+                            TextAscii(title = _("Include Pattern"), size=40),
+                            TextAscii(title = _("Exclude Pattern"), size=40),
                         ],
                     ),
                     forth = lambda params: type(params) == str and ( params, '' ) or params
@@ -4948,8 +4949,35 @@ register_check_parameters(
                       Integer(title = _("critical if above"), unit = u"%", default_value = 75),
                   ])),
             ]),
-            None,
-    "first"
+    None,
+    "dict"
+)
+
+register_check_parameters(
+    subgroup_environment,
+    "ups_outphase",
+    _("Parameters for output phases of UPSs"),
+    Dictionary(
+        elements = [
+            ( "voltage",
+              Tuple(
+                  title = _("Voltage"),
+                  elements = [
+                      Integer(title = _("warning if below"), unit = u"V", default_value = 210),
+                      Integer(title = _("critical if below"), unit = u"V", default_value = 200),
+                  ])),
+            ( "load",
+              Tuple(
+                  title = _("Load"),
+                  elements = [
+                      Integer(title = _("warning at"), unit = u"%", default_value = 80),
+                      Integer(title = _("critical at"), unit = u"%", default_value = 90),
+                  ])),
+            ]),
+    TextAscii(
+        title = _("Phase Number"),
+        help = _("The number of the phase (usually <tt>1</tt>,<tt>2</tt>,<tt>3</tt>).")),
+    "dict"
 )
 
 register_check_parameters(
@@ -6054,10 +6082,10 @@ register_check_parameters(
                             totext = "",
                             title = _("Match all users"),
                         )
-                       
+
                     ],
                     match = lambda x: (not x and 2) or (x[0] == '~' and 1 or 0)
-                   
+
                 )),
                 ( "cpulevels",
                   Tuple(

@@ -82,7 +82,7 @@ function waitmax
 }
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.5i6
+echo Version: 1.2.5i7
 echo AgentOS: aix
 
 echo '<<<df>>>'
@@ -92,6 +92,13 @@ df -kP | sed 's/ / - /' | grep -v ^/proc | grep -v ^Filesystem | grep -v :
 if type stat >/dev/null 2>&1 ; then
     echo '<<<nfsmounts>>>'
      mount | grep ' nfs' | awk '{print $3;}' | \
+        while read MP
+	do
+	    waitmax 2 stat -f -c '"'$MP' ok - - - -"' "$MP" || \
+		echo "$MP hanging 0 0 0 0"
+	done
+    echo '<<<cifsmounts>>>'
+     mount | grep ' cifs' | awk '{print $3;}' | \
         while read MP
 	do
 	    waitmax 2 stat -f -c '"'$MP' ok - - - -"' "$MP" || \
