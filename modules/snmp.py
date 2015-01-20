@@ -28,9 +28,11 @@
 
 import subprocess
 
-OID_END    =  0
-OID_STRING = -1
-OID_BIN    = -2
+OID_END              =  0  # Suffix-part of OID that was not specified
+OID_STRING           = -1  # Complete OID as string ".1.3.6.1.4.1.343...."
+OID_BIN              = -2  # Complete OID as binary string "\x01\x03\x06\x01..."
+OID_END_BIN          = -3  # Same, but just the end part
+OID_END_OCTET_STRING = -4  # yet same, but omit first byte (assuming that is the length byte)
 
 def strip_snmp_value(value, hex_plain = False):
     v = value.strip()
@@ -84,7 +86,7 @@ def oid_to_intlist(oid):
 def cmp_oids(o1, o2):
     return cmp(oid_to_intlist(o1), oid_to_intlist(o2))
 
-def get_snmp_table(hostname, ip, oid_info):
+def get_snmp_table(hostname, ip, check_type, oid_info):
     # oid_info is either ( oid, columns ) or
     # ( oid, suboids, columns )
     # suboids is a list if OID-infixes that are put between baseoid
@@ -127,19 +129,30 @@ def get_snmp_table(hostname, ip, oid_info):
             # in later. If the column in OID_STRING or OID_BIN we do something
             # similar: we fill in the complete OID of the entry, either as
             # string or as binary UTF-8 encoded number string
-            if column in [ OID_END, OID_STRING, OID_BIN ]:
+            if column in [ OID_END, OID_STRING, OID_BIN, OID_END_BIN, OID_END_OCTET_STRING ]:
+                if index_column >= 0 and index_column != colno:
+                    raise MKGeneralException("Invalid SNMP OID specification in implementation of check. "
+                        "You can only use one of OID_END, OID_STRING, OID_BIN, OID_END_BIN and OID_END_OCTET_STRING.")
                 index_column = colno
                 columns.append((fetchoid, []))
                 index_format = column
                 continue
 
-
             if opt_use_snmp_walk or is_usewalk_host(hostname):
                 rowinfo = get_stored_snmpwalk(hostname, fetchoid)
             elif has_inline_snmp and use_inline_snmp:
-                rowinfo = inline_snmpwalk_on_suboid(hostname, fetchoid)
+                rowinfo = inline_snmpwalk_on_suboid(hostname, check_type, fetchoid)
             else:
                 rowinfo = snmpwalk_on_suboid(hostname, ip, fetchoid)
+
+            # I've seen a broken device (Mikrotik Router), that broke after an
+            # update to RouterOS v6.22. It would return 9 time the same OID when
+            # .1.3.6.1.2.1.1.1.0 was being walked. We try to detect these situations
+            # by removing any duplicate OID information
+            if len(rowinfo) > 1 and rowinfo[0][0] == rowinfo[1][0]:
+                if opt_verbose:
+                    sys.stderr.write("Detected broken SNMP agent. Ignoring duplicate OID %s.\n" % rowinfo[0][0])
+                rowinfo = rowinfo[:1]
 
             columns.append((fetchoid, rowinfo))
             number_rows = len(rowinfo)
@@ -153,12 +166,16 @@ def get_snmp_table(hostname, ip, oid_info):
             fetchoid, max_column  = columns[max_len_col]
             for o, value in max_column:
                 if index_format == OID_END:
-		    eo = extract_end_oid(fetchoid, o)
-                    index_rows.append((o, eo))
+                    index_rows.append((o, extract_end_oid(fetchoid, o)))
                 elif index_format == OID_STRING:
                     index_rows.append((o, o))
-                else:
+                elif index_format == OID_BIN:
                     index_rows.append((o, oid_to_bin(o)))
+                elif index_format == OID_END_BIN:
+                    index_rows.append((o, oid_to_bin(extract_end_oid(fetchoid, o))))
+                else: # OID_END_OCTET_STRING:
+                    index_rows.append((o, oid_to_bin(extract_end_oid(fetchoid, o))[1:]))
+
             columns[index_column] = fetchoid, index_rows
 
 
@@ -290,9 +307,6 @@ def get_stored_snmpwalk(hostname, oid):
 
     path = snmpwalks_dir + "/" + hostname
 
-    if opt_debug:
-        sys.stderr.write("Getting %s from %s\n" % (oid, path))
-
     rowinfo = []
 
     # New implementation: use binary search
@@ -355,9 +369,10 @@ def get_stored_snmpwalk(hostname, oid):
                 o = o[1:]
             if o == oid or o.startswith(oid_prefix + "."):
                 if len(parts) > 1:
-                    value = parts[1]
-                    if agent_simulator:
-                        value = agent_simulator_process(value)
+                    try:
+                        value = agent_simulator_process(parts[1])
+                    except:
+                        value = parts[1] # agent simulator missing in precompiled mode
                 else:
                     value = ""
                 # Fix for missing starting oids
@@ -430,7 +445,7 @@ def snmpwalk_on_suboid(hostname, ip, oid, hex_plain = False):
                or value.startswith('No Such Object available') or value.startswith('No Such Instance currently exists'):
                 continue
 
-            if len(value) > 0 and value[0] == '"' and value[-1] != '"': # to be continued
+            if value == '"' or (len(value) > 1 and value[0] == '"' and (value[-1] != '"')): # to be continued
                 while True: # scan for end of this dataset
                     nextline = line_iter.next().strip()
                     value += " " + nextline

@@ -182,12 +182,12 @@ else:
           "prefix"      : defaults.omd_root,
           "paths"       : [
                             ("dir",  "var/log"),
-                            ("file", "var/check_mk/notify/notify.log"),
                             ("file", "var/nagios/livestatus.log"),
                             ("dir",  "var/pnp4nagios/log"),
                           ],
           "checksum"    : False,
         },
+
         "mkeventstatus": {
           "group"       : _("Configuration"),
           "title"       : _("Event Console Configuration"),
@@ -208,6 +208,16 @@ else:
                             ("dir",  "var/mkeventd/messages-history"),
                           ],
         },
+        "snmpmibs": {
+          "group"       : _("Configuration"),
+          "title"       : _("SNMP MIBs"),
+          "prefix"      : defaults.omd_root,
+          "paths"       : [
+                            ("dir",  "local/share/check_mk/mibs"),
+                          ],
+          "default"     : True
+        },
+
         "dokuwiki": {
           "title"       : _("Doku Wiki Pages and Settings"),
           "prefix"      : defaults.omd_root,

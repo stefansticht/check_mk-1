@@ -31,43 +31,71 @@
 # <<<lnx_thermal>>>
 # thermal_zone0 enabled acpitz 47000 90000 critical 79000 passive
 
+# <<<lnx_thermal>>>
+# thermal_zone0 enabled acpitz 38000 98000 critical
+# thermal_zone1 pkg-temp-0  44000 0 passive 0 passive
+
+factory_settings["lnx_thermal_default_levels"] = {
+    "levels"                    : (70, 80),
+    "device_levels_handling"    : "devdefault",
+}
+
 def inventory_lnx_thermal(info):
-    return [ (l[0].replace('thermal_zone', ''), None) for l in info ]
+    return [ (l[0].replace('thermal_zone', 'Zone '), {}) for l in info ]
+
 
 def check_lnx_thermal(item, params, info):
     for line in info:
-        if line[0].replace('thermal_zone', '') == item:
+        if line[0].replace('thermal_zone', 'Zone ') == item:
             # ['thermal_zone0', 'enabled', 'acpitz', '51000', '90000', 'critical', '79000', 'passive']
             state = 0
             tp_reached = []
 
+            # Some devices report an empty value for the 3rd field (type). Trying to fix those lines.
+            # -> thermal_zone1 pkg-temp-0  44000 0 passive 0 passive
+            try:
+                int(line[2])
+                int(line[3])
+                line = line[:2] + [''] + line[2:]
+            except:
+                pass # -> regular line
+
             # convert values from millidegree
-            cur = saveint(line[3]) / 1000
+            temp = int(line[3]) / 1000.0
 
             # parse trip points
+            dev_warn = None
+            dev_crit = None
             if len(line) > 4:
-                trip_points = dict(zip(line[5::2], map(lambda x: saveint(x) / 1000, line[4::2])))
+                trip_points = dict(zip(line[5::2], map(lambda x: int(x) / 1000.0, line[4::2])))
                 for tp_num, (tp_name, level) in enumerate(trip_points.items()):
                     # ignore active cooling device trip points (means enabling a fan or similar)
                     if tp_name == 'active':
                         continue
-                    if cur > level:
+                    if level != 0:
                         if tp_name in [ 'hot', 'critical' ]:
-                            state = max(state, 2)
+                            dev_crit = level
                         else:
-                            state = max(state, 1)
-                        tp_reached.append("%s (%d)" % (tp_name, tp_num))
+                            dev_warn = level
 
-            detail_txt = ''
-            if tp_reached:
-                detail_txt = ' (Trip Points reached: %s)' % ', '.join(tp_reached)
+            # If only one relevant trip point is found, use that for both warn and crit
+            if (dev_warn != None) != (dev_crit != None):
+                dev_warn = dev_crit = max(dev_warn, dev_crit)
 
-            return (state, 'Temperature is %d °C%s' % (cur, detail_txt), [ ( 'temperature', cur ) ])
-    return (3, 'No data found for sensor "thermal_zone%s"' % item)
+            if dev_warn and dev_crit:
+                dev_levels = (dev_warn, dev_crit)
+            else:
+                dev_levels = None
+
+            return check_temperature(temp, params, dev_levels=dev_levels)
+
 
 check_info['lnx_thermal'] = {
     "inventory_function"      : inventory_lnx_thermal,
     "check_function"          : check_lnx_thermal,
     "service_description"     : "Temperature %s",
     "has_perfdata"            : True,
+    "group"                   : "temperature",
+    "default_levels_variable" : "lnx_thermal_default_levels",
+    "includes"                : [ "temperature.include" ],
 }

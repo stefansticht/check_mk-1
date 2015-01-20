@@ -24,8 +24,351 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-
+#   .--mem.linux-----------------------------------------------------------.
+#   |                                      _ _                             |
+#   |           _ __ ___   ___ _ __ ___   | (_)_ __  _   ___  __           |
+#   |          | '_ ` _ \ / _ \ '_ ` _ \  | | | '_ \| | | \ \/ /           |
+#   |          | | | | | |  __/ | | | | |_| | | | | | |_| |>  <            |
+#   |          |_| |_| |_|\___|_| |_| |_(_)_|_|_| |_|\__,_/_/\_\           |
+#   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   |  Specialized memory check for Linux that takes into account          |
+#   |  all of its specific information in /proc/meminfo.                   |
+#   '----------------------------------------------------------------------'
+
+# BEWARE: half of the information and blob entries about /proc/meminfo
+# in the internet is unprecise or even totally wrong!
+
+# <<<mem>>>
+# MemTotal:       24707592 kB
+# MemFree:          441224 kB
+# Buffers:          320672 kB
+# Cached:         19981008 kB
+# SwapCached:         6172 kB
+# Active:          8756876 kB
+# Inactive:       13360444 kB
+# Active(anon):    1481236 kB
+# Inactive(anon):   371260 kB
+# Active(file):    7275640 kB
+# Inactive(file): 12989184 kB
+# Unevictable:      964808 kB
+# Mlocked:          964808 kB
+# SwapTotal:      16777212 kB
+# SwapFree:       16703328 kB
+# Dirty:           4408124 kB
+# Writeback:         38020 kB
+# AnonPages:       2774444 kB
+# Mapped:            69456 kB
+# Shmem:             33772 kB
+# Slab:             861028 kB
+# SReclaimable:     756236 kB
+# SUnreclaim:       104792 kB
+# KernelStack:        4176 kB
+# PageTables:        15892 kB
+# NFS_Unstable:          0 kB
+# Bounce:                0 kB
+# WritebackTmp:          0 kB
+# CommitLimit:    39014044 kB
+# Committed_AS:    3539808 kB
+# VmallocTotal:   34359738367 kB
+# VmallocUsed:      347904 kB
+# VmallocChunk:   34346795572 kB
+# HardwareCorrupted:     0 kB
+# AnonHugePages:         0 kB
+# HugePages_Total:       0
+# HugePages_Free:        0
+# HugePages_Rsvd:        0
+# HugePages_Surp:        0
+# Hugepagesize:       2048 kB
+# DirectMap4k:      268288 kB
+# DirectMap2M:     8112128 kB
+# DirectMap1G:    16777216 kB
+
+# This is from an earlier kernel (CentOS 5.5). Some entries
+# are missing here:
+# <<<mem>>>
+# MemTotal:       377176 kB
+# MemFree:         60112 kB
+# Buffers:         93864 kB
+# Cached:         116364 kB
+# SwapCached:          0 kB
+# Active:         169140 kB
+# Inactive:        84144 kB
+# HighTotal:           0 kB
+# HighFree:            0 kB
+# LowTotal:       377176 kB
+# LowFree:         60112 kB
+# SwapTotal:     2064376 kB
+# SwapFree:      2062756 kB
+# Dirty:             172 kB
+# Writeback:           0 kB
+# AnonPages:       43080 kB
+# Mapped:           8352 kB
+# Slab:            45892 kB
+# PageTables:       3208 kB
+# NFS_Unstable:        0 kB
+# Bounce:              0 kB
+# CommitLimit:   2252964 kB
+# Committed_AS:   125968 kB
+# VmallocTotal: 34359738367 kB
+# VmallocUsed:     18112 kB
+# VmallocChunk: 34359719415 kB
+# HugePages_Total:     0
+# HugePages_Free:      0
+# HugePages_Rsvd:      0
+# Hugepagesize:     2048 kB
+
+# Yet earlier kernel (SLES 9):
+# <<<mem>>>
+# MemTotal: 6224268 kB
+# MemFree: 2913660 kB
+# Buffers: 84712 kB
+# Cached: 1779052 kB
+# SwapCached: 0 kB
+# Active: 1931528 kB
+# Inactive: 1276156 kB
+# HighTotal: 5373824 kB
+# HighFree: 2233984 kB
+# LowTotal: 850444 kB
+# LowFree: 679676 kB
+# SwapTotal: 1052280 kB
+# SwapFree: 1052280 kB
+# Dirty: 55680 kB
+# Writeback: 0 kB
+# Mapped: 1469268 kB
+# Slab: 71724 kB
+# Committed_AS: 2758332 kB
+# PageTables: 7672 kB
+# VmallocTotal: 112632 kB
+# VmallocUsed: 9324 kB
+# VmallocChunk: 103180 kB
+# HugePages_Total: 0
+# HugePages_Free: 0
+# Hugepagesize: 2048 kB
+
+
+factory_settings["mem_linux_default_levels"] = {
+    "levels_virtual":       ("perc_used", ( 80.0,  90.0)),
+    "levels_total":         ("perc_used", (120.0, 150.0)),
+    "levels_shm":           ("perc_used", ( 20.0,  30.0)),
+    "levels_pagetables":    ("perc_used", (  8.0,  16.0)),
+    "levels_committed":     ("perc_used", (100.0, 150.0)),
+    "levels_commitlimit":   ("perc_free", ( 20.0,  10.0)),
+    "levels_vmalloc":       ("abs_free",  (50*1024*1024, 30*1024*1024)),
+}
+
+# Parse /proc/meminfo into the canonical form: into bytes, not kB
+def parse_proc_meminfo_bytes(info):
+    meminfo = {}
+    for line in info:
+        value = int(line[1])
+        if len(line) > 2 and line[2] == 'kB':
+            value *= 1024
+        meminfo[line[0][:-1]] = value
+    return meminfo
+
+def is_linux_meminfo(meminfo):
+    return "PageTables" in meminfo and "Writeback" in meminfo and "Committed_AS" in meminfo
+
+def inventory_mem_linux(info):
+    meminfo = parse_proc_meminfo_bytes(info)
+    if is_linux_meminfo(meminfo):
+        return [ (None, {}) ]
+
+
+def check_mem_levels(title, used, total, levels, of_what=None, of_value=None, show_percentage=False, show_free=False):
+    if of_value == None:
+        of_value = total # Reference for percentage levels
+    state = 0
+    if of_what:
+        if show_free:
+            value = total - used
+        else:
+            value = used
+        infotext = "%s: %s" % (title, get_bytes_human_readable(value))
+    else:
+        infotext = "%s used: %s of %s" % (
+             title, get_bytes_human_readable(used), get_bytes_human_readable(total))
+
+    perc_shown = False
+    if levels and levels != "ignore":
+        how = levels[0]
+        if how == "predictive":
+            return 3, "Predictive levels for memory check not yet implemented"
+            # TODO: Hier brauchen wir den Namen der RRD-variable! Das klappt aber
+            # nicht, wenn hier Werte zusammengerechnet wurden. Wir sollten die
+            # Predictive Levels nur für ausgewählte Werte zulassen.
+            # return check_levels(used, levels[1], unit = "GB")
+
+        warn, crit = levels[1]
+        if how.startswith("perc_"):
+            perc_used = 100.0 * float(used) / of_value
+            perc_free = 100 - perc_used
+            if how == "perc_used":
+                if of_what:
+                    t = " of " + of_what
+                else:
+                    t = ""
+                levels_text = " (%.1f%%%s, " % (perc_used, t)
+                if perc_used >= crit:
+                    state = 2
+                elif perc_used >= warn:
+                    state = 1
+
+            elif how == "perc_free":
+                if of_what:
+                    t = "of " + of_what
+                else:
+                    t = "free"
+                levels_text = " (%.1f%% %s, " % (perc_free, t)
+                if perc_free < crit:
+                    state = 2
+                elif perc_free < warn:
+                    state = 1
+
+            if state:
+                perc_shown = True
+                infotext += levels_text + "levels at %.1f%%/%.1f%%)" % (warn, crit)
+
+        else:
+            if how == "abs_used":
+                if used >= crit:
+                    state = 2
+                elif used >= warn:
+                    state = 1
+            else:
+                free = total - used
+                if free < crit:
+                    state = 2
+                elif free < warn:
+                    state = 1
+
+            if state:
+                infotext += " (levels at %s/%s)" % (get_bytes_human_readable(warn), get_bytes_human_readable(crit))
+
+    if not perc_shown and show_percentage:
+        infotext += " (%.1f%%)" % (100.0 * float(used) / of_value)
+    return state, infotext
+
+def check_mem_linux(_no_item, params, info):
+    meminfo = parse_proc_meminfo_bytes(info)
+
+    # SReclaimable is not available for older kernels
+    if "SReclaimable" not in meminfo:
+        meminfo["SReclaimable"] = 0
+        meminfo["SUnreclaim"] = meminfo["Slab"]
+
+    # Compute memory used by caches, that can be considered "free"
+    meminfo["Caches"] = meminfo["Cached"] + meminfo["Buffers"] \
+                      + meminfo["SwapCached"] + meminfo["SReclaimable"]
+
+    # RAM
+    meminfo["MemUsed"] = meminfo["MemTotal"] - meminfo["MemFree"] - meminfo["Caches"]
+    yield check_mem_levels("RAM", meminfo["MemUsed"], meminfo["MemTotal"],
+              params.get("levels_ram"), show_percentage=not meminfo["SwapTotal"])
+
+    # Swap - but only if available
+    meminfo["SwapUsed"] = meminfo["SwapTotal"] - meminfo["SwapFree"]
+    if meminfo["SwapTotal"]:
+        yield check_mem_levels("Swap", meminfo["SwapUsed"], meminfo["SwapTotal"],
+                  params.get("levels_swap"))
+
+    # Total virtual memory
+    meminfo["TotalTotal"] = meminfo["MemTotal"] + meminfo["SwapTotal"]
+    meminfo["TotalUsed"] = meminfo["MemUsed"] + meminfo["SwapUsed"]
+    r = check_mem_levels("Total virtual memory", meminfo["TotalUsed"], meminfo["TotalTotal"],
+              params.get("levels_virtual"), show_percentage=True)
+    if r[0] or meminfo["SwapTotal"]:
+        yield r # only display if there is swap or status is non-OK
+
+    # Total memory / in relation to RAM
+    r = check_mem_levels("RAM + Swap", meminfo["TotalUsed"], meminfo["TotalTotal"],
+              params.get("levels_total"), of_what = "RAM", of_value = meminfo["MemTotal"])
+    if r[0]:
+        yield r # only display if non-OK
+
+    # Shared memory
+    if "Shmem" in meminfo:
+        r = check_mem_levels("Shared memory", meminfo["Shmem"], meminfo["MemTotal"],
+                params.get("levels_shm"), of_what = "RAM")
+        if r[0]:
+            yield r # only display if non-OK
+
+    # Page tables
+    r = check_mem_levels("Page tables", meminfo["PageTables"], meminfo["MemTotal"],
+            params.get("levels_pagetables"), of_what = "RAM")
+    if r[0]:
+        yield r # only display if non-OK
+
+    # Disk Writeback
+    meminfo["Pending"] = \
+         meminfo["Dirty"] \
+       + meminfo.get("Writeback", 0) \
+       + meminfo.get("NFS_Unstable", 0) \
+       + meminfo.get("Bounce", 0) \
+       + meminfo.get("WritebackTmp", 0)
+
+    r = check_mem_levels("Disk Writeback", meminfo["Pending"], meminfo["MemTotal"],
+            params.get("levels_writeback"), of_what = "RAM")
+    if r[0]:
+        yield r # only display if non-OK
+
+    # Committed memory
+    r = check_mem_levels("Committed", meminfo["Committed_AS"], meminfo["TotalTotal"],
+            params.get("levels_committed"), of_what = "RAM + Swap")
+    if r[0]:
+        yield r # only display if non-OK
+
+    # Commit limit
+    if "CommitLimit" in meminfo:
+        r = check_mem_levels("Commit Limit", meminfo["TotalTotal"] - meminfo["CommitLimit"],
+                meminfo["TotalTotal"], params.get("levels_commitlimit"), of_what = "RAM + Swap")
+        if r[0]:
+            yield r # only display if non-OK
+
+    # VMalloc
+    r = check_mem_levels("Largest Free VMalloc Chunk", meminfo["VmallocTotal"] - meminfo["VmallocChunk"],
+            meminfo["VmallocTotal"], params.get("levels_vmalloc"), of_what = "VMalloc Area", show_free=True)
+    if r[0]:
+        yield r # only display if non-OK
+
+    # HardwareCorrupted
+    hwc = meminfo.get("HardwareCorrupted")
+    if hwc:
+        yield 2, "Hardware defect of %s" % get_bytes_human_readable(hwc)
+
+    # Now send performance data. We simply output *all* fields of meminfo
+    # except for a few really useless values
+    perfdata = []
+    items = meminfo.items()
+    items.sort()
+    for name, value in items:
+        if name.startswith("DirectMap"):
+            continue
+        if name.startswith("Vmalloc") and meminfo["VmallocTotal"] > 2**40: # useless on 64 Bit system
+            continue
+        if name.startswith("Huge"):
+            if meminfo["HugePages_Total"] == 0: # omit useless data
+                continue
+            if name == "Hugepagesize":
+                continue # not needed
+            value = value * meminfo["Hugepagesize"] # convert number to actual memory size
+        perfdata.append((camelcase_to_underscored(name.replace("(", "_").replace(")","")), value))
+    yield 0, "", perfdata
+
+
+
+check_info["mem.linux"] = {
+    'check_function':          check_mem_linux,
+    'inventory_function':      inventory_mem_linux,
+    'service_description':     'Memory',
+    'default_levels_variable': 'mem_linux_default_levels',
+    'has_perfdata':            True,
+    'group':                   'memory_linux',
+}
+
+#.
+#   .--mem.used------------------------------------------------------------.
 #   |                                                        _             |
 #   |           _ __ ___   ___ _ __ ___   _   _ ___  ___  __| |            |
 #   |          | '_ ` _ \ / _ \ '_ ` _ \ | | | / __|/ _ \/ _` |            |
@@ -35,19 +378,20 @@
 #   +----------------------------------------------------------------------+
 #   | Memory check that takes into account the swap space. This check is   |
 #   | used for unixoide operating systems.                                 |
-#   +----------------------------------------------------------------------+
+#   '----------------------------------------------------------------------'
+
+def parse_proc_meminfo(info):
+    return dict([ (i[0][:-1], int(i[1])) for i in info ])
 
 # The following variable is obsolete. It is kept here so that Check_MK
 # won't fail if it's found in main.mk
 mem_extended_perfdata = None
 
-def parse_proc_meminfo(info):
-    return dict([ (i[0][:-1], int(i[1])) for i in info ])
-
 def inventory_mem_used(info):
     meminfo = parse_proc_meminfo(info)
-    if "MemTotal" in meminfo and \
-        "PageTotal" not in meminfo: # This case is handled by mem.win
+    if "MemTotal" in meminfo \
+        and "PageTotal" not in meminfo \
+        and not is_linux_meminfo(meminfo): # handled by more modern check
         return [(None, {})]
 
 def check_mem_used(_no_item, params, info):
@@ -64,8 +408,8 @@ check_info['mem.used'] = {
     "includes"                : [ "mem.include" ],
 }
 
-
-#   +----------------------------------------------------------------------+
+#.
+#   .--mem.win-------------------------------------------------------------.
 #   |                                                _                     |
 #   |              _ __ ___   ___ _ __ ___ __      _(_)_ __                |
 #   |             | '_ ` _ \ / _ \ '_ ` _ \\ \ /\ / / | '_ \               |
@@ -75,12 +419,12 @@ check_info['mem.used'] = {
 #   +----------------------------------------------------------------------+
 #   | Windows now has a dedicated memory check that reflect the special    |
 #   | nature of the page file.                                             |
-#   +----------------------------------------------------------------------+
+#   '----------------------------------------------------------------------'
 
 # Special memory and page file check for Windows
 factory_settings["memory_win_default_levels"] = {
     "memory"   : ( 80.0, 90.0 ),
-    "pagefile" : ( 50.0, 70.0 ),
+    "pagefile" : ( 80.0, 90.0 ),
 }
 
 def inventory_mem_win(info):
@@ -129,7 +473,7 @@ def check_mem_windows(item, params, info):
         # Do averaging, if configured, just for matching the levels
         if "average" in params:
             average_min = params["average"]
-            timedif, used_kb = get_average("mem.win.%s" % paramname,
+            used_kb = get_average("mem.win.%s" % paramname,
                                            now, used_kb, average_min, initialize_zero = False)
             used_mb  = used_kb / 1024.0
             free_mb  = (total_kb / 1024.0) - used_mb
@@ -173,7 +517,8 @@ check_info["mem.win"] = {
     'default_levels_variable': 'memory_win_default_levels',
 }
 
-#   +----------------------------------------------------------------------+
+#.
+#   .--mem.vmalloc---------------------------------------------------------.
 #   |                                                   _ _                |
 #   |    _ __ ___   ___ _ __ ___ __   ___ __ ___   __ _| | | ___   ___     |
 #   |   | '_ ` _ \ / _ \ '_ ` _ \\ \ / / '_ ` _ \ / _` | | |/ _ \ / __|    |
@@ -183,20 +528,24 @@ check_info["mem.win"] = {
 #   +----------------------------------------------------------------------+
 #   | This very specific check checks the usage and fragmentation of the   |
 #   | address space 'vmalloc' that can be problematic on 32-Bit systems.   |
-#   +----------------------------------------------------------------------+
+#   | It is superseeded by the new check mem.linux and will be removed     |
+#   | soon.                                                                |
+#   '----------------------------------------------------------------------'
 
 # warn, crit, warn_chunk, crit_chunk. Integers are in MB, floats are in percent
 mem_vmalloc_default_levels = ( 80.0, 90.0, 64, 32 )
 
 def inventory_mem_vmalloc(info):
     meminfo = parse_proc_meminfo(info)
+    if is_linux_meminfo(meminfo):
+        return # handled by new Linux memory check
+
     if "VmallocTotal" in meminfo:
         # Do not checks this on 64 Bit systems. They have almost
         # infinitive vmalloc
         vmalloc = meminfo["VmallocTotal"] / 1024.4
         if vmalloc < 4096:
             return [ (None, "mem_vmalloc_default_levels") ]
-    return []
 
 def check_mem_vmalloc(item, params, info):
     meminfo = parse_proc_meminfo(info)

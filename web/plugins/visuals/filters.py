@@ -28,21 +28,33 @@
 
 # Filters for substring search, displaying a text input field
 class FilterText(Filter):
-    def __init__(self, name, title, info, column, htmlvar, op):
-        Filter.__init__(self, name, title, info, [htmlvar], [column])
+    def __init__(self, name, title, info, column, htmlvar, op, negateable=False):
+        htmlvars = [htmlvar]
+        if negateable:
+            htmlvars.append("neg_" + htmlvar)
+        Filter.__init__(self, name, title, info, htmlvars, [column])
         self.op = op
         self.column = column
+        self.negateable = negateable
 
     def display(self):
         htmlvar = self.htmlvars[0]
         current_value = html.var(htmlvar, "")
-        html.text_input(htmlvar, current_value)
+        html.text_input(htmlvar, current_value, self.negateable and 'neg' or '')
+        if self.negateable:
+            html.write(" <nobr>")
+            html.checkbox(self.htmlvars[1], label=_("negate"))
+            html.write("</nobr>")
 
     def filter(self, infoname):
         htmlvar = self.htmlvars[0]
         current_value = html.var(htmlvar)
+        if self.negateable and html.get_checkbox(self.htmlvars[1]):
+            negate = "!"
+        else:
+            negate = ""
         if current_value:
-            return "Filter: %s %s %s\n" % (self.column, self.op, current_value)
+            return "Filter: %s %s%s %s\n" % (self.column, negate, self.op, lqencode(current_value))
         else:
             return ""
 
@@ -53,19 +65,6 @@ class FilterText(Filter):
         return html.var(self.htmlvars[0])
 
 
-
-class FilterHostgroupVisibility(Filter):
-    def __init__(self, name, title):
-        Filter.__init__(self, name, title, "hostgroup_summary", [ "hostgroupshowempty" ], [])
-
-    def display(self):
-        html.checkbox("hostgroupshowempty", False, label="Show empty groups")
-
-    def filter(self, infoname):
-        if html.var("hostgroupshowempty"):
-            return ""
-        else:
-            return "Filter: num_hosts > 0\n"
 
 #                               filter          title              info       column           htmlvar
 declare_filter(100, FilterText("hostregex",    _("Hostname"),        "host",    "host_name",      "host_regex",    "~~"),
@@ -85,18 +84,6 @@ declare_filter(201, FilterText("service", _("Service (exact match)"),           
 
 declare_filter(202, FilterText("service_display_name", _("Service alternative display name"),   "service", "service_display_name",   "service_display_name", "~~"),
                           _("Alternative display name of the service, regex match"))
-
-declare_filter(101, FilterText("hostgroupnameregex",    _("Hostgroup"),        "hostgroup",    "hostgroup_name",      "hostgroup_regex",    "~~"),
-                               _("Search field allowing regular expressions and partial matches on the names of hostgroups"))
-
-declare_filter(102, FilterHostgroupVisibility("hostgroupvisibility", _("Empty Hostgroup Visibilitiy")),
-                               _("You can enable this checkbox to show empty hostgroups"))
-
-declare_filter(101, FilterText("servicegroupnameregex", _("Servicegroup"),   "servicegroup", "servicegroup_name",   "servicegroup_regex", "~~"),
-                          _("Search field allowing regular expression and partial matches"))
-
-declare_filter(101, FilterText("servicegroupname", _("Servicegroup (enforced)"),   "servicegroup", "servicegroup_name",   "servicegroup_name", "="),
-                          _("Exact match, used for linking"))
 
 declare_filter(202, FilterText("output",  _("Status detail"), "service", "service_plugin_output", "service_output", "~~"))
 
@@ -119,9 +106,9 @@ class FilterIPAddress(Filter):
         address = html.var("host_address")
         if address:
             if html.var("host_address_prefix") == "yes":
-                return "Filter: host_address ~ ^%s\n" % address
+                return "Filter: host_address ~ ^%s\n" % lqencode(address)
             else:
-                return "Filter: host_address = %s\n" % address
+                return "Filter: host_address = %s\n" % lqencode(address)
         else:
             return ""
 
@@ -175,24 +162,28 @@ class FilterMultigroup(Filter):
             return "" # No group selected = all groups selected, filter unused
         filters = ""
         for group in current:
-            filters += "Filter: %s_groups >= %s\n" % (self.what, group)
+            filters += "Filter: %s_groups >= %s\n" % (self.what, lqencode(group))
         filters += "Or: %d\n" % len(current)
         return filters
 
 
+# Selection of a host/service(-contact) group as an attribute of a host or service
 class FilterGroupCombo(Filter):
     def __init__(self, what, title, enforce):
         self.enforce = enforce
         self.prefix = not self.enforce and "opt" or ""
-        htmlvars = [ self.prefix + what + "group" ]
+        htmlvars = [ self.prefix + what + "_group" ]
         if not enforce:
             htmlvars.append("neg_" + htmlvars[0])
         Filter.__init__(self, self.prefix + what + "group", # name,     e.g. "hostgroup"
                 title,                                      # title,    e.g. "Hostgroup"
                 what.split("_")[0],                         # info,     e.g. "host"
-                htmlvars,                                   # htmlvars, e.g. "hostgroup"
+                htmlvars,                                   # htmlvars, e.g. "host_group"
                 [ what + "group_name" ])                    # rows needed to fetch for link information
         self.what = what
+
+    def double_height(self):
+        return True
 
     def display(self):
         choices = all_groups(self.what.split("_")[-1])
@@ -228,7 +219,7 @@ class FilterGroupCombo(Filter):
             negate = "!"
         else:
             negate = ""
-        return "Filter: %s %s>= %s\n" % (col, negate, current_value)
+        return "Filter: %s %s>= %s\n" % (col, negate, lqencode(current_value))
 
     def variable_settings(self, row):
         varname = self.htmlvars[0]
@@ -248,26 +239,76 @@ class FilterGroupCombo(Filter):
         if current_value:
             table = self.what.replace("host_contact", "contact").replace("service_contact", "contact")
             alias = html.live.query_value("GET %sgroups\nCache: reload\nColumns: alias\nFilter: name = %s\n" %
-                (table, current_value), current_value)
+                (table, lqencode(current_value)), current_value)
             return alias
 
-
-declare_filter(104, FilterGroupCombo("host",            _("Hostgroup"),            False), _("Optional selection of host group"))
-declare_filter(104, FilterGroupCombo("host",            _("Hostgroup (enforced)"), True),  _("Dropdown list, selection of host group is <b>enforced</b>"))
-declare_filter(105, FilterMultigroup("host",            _("Several Hostgroups")), _("Selection of multiple host groups"))
-declare_filter(204, FilterGroupCombo("service",         _("Servicegroup"),         False), _("Optional selection of service group"))
+declare_filter(104, FilterGroupCombo("host",            _("Host is in Group"),     False), _("Optional selection of host group"))
+declare_filter(105, FilterMultigroup("host",            _("Several Host Groups")), _("Selection of multiple host groups"))
+declare_filter(204, FilterGroupCombo("service",         _("Service is in Group"),     False), _("Optional selection of service group"))
 declare_filter(205, FilterGroupCombo("service",         _("Servicegroup (enforced)"), True),  _("Dropdown list, selection of service group is <b>enforced</b>"))
-declare_filter(205, FilterMultigroup("service",         _("Several Servicegroups")), _("Selection of multiple service groups"))
+declare_filter(205, FilterMultigroup("service",         _("Several Service Groups")), _("Selection of multiple service groups"))
 
-declare_filter(106, FilterGroupCombo("host_contact",    _("Host Contactgroup"),    False), _("Optional selection of host contact group"))
-declare_filter(206, FilterGroupCombo("service_contact", _("Service Contactgroup"), False), _("Optional selection of service contact group"))
+declare_filter(106, FilterGroupCombo("host_contact",    _("Host Contact Group"),    False), _("Optional selection of host contact group"))
+declare_filter(206, FilterGroupCombo("service_contact", _("Service Contact Group"), False), _("Optional selection of service contact group"))
 
 declare_filter(107, FilterText("host_ctc", _("Host Contact"), "host", "host_contacts", "host_ctc", ">="))
 declare_filter(207, FilterText("service_ctc", _("Service Contact"), "service", "service_contacts", "service_ctc", ">="))
 
 
-# Livestatus still misses "contact_groups" column.
-# declare_filter(FilterGroupCombo("contact"))
+# Selection of one group to be used in the info "hostgroup" or "servicegroup".
+class FilterGroupSelection(Filter):
+    def __init__(self, infoname, title):
+        Filter.__init__(self, name=infoname, title=title, info=infoname, htmlvars=[infoname], link_columns=[])
+        self.what = infoname
+
+    def display(self):
+        choices = all_groups(self.what[:-5]) # chop off "group", leaves host or service
+        html.sorted_select(self.htmlvars[0], choices)
+
+    def current_value(self):
+        return html.var(self.htmlvars[0])
+
+    def filter(self, infoname):
+        current_value = self.current_value()
+        if not current_value:
+            raise MKGeneralException(_("This view needs a host/service group to be specified. "
+                                       "We are missing the URL variable <tt>%s</tt>." %
+                                        self.htmlvars[0]))
+
+        return "Filter: %s_name = %s\n" % (self.what, lqencode(current_value))
+
+    def variable_settings(self, row):
+        group_name = row[self.what + "_name"]
+        return [ (self.htmlvars[0], group_name) ]
+
+# Filter for selecting one specific host group in the hostgroup views
+declare_filter(104, FilterGroupSelection("hostgroup",    _("Host Group")),       _("Selection of the host group"))
+declare_filter(104, FilterGroupSelection("servicegroup", _("Service Group")), _("Selection of the service group"))
+
+class FilterHostgroupVisibility(Filter):
+    def __init__(self, name, title):
+        Filter.__init__(self, name=name, title=title, info="hostgroup", htmlvars=[ "hostgroupshowempty" ], link_columns=[])
+
+    def display(self):
+        html.checkbox("hostgroupshowempty", False, label="Show empty groups")
+
+    def filter(self, infoname):
+        if html.var("hostgroupshowempty"):
+            return ""
+        else:
+            return "Filter: num_hosts > 0\n"
+
+declare_filter(101, FilterText("hostgroupnameregex",    _("Hostgroup (Regex)"),        "hostgroup",    "hostgroup_name",      "hostgroup_regex",    "~~"),
+                               _("Search field allowing regular expressions and partial matches on the names of hostgroups"))
+
+declare_filter(102, FilterHostgroupVisibility("hostgroupvisibility", _("Empty Hostgroup Visibilitiy")),
+                               _("You can enable this checkbox to show empty hostgroups"))
+
+declare_filter(101, FilterText("servicegroupnameregex", _("Servicegroup (Regex)"),   "servicegroup", "servicegroup_name",   "servicegroup_regex", "~~"),
+                          _("Search field allowing regular expression and partial matches"))
+
+declare_filter(101, FilterText("servicegroupname", _("Servicegroup (enforced)"),   "servicegroup", "servicegroup_name",   "servicegroup_name", "="),
+                          _("Exact match, used for linking"))
 
 class FilterQueryDropdown(Filter):
     def __init__(self, name, title, info, query, filterline):
@@ -282,7 +323,7 @@ class FilterQueryDropdown(Filter):
     def filter(self, infoname):
         current = html.var(self.name)
         if current:
-            return self.filterline % current
+            return self.filterline % lqencode(current)
         else:
             return ""
 
@@ -457,7 +498,7 @@ declare_filter(232, FilterNagiosExpression("service", "service_staleness",      
 
 class FilterSite(Filter):
     def __init__(self, name, enforce):
-        Filter.__init__(self, name, _("Site") + (enforce and _( " (enforced)") or ""), None, ["site"], [])
+        Filter.__init__(self, name, _("Site") + (enforce and _( " (enforced)") or ""), 'host', ["site"], [])
         self.enforce = enforce
 
     def visible(self):
@@ -634,6 +675,7 @@ declare_filter(250, FilterTime("host", "host_last_state_change", _("Last host st
 declare_filter(251, FilterTime("host", "host_last_check", _("Last host check"), "host_last_check"))
 declare_filter(253, FilterTime("comment", "comment_entry_time", _("Time of comment"), "comment_entry_time" ))
 declare_filter(253, FilterTime("downtime", "downtime_entry_time", _("Time of Downtime"), "downtime_entry_time" ))
+declare_filter(254, FilterText("downtime_comment", _("Downtime comment"), "downtime", "downtime_comment", "downtime_comment", "~"))
 #    _
 #   | |    ___   __ _
 #   | |   / _ \ / _` |
@@ -706,10 +748,13 @@ class FilterLogClass(Filter):
             return "".join(headers) + ("Or: %d\n" % len(headers))
 
 declare_filter(255, FilterLogClass())
+#                               filter          title              info       column           htmlvar
 declare_filter(202, FilterText("log_plugin_output",  _("Log: plugin output"), "log", "log_plugin_output", "log_plugin_output", "~~"))
-declare_filter(203, FilterText("log_type", _("Log: message type"), "log", "log_type", "log_type", "~~"))
-declare_filter(260, FilterText("log_contact_name",   _("Log: contact name"),  "log", "log_contact_name",  "log_contact_name",  "="),
+declare_filter(203, FilterText("log_type",           _("Log: message type"), "log", "log_type", "log_type", "~~"))
+declare_filter(204, FilterText("log_state_type",     _("Log: state type"), "log", "log_state_type", "log_state_type", "~~"))
+declare_filter(260, FilterText("log_contact_name",   _("Log: contact name (exact match)"),  "log", "log_contact_name",  "log_contact_name",  "="),
                                                                                                   _("Exact match, used for linking"))
+declare_filter(261, FilterText("log_contact_name_regex",   _("Log: contact name"),  "log", "log_contact_name",  "log_contact_name_regex",  "~~", negateable=True))
 
 class FilterLogState(Filter):
     def __init__(self):
@@ -835,7 +880,7 @@ class FilterHostTags(Filter):
         html.write('</table>')
 
     def hosttag_filter(self, negate, tag):
-        return  'Filter: host_custom_variables %s TAGS (^|[ ])%s($|[ ])' % (negate and '!~' or '~', tag)
+        return  'Filter: host_custom_variables %s TAGS (^|[ ])%s($|[ ])' % (negate and '!~' or '~', lqencode(tag))
 
     def filter(self, infoname):
         headers = []
@@ -909,15 +954,15 @@ class FilterStarred(FilterTristate):
             for star in stars:
                 if ";" in star:
                     continue
-                filters += "Filter: host_name %s %s\n" % (eq, star)
+                filters += "Filter: host_name %s %s\n" % (eq, lqencode(star))
                 count += 1
         else:
             for star in stars:
                 if ";" not in star:
                     continue
                 h, s = star.split(";")
-                filters += "Filter: host_name %s %s\n" % (eq, h)
-                filters += "Filter: service_description %s %s\n" % (eq, s)
+                filters += "Filter: host_name %s %s\n" % (eq, lqencode(h))
+                filters += "Filter: service_description %s %s\n" % (eq, lqencode(s))
                 filters += "%s: 2\n" % aand
                 count += 1
 

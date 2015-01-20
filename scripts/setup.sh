@@ -24,7 +24,7 @@
 # Boston, MA 02110-1301 USA.
 
 
-VERSION=1.2.5i7
+VERSION=1.2.7i1
 NAME=check_mk
 LANG=
 LC_ALL=
@@ -955,7 +955,18 @@ and change the path there. Restart Apache afterwards."
        Allow from all
        Satisfy any
   </Location>
+
+  # Trigger cron jobs. This is done without authentication
+  <Location "${url_prefix}check_mk/run_cron.py">
+      Order deny,allow
+      Deny from all
+      Allow from 127.0.0.1
+      Satisfy any
+  </Location>
+
 </IfModule>
+
+
 
 <IfModule !mod_python.c>
   Alias ${url_prefix}check_mk $web_dir/htdocs

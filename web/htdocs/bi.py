@@ -1181,14 +1181,14 @@ def get_status_info(required_hosts):
 # This variant of the function is configured not with a list of
 # hosts but with a livestatus filter header and a list of columns
 # that need to be fetched in any case
-def get_status_info_filtered(filter_header, only_sites, limit, add_columns, fetch_parents = True):
+def get_status_info_filtered(filter_header, only_sites, limit, add_columns, fetch_parents = True, bygroup=False):
     columns = [ "name", "state", "hard_state", "plugin_output", "scheduled_downtime_depth",
                 "acknowledged", "services_with_fullstate", "parents" ] + add_columns
 
     html.live.set_only_sites(only_sites)
     html.live.set_prepend_site(True)
 
-    query = "GET hosts\n"
+    query = "GET hosts%s\n" % (bygroup and "bygroup" or "")
     query += "Columns: " + (" ".join(columns)) + "\n"
     query += filter_header
 
@@ -1217,10 +1217,10 @@ def get_status_info_filtered(filter_header, only_sites, limit, add_columns, fetc
     if fetch_parents:
         parent_filter = []
         for row in data:
-            parent_filter += [ 'Filter: name = %s\n' % p for p in row[5] ]
+            parent_filter += [ 'Filter: name = %s\n' % p for p in row[7] ]
         parent_filter_txt = ''.join(parent_filter)
         parent_filter_txt += 'Or: %d\n' % len(parent_filter)
-        for row in  get_status_info_filtered(filter_header, only_sites, limit, add_columns, False):
+        for row in  get_status_info_filtered(filter_header, only_sites, limit, add_columns, False, bygroup):
             if row['name'] not in hostnames:
                 rows.append(row)
 
@@ -1405,7 +1405,7 @@ def ajax_set_assumption():
     save_assumptions()
 
 def ajax_save_treestate():
-    path_id = html.var("path")
+    path_id = html.var_utf8("path")
     current_ex_level, path = path_id.split(":", 1)
     current_ex_level = int(current_ex_level)
 
@@ -1419,9 +1419,9 @@ def ajax_save_treestate():
     save_ex_level(current_ex_level)
 
 def ajax_render_tree():
-    aggr_group = html.var("group")
+    aggr_group = html.var_utf8("group")
     reqhosts = [ tuple(sitehost.split('#')) for sitehost in html.var("reqhosts").split(',') ]
-    aggr_title = html.var("title")
+    aggr_title = html.var_utf8("title")
     omit_root = not not html.var("omit_root")
     boxes = not not html.var("boxes")
     only_problems = not not html.var("only_problems")
@@ -1788,12 +1788,15 @@ def table(columns, add_headers, only_sites, limit, filters):
 
 # Table of all host aggregations, i.e. aggregations using data from exactly one host
 def hostname_table(columns, add_headers, only_sites, limit, filters):
-    return singlehost_table(columns, add_headers, only_sites, limit, filters, True)
+    return singlehost_table(columns, add_headers, only_sites, limit, filters, True, bygroup=False)
+
+def hostname_by_group_table(columns, add_headers, only_sites, limit, filters):
+    return singlehost_table(columns, add_headers, only_sites, limit, filters, True, bygroup=True)
 
 def host_table(columns, add_headers, only_sites, limit, filters):
-    return singlehost_table(columns, add_headers, only_sites, limit, filters, False)
+    return singlehost_table(columns, add_headers, only_sites, limit, filters, False, bygroup=False)
 
-def singlehost_table(columns, add_headers, only_sites, limit, filters, joinbyname):
+def singlehost_table(columns, add_headers, only_sites, limit, filters, joinbyname, bygroup):
     log("--------------------------------------------------------------------\n")
     log("* Starting to compute singlehost_table (joinbyname = %s)\n" % joinbyname)
     load_assumptions() # user specific, always loaded
@@ -1810,7 +1813,7 @@ def singlehost_table(columns, add_headers, only_sites, limit, filters, joinbynam
 
     log("* Getting status information about hosts...\n")
     host_columns = filter(lambda c: c.startswith("host_"), columns)
-    hostrows = get_status_info_filtered(filter_code, only_sites, limit, host_columns, config.bi_precompile_on_demand)
+    hostrows = get_status_info_filtered(filter_code, only_sites, limit, host_columns, config.bi_precompile_on_demand, bygroup)
     log("* Got %d host rows\n" % len(hostrows))
 
     # if limit:

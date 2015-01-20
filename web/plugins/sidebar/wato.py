@@ -59,6 +59,7 @@ def render_wato(mini):
     num_pending = wato.num_pending_changes()
     if num_pending:
         footnotelinks([(_("%d changes") % num_pending, "wato.py?mode=changelog")])
+        html.write('<div class=clear></div>')
 
 
 sidebar_snapins["admin"] = {
@@ -78,6 +79,7 @@ sidebar_snapins["admin_mini"] = {
     "styles": """
 #snapin_admin_mini {
     padding-top: 6px;
+    clear: right;
 }
 #snapin_admin_mini img {
     margin-right: 3.9px;
@@ -90,7 +92,10 @@ sidebar_snapins["admin_mini"] = {
 }
 
 #snapin_admin_mini div.footnotelink {
-    margin-top: -14px;
+    float: right;
+}
+#snapin_admin_mini div.clear {
+    clear: right;
 }
 """,
 }
@@ -207,6 +212,15 @@ def render_tree_folder(f, js_func):
 
 
 def render_wato_foldertree():
+    is_slave_site = not wato.is_distributed() and os.path.exists(defaults.check_mk_configdir + "/distributed_wato.mk")
+    if not is_slave_site:
+        if not config.wato_enabled:
+            html.write(_("WATO is disabled."))
+            return False
+        elif not config.may("wato.use"):
+            html.write(_("You are not allowed to use Check_MK's web configuration GUI."))
+            return False
+
     user_folders = compute_foldertree()
 
     #

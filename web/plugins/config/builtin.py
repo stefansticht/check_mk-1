@@ -192,7 +192,7 @@ auth_by_http_header = False
 table_row_limit = 100
 
 # Add an icon pointing to the WATO rule to each service
-multisite_draw_ruleicon = False
+multisite_draw_ruleicon = True
 
 # Default downtime configuration
 adhoc_downtime = {}
@@ -237,8 +237,12 @@ default_user_profile  = {
     'roles': ['user'],
 }
 lock_on_logon_failures = False
+password_policy        = {}
 
 user_localizations = default_user_localizations
 
 # Write WATO folder permissions to auth.php file
 export_folder_permissions = False
+
+# Name of the hostgroup to filter the network topology view by default
+topology_default_filter_group = None

@@ -54,8 +54,8 @@ notification_logdir     = var_dir + "/notify"
 notification_spooldir   = var_dir + "/notify/spool"
 notification_bulkdir    = var_dir + "/notify/bulk"
 notification_core_log   = var_dir + "/notify/nagios.log" # Fallback for history if no CMC running
-notification_log        = notification_logdir + "/notify.log"
-notification_logging    = 0
+notification_log        = log_dir + "/notify.log"
+notification_logging    = 1
 notification_backlog    = 10 # keep the last 10 notification contexts for reference
 
 # Settings for new rule based notifications
@@ -133,7 +133,9 @@ Available commands:
 # keepalive mode (used by CMC), sends out one notifications from
 # several possible sources or sends out all ripe bulk notifications.
 def do_notify(args):
-    global notify_mode
+    global notify_mode, notification_logging
+    if notification_logging == 0:
+        notification_logging = 1 # transform deprecated value 0 to 1
     try:
         if not os.path.exists(notification_logdir):
             os.makedirs(notification_logdir)
@@ -219,7 +221,7 @@ def notify_notify(raw_context, analyse=False):
     try:
         complete_raw_context(raw_context)
     except Exception, e:
-        notify_log("Mist: %s" % e)
+        notify_log("Error on completing raw context: %s" % e)
 
     if notification_logging >= 2:
         notify_log("Computed variables:\n"
@@ -698,7 +700,7 @@ def rbn_match_servicegroups(rule, context):
 
 def rbn_match_contactgroups(rule, context):
     required_groups = rule.get("match_contactgroups")
-    if context["WHAT"] != "SERVICE":
+    if context["WHAT"] == "SERVICE":
         cgn = context.get("SERVICECONTACTGROUPNAMES")
     else:
         cgn = context.get("HOSTCONTACTGROUPNAMES")
@@ -1230,9 +1232,6 @@ def notify_via_email(plugin_context):
     else:
         notify_log("No UTF-8 encoding found in your locale -a! Please provide C.UTF-8 encoding.")
 
-    if notification_logging >= 2:
-        file(var_dir + "/notify/body.log", "w").write(body.encode("utf-8"))
-
     # Important: we must not output anything on stdout or stderr. Data of stdout
     # goes back into the socket to the CMC in keepalive mode and garbles the
     # handshake signal.
@@ -1443,7 +1442,7 @@ def do_bulk_notify(contact, plugin, params, plugin_context, bulk):
     # 2. plugin
     # 3. time horizon (interval) in seconds
     # 4. max bulked notifications
-    # 5. elements specified in bulk["groupby"]
+    # 5. elements specified in bulk["groupby"] and bulk["groupby_custom"]
     # We first create a bulk path constructed as a tuple of strings.
     # Later we convert that to a unique directory name.
     # Note: if you have separate bulk rules with exactly the same
@@ -1468,6 +1467,13 @@ def do_bulk_notify(contact, plugin, params, plugin_context, bulk):
         state = plugin_context.get(what + "STATE", "")
         bulk_path += ("state", state)
 
+    # User might have specified _FOO instead of FOO
+    bulkby_custom = bulk.get("groupby_custom", [])
+    for macroname in bulkby_custom:
+        macroname = macroname.lstrip("_").upper()
+        value = plugin_context.get(what + "_" + macroname, "")
+        bulk_path += (macroname.lower(), value)
+
     notify_log("    --> storing for bulk notification %s" % "|".join(bulk_path))
     bulk_dirname = create_bulk_dirname(bulk_path)
     uuid = fresh_uuid()
@@ -1487,6 +1493,19 @@ def find_wato_folder(context):
 def create_bulk_dirname(bulk_path):
     dirname = notification_bulkdir + "/" + bulk_path[0] + "/" + bulk_path[1] + "/"
     dirname += ",".join([b.replace("/", "\\") for b in bulk_path[2:]])
+
+    # Remove non-Ascii-characters by special %02x-syntax
+    try:
+        str(dirname)
+    except:
+        new_dirname = ""
+        for char in dirname:
+            if ord(char) <= 0 or ord(char) > 127:
+                new_dirname += "%%%04x" % ord(char)
+            else:
+                new_dirname += char
+        dirname = new_dirname
+
     if not os.path.exists(dirname):
         os.makedirs(dirname)
         notify_log("        - created bulk directory %s" % dirname)
@@ -1713,8 +1732,11 @@ def complete_raw_context(raw_context):
             # Here We do not know. The transition might be OK -> WARN -> CRIT and
             # the initial OK is completely lost. We use the artificial state "?"
             # here, which matches all states and makes sure that when in doubt a
-            # notification is being sent out.
-            prev_state = "?"
+            # notification is being sent out. But when the new state is UP, then
+            # we know that the previous state was a hard state (otherwise there
+            # would not have been any notification)
+            if raw_context["HOSTSTATE"] != "UP":
+                prev_state = "?"
             notify_log("Previous host hard state not known. Allowing all states.")
         raw_context["PREVIOUSHOSTHARDSTATE"] = prev_state
 
@@ -1725,7 +1747,8 @@ def complete_raw_context(raw_context):
             prev_state = "OK"
         elif "SERVICEATTEMPT" not in raw_context or \
             ("SERVICEATTEMPT" in raw_context and raw_context["SERVICEATTEMPT"] != "1"):
-            prev_state = "?"
+            if raw_context["SERVICESTATE"] != "OK":
+                prev_state = "?"
             notify_log("Previous service hard state not known. Allowing all states.")
         raw_context["PREVIOUSSERVICEHARDSTATE"] = prev_state
 
@@ -1733,6 +1756,10 @@ def complete_raw_context(raw_context):
     for key, value in raw_context.items():
         if key.endswith("STATE"):
             raw_context[key[:-5] + "SHORTSTATE"] = value[:4]
+
+    if raw_context["WHAT"] == "SERVICE":
+        raw_context['SERVICEFORURL'] = urllib.quote(raw_context['SERVICEDESC'])
+    raw_context['HOSTFORURL'] = urllib.quote(raw_context['HOSTNAME'])
 
     convert_context_to_unicode(raw_context)
 

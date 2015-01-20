@@ -27,7 +27,7 @@
 # Configuration for using alias instead of UUID
 inventory_multipath_rules = []
 
-# Output from multipath -l has the following format:
+# Output from multipath -l has the following possible formats:
 
 # orabase.lun50 (360a9800043346937686f456f59386741) dm-15 NETAPP,LUN
 # [size=25G][features=1 queue_if_no_path][hwhandler=0]
@@ -130,6 +130,18 @@ inventory_multipath_rules = []
 # \_ round-robin 0 [prio=-1][enabled]
 #  \_ 4:0:0:11 sdt  65:48  [active][undef]
 
+# This one here is from RedHat 6. Very creative...
+# 1IET     00010001 dm-4 IET,VIRTUAL-DISK
+# size=200G features='0' hwhandler='0' wp=rw
+# |-+- policy='round-robin 0' prio=0 status=active
+# | `- 23:0:0:1   sdk  8:160   active undef running
+# |-+- policy='round-robin 0' prio=0 status=enabled
+# | `- 21:0:0:1   sdj  8:144   active undef running
+# |-+- policy='round-robin 0' prio=0 status=enabled
+# | `- 22:0:0:1   sdg  8:96    active undef running
+# `-+- policy='round-robin 0' prio=0 status=enabled
+#   `- 20:0:0:1   sdi  8:128   active undef running
+
 # And a completely new situation:
 # <<<multipath>>>
 # Nov 05 17:17:03 | DM multipath kernel driver not loaded
@@ -139,26 +151,25 @@ inventory_multipath_rules = []
 # Nov 05 17:17:03 | You can run /sbin/mpathconf to create or modify /etc/multipath.conf
 # Nov 05 17:17:03 | DM multipath kernel driver not loaded
 
-def parse_multipath_output(info, only_uuid = None):
-    # only_uuid --> look only for data of this uuid or alias
-
+def parse_multipath(info):
     # New reported header lines need to be placed here
     # the matches need to be put in a list of tupples
     # while the structure of the tupple is:
     # 0: matching regex
     # 1: matched regex-group id of UUID
     # 2: matched regex-group id of alias (optional)
+    # 3: matched regex-group id of dm-device (optional)
     reg_headers = [
-        (get_regex(r"^[0-9a-z]{33}$"),                       0, None), # 1. (should be included in 3.)
-        (get_regex(r"^([^\s]+)\s\(([0-9A-Za-z_-]+)\)"),      2, 1), # 2.
-        (get_regex(r"^[a-zA-Z0-9_]+$"),                      0, None), # 3.
-        (get_regex(r"^([0-9a-z]{33}|[0-9a-z]{49})\s?dm.+$"), 1, None), # 4.
-        (get_regex(r"^[a-zA-Z0-9_]+dm-.+$"),                 0, None), # 5. Remove this line in 1.2.0
-        (get_regex(r"^([a-zA-Z0-9_-]+)\s?dm-.+$"),           1, None), # 6. and 7.
+        (regex(r"^[0-9a-z]{33}$"),                                0, None, None), # 1. (should be included in 3.)
+        (regex(r"^([^\s]+)\s\(([0-9A-Za-z_-]+)\)"),               2, 1,    None),    # 2.
+        (regex(r"^[a-zA-Z0-9_]+$"),                               0, None, None), # 3.
+        (regex(r"^([0-9a-z]{33}|[0-9a-z]{49})\s?(dm.[0-9]+).*$"), 1, None, 2), # 4.
+        (regex(r"^[a-zA-Z0-9_]+(dm-[0-9]+).*$"),                  0, None, 1), # 5. Remove this line in 1.2.0
+        (regex(r"^([-a-zA-Z0-9_ ]+)\s?(dm-[0-9]+).*$"),           1, None, 2), # 6. and 7.
     ]
 
-    reg_prio = get_regex("[[ ]prio=")
-    reg_lun  = get_regex("[0-9]+:[0-9]+:[0-9]+:[0-9]+")
+    reg_prio = regex("[[ ]prio=")
+    reg_lun  = regex("[0-9]+:[0-9]+:[0-9]+:[0-9]+")
     uuid = None
     alias = None
     groups = {}
@@ -191,27 +202,27 @@ def parse_multipath_output(info, only_uuid = None):
         if line[0][0] not in [ '[', '`', '|', '\\' ] and not line[0].startswith("size="):
             # Try to match header lines
             matchobject = None
-            for regex, uuid_pos, alias_pos in reg_headers:
-                matchobject = regex.search(l)
+            for header_regex, uuid_pos, alias_pos, dm_pos in reg_headers:
+                matchobject = header_regex.search(l)
 
                 if matchobject:
-                    uuid = matchobject.group(uuid_pos)
+                    uuid = matchobject.group(uuid_pos).strip()
 
                     if alias_pos:
                         alias = matchobject.group(alias_pos)
                     else:
                         alias = None
 
+                    if dm_pos:
+                        dm_device = matchobject.group(dm_pos)
+                    else:
+                        dm_device = None
+
                     break
 
             # No data row and no matching header row
             if not matchobject:
                 raise Exception("Invalid line in agent output: " + l)
-
-            # Skip unwanted devices in one device mode
-            if only_uuid and only_uuid not in [ uuid, alias ]:
-                uuid = None # wrong uuid, ignore this one
-                continue
 
             # initialize information about next device
             numpaths = 0
@@ -225,6 +236,7 @@ def parse_multipath_output(info, only_uuid = None):
             group['uuid'] = uuid
             group['state'] = None
             group['numpaths'] = 0
+            group['device'] = dm_device
             groups[uuid] = group
 
             # If the device has an alias, then extract it
@@ -253,11 +265,10 @@ def parse_multipath_output(info, only_uuid = None):
 
 # Get list of UUIDs of all multipath devices
 # Length of UUID is 360a9800043346937686f456f59386741
-def inventory_multipath(info):
+def inventory_multipath(parsed):
     settings = host_extra_conf_merged(g_hostname, inventory_multipath_rules)
 
     inventory = []
-    parsed = parse_multipath_output(info)
     for uuid, info in parsed.items():
         # take current number of paths as target value
         if "alias" in info and settings.get("use_alias"):
@@ -268,14 +279,20 @@ def inventory_multipath(info):
     return inventory
 
 # item is UUID (e.g. '360a9800043346937686f456f59386741') or alias (e.g. 'mpath0')
-def check_multipath(item, target_numpaths, info):
+def check_multipath(item, target_numpaths, parsed):
     if target_numpaths == None:
         target_numpaths = 2 # default case: we need two paths
 
-    parsed = parse_multipath_output(info, item) # we look for one specific uuid/alias
-    if len(parsed) == 0:
-        return (3, "no map with uuid/alias %s" % item)
-    mmap = parsed.values()[0]
+    # Keys in parsed are the UUIDs. First assume that we are
+    # looking for a UUID. Then fall back to aliases
+    if item in parsed:
+        mmap = parsed[item]
+    else:
+        for mmap in parsed.values():
+            if mmap["alias"] == item:
+                break
+        else:
+            return 3, "Multipath device not found in agent output"
 
     # If the item is the alias, then show the UUID in the plugin output.
     # If the item is the UUID, then vice versa.
@@ -307,6 +324,7 @@ def check_multipath(item, target_numpaths, info):
 check_info["multipath"] = {
     'check_function':          check_multipath,
     'inventory_function':      inventory_multipath,
+    'parse_function':          parse_multipath,
     'service_description':     'Multipath %s',
     'group':                   'multipath',
 }

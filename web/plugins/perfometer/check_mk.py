@@ -180,18 +180,37 @@ perfometers["check_mk-ucd_cpu_util"] = perfometer_check_mk_kernel_util
 perfometers["check_mk-lparstat_aix.cpu_util"] = perfometer_check_mk_kernel_util
 
 def perfometer_check_mk_mem_used(row, check_command, perf_data):
-    h = '<table><tr>'
-    ram_total  = float(perf_data[0][6])
-    swap_total = float(perf_data[1][6])
-    virt_total = ram_total + swap_total
+    ram_used = None
 
-    ram_used   = float(perf_data[0][1])
-    swap_used  = float(perf_data[1][1])
+    for entry in perf_data:
+        # Get total and used RAM
+        if entry[0] == "ramused":
+            ram_used   = float(entry[1]) # mem.include
+            ram_total  = float(entry[6]) # mem.include
+        elif entry[0] == "mem_used":
+            ram_used   = float(entry[1]) # mem.linux
+        elif entry[0] == "mem_total":
+            ram_total  = float(entry[1]) # mem.linux
+
+        # Get total and used SWAP
+        elif entry[0] == "swapused":
+            swap_used   = float(entry[1]) # mem.include
+            swap_total  = float(entry[6]) # mem.include
+        elif entry[0] == "swap_used":
+            swap_used   = float(entry[1]) # mem.linux
+        elif entry[0] == "swap_total":
+            swap_total  = float(entry[1]) # mem.linux
+
+    if not ram_used:
+        return
+
+    virt_total = ram_total + swap_total
     virt_used  = ram_used + swap_used
 
-    state = row["service_state"]
     # paint used ram and swap
     ram_color, swap_color = "#80ff40", "#008030"
+
+    h = '<table><tr>'
     h += perfometer_td(100 * ram_used / virt_total, ram_color)
     h += perfometer_td(100 * swap_used / virt_total, swap_color)
 
@@ -206,12 +225,12 @@ def perfometer_check_mk_mem_used(row, check_command, perf_data):
     return "%d%%" % (100 * (virt_used / ram_total)), h
 
 perfometers["check_mk-mem.used"] = perfometer_check_mk_mem_used
+perfometers["check_mk-mem.linux"] = perfometer_check_mk_mem_used
 perfometers["check_mk-aix_memory"] = perfometer_check_mk_mem_used
 perfometers["check_mk-hr_mem"] = perfometer_check_mk_mem_used
 
 def perfometer_check_mk_mem_win(row, check_command, perf_data):
     # only show mem usage, do omit page file
-    state = row["service_state"]
     color = "#5090c0"
     ram_total  = float(perf_data[0][6])
     ram_used   = float(perf_data[0][1])
@@ -318,7 +337,8 @@ perfometers["check_mk-cisco_temp_perf"] = perfometer_temperature
 perfometers["check_mk-cmctc_lcp.temp"] = perfometer_temperature
 perfometers["check_mk-cmctc.temp"] = perfometer_temperature
 perfometers["check_mk-smart.temp"] = perfometer_temperature
-perfometers["check_mk-f5_bigip_temp"] = perfometer_temperature
+perfometers["check_mk-f5_bigip_chassis_temp"] = perfometer_temperature
+perfometers["check_mk-f5_bigip_cpu_temp"] = perfometer_temperature
 perfometers["check_mk-hp_proliant_temp"] = perfometer_temperature
 perfometers["check_mk-akcp_sensor_temp"] = perfometer_temperature
 perfometers["check_mk-akcp_daisy_temp"] = perfometer_temperature
@@ -330,6 +350,7 @@ perfometers["check_mk-apc_inrow_temperature"] = perfometer_temperature
 perfometers["check_mk-hitachi_hnas_temp"] = perfometer_temperature
 perfometers["check_mk-dell_poweredge_temp"] = perfometer_temperature
 perfometers["check_mk-dell_chassis_temp"] = perfometer_temperature
+perfometers["check_mk-dell_om_sensors"] = perfometer_temperature
 perfometers["check_mk-innovaphone_temp"] = perfometer_temperature
 perfometers["check_mk-cmciii.temp"] = perfometer_temperature
 perfometers["check_mk-ibm_svc_enclosurestats.temp"] = perfometer_temperature
@@ -345,6 +366,10 @@ perfometers["check_mk-casa_cpu_temp"] = perfometer_temperature
 perfometers["check_mk-rms200_temp"] = perfometer_temperature
 perfometers["check_mk-juniper_screenos_temp"] = perfometer_temperature
 perfometers["check_mk-lnx_thermal"] = perfometer_temperature
+perfometers["check_mk-climaveneta_temp"] = perfometer_temperature
+perfometers["check_mk-carel_sensors"] = perfometer_temperature
+perfometers["check_mk-netscaler_health.temp"]  = perfometer_temperature
+perfometers["check_mk-kentix_temp"] = perfometer_temperature
 
 def perfometer_temperature_multi(row, check_command, perf_data):
     display_value = -1
@@ -595,6 +620,7 @@ def perfometer_ps_perf(row, check_command, perf_data):
     except:
         return "", ""
 
+perfometers["check_mk-ps"] = perfometer_ps_perf
 perfometers["check_mk-ps.perf"] = perfometer_ps_perf
 
 
@@ -733,7 +759,7 @@ def perfometer_check_mk_printer_supply(row, check_command, perf_data):
     return "<font color=\"%s\">%.0f%%</font>" % (fg_color, left), perfometer_linear(left, color)
 
 perfometers["check_mk-printer_supply"] = perfometer_check_mk_printer_supply
-perfometers["check_mk-printer_supply_ricon"] = perfometer_check_mk_printer_supply
+perfometers["check_mk-printer_supply_ricoh"] = perfometer_check_mk_printer_supply
 
 def perfometer_printer_pages(row, check_command, perf_data):
     color = "#909090"
@@ -938,6 +964,7 @@ perfometers['check_mk-esx_vsphere_hostsystem.mem_usage'] = perfometer_simple_mem
 perfometers['check_mk-brocade_mlx.module_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-innovaphone_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-juniper_screenos_mem'] = perfometer_simple_mem_usage
+perfometers['check_mk-netscaler_mem'] = perfometer_simple_mem_usage
 perfometers['check_mk-arris_cmts_mem'] = perfometer_simple_mem_usage
 perfometers["check_mk-juniper_trpz_mem"] = perfometer_simple_mem_usage
 
@@ -1109,7 +1136,7 @@ perfometers["check_mk-adva_fsp_current"] = perfometer_current
 
 def perfometer_raritan_pdu_inlet(row, check_command, perf_data):
     display_color = "#50f020"
-    cap = perf_data[0][0]
+    cap = perf_data[0][0].split('-')[-1]
     value = float(perf_data[0][1])
     unit = perf_data[0][2]
     display_str = perf_data[0][1] + " " + unit
@@ -1134,6 +1161,7 @@ def perfometer_raritan_pdu_inlet(row, check_command, perf_data):
     return "unimplemented" , perfometer_linear(0, "#ffffff")
 
 perfometers["check_mk-raritan_pdu_inlet"] = perfometer_raritan_pdu_inlet
+perfometers["check_mk-raritan_pdu_inlet_summary"] = perfometer_raritan_pdu_inlet
 
 
 def perfometer_raritan_pdu_outletcount(row, check_command, perf_data):
@@ -1167,6 +1195,7 @@ def perfometer_dbmv(row, check_command, perf_data):
     return "%.1f dBmV" % dbmv, perfometer_logarithmic(dbmv, 50, 2, "#da6")
 
 perfometers["check_mk-docsis_channels_downstream"] = perfometer_dbmv
+perfometers["check_mk-docsis_cm_status"] = perfometer_dbmv
 
 def perfometer_docsis_snr(row, check_command, perf_data):
     dbmv = float(perf_data[0][1])
@@ -1192,3 +1221,18 @@ def perfometer_ups_outphase(row, check_command, perf_data):
     return "%d%%" % load, perfometer_linear(load, "#8050ff")
 
 perfometers["check_mk-ups_socomec_outphase"] = perfometer_ups_outphase
+
+def perfometer_el_inphase(row, check_command, perf_data):
+    for data in perf_data:
+        if data[0] == "power":
+            power = savefloat(data[1])
+    return "%.0f W" % power, perfometer_linear(power, "#8050ff")
+
+perfometers["check_mk-raritan_pdu_inlet"] = perfometer_el_inphase
+perfometers["check_mk-raritan_pdu_inlet_summary"] = perfometer_el_inphase
+
+def perfometer_f5_bigip_vserver(row, check_command, perf_data):
+    connections = int(perf_data[0][1])
+    return str(connections), perfometer_logarithmic(connections, 100, 2, "#46a")
+
+perfometers["check_mk-f5_bigip_vserver"] = perfometer_f5_bigip_vserver

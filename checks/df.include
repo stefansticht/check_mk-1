@@ -203,7 +203,7 @@ def get_filesystem_levels(host, mountpoint, size_gb, params):
             crit_scaled *= -1
         else:
             label = 'levels at'
-        levels["levels_text"] = "(%s %.2f/%.2f %%)" % (label, warn_scaled, crit_scaled)
+        levels["levels_text"] = "(%s %.2f/%.2f%%)" % (label, warn_scaled, crit_scaled)
     else:
         if warn * mega < 0 and crit * mega < 0:
             label = 'levels at free space below'
@@ -306,10 +306,10 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
     perfdata = [(perf_var, str(used_mb) + 'MB', warn_mb, crit_mb, 0, size_mb)]
 
     if size_gb < 10240:
-        infotext = "%.1f %% used (%.2f of %.2f GB), %s" % \
+        infotext = "%.1f%% used (%.2f of %.2f GB), %s" % \
                     (used_perc, used_mb / 1024.0, size_gb, levels["levels_text"])
     else:
-        infotext = "%.1f %% used (%.2f of %.2f TB), %s" % \
+        infotext = "%.1f%% used (%.2f of %.2f TB), %s" % \
                     (used_perc, used_mb / 1024.0 / 1024.0, size_gb / 1024.0, levels["levels_text"])
 
     # Trends. The trends are computed in two steps. In the first step we
@@ -337,15 +337,15 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
             this_time = time.time()
 
             # first compute current rate in MB/s by computing delta since last check
-            timedif, rate = get_counter("df.%s.delta" % mountpoint, this_time, used_mb, True)
+            rate = get_rate("df.%s.delta" % mountpoint, this_time, used_mb, allow_negative=True, onwrap=ZERO)
             if levels.get("trend_perfdata"):
                 # Change in 1.1.13i3: The trend perfdata always outputs
                 # the growth in MB/24h, not any longer in MB/trendrange
                 perfdata.append(("growth", rate * H24))
 
             # average trend, initialize with zero, rate_avg is in MB/s
-            timedif, rate_avg = get_average("df.%s.trend" % mountpoint,
-                                            this_time, rate, range_sec / 60.0, True)
+            rate_avg = get_average("df.%s.trend" % mountpoint,
+                                   this_time, rate, range_sec / 60.0, True)
 
             # rate_avg is growth in MB/s, trend is in MB per trend range hours
             trend = rate_avg * range_sec
@@ -384,7 +384,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                 else:
                     warn_perf, crit_perf = wa, cr
                 if trend >= wa:
-                    problems.append("growing too fast (levels at %.3f %%/%.3f %% per %.1f h)(!" %
+                    problems.append("growing too fast (levels at %.3f%%/%.3f%% per %.1f h)(!" %
                        ( wa_perc, cr_perc, range))
                     status = max(1, status)
                     if trend >= cr:
@@ -484,7 +484,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, inodes_t
                 elif inodes_warn > inodes_avail_perc:
                     status = max(1, status)
                     problems.append("less than %.02f%% inodes available(!)" % inodes_warn)
-        infotext += ", inodes available %dk/%0.2f %%" % (inodes_avail / 1000, inodes_avail_perc)
+        infotext += ", inodes available %dk/%0.2f%%" % (inodes_avail / 1000, inodes_avail_perc)
 
     if problems:
         infotext += " - %s" % ", ".join(problems)

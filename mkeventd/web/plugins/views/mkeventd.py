@@ -307,31 +307,42 @@ if mkeventd_enabled:
     #   |                                                                      |
     #   '----------------------------------------------------------------------'
 
-    def paint_event_host(row):
-        if row["host_name"]:
-            return "", row["host_name"]
-        else:
-            return "", row["event_host"]
-
     multisite_painters["event_id"] = {
         "title"   : _("ID of the event"),
         "short"   : _("ID"),
         "columns" : ["event_id"],
-        "paint"   : lambda row: ("number", row["event_id"]),
+        "paint"   : lambda row: ("number", str(row["event_id"])),
     }
 
     multisite_painters["event_count"] = {
         "title"   : _("Count (number of recent occurrances)"),
         "short"   : _("Cnt."),
         "columns" : ["event_count"],
-        "paint"   : lambda row: ("number", row["event_count"]),
+        "paint"   : lambda row: ("number", str(row["event_count"])),
     }
 
     multisite_painters["event_text"] = {
         "title"   : _("Text/Message of the event"),
         "short"   : _("Message"),
         "columns" : ["event_text"],
-        "paint"   : lambda row: ("", row["event_text"].replace("\x01","<br>")),
+        "paint"   : lambda row: ("", html.attrencode(row["event_text"]).replace("\x01","<br>")),
+    }
+
+    def paint_ec_match_groups(row):
+        groups = row["event_match_groups"]
+        if groups:
+            code = ""
+            for text in groups:
+                code += '<span>%s</span>' % text
+            return "matchgroups", code
+        else:
+            return "", ""
+
+    multisite_painters["event_match_groups"] = {
+        "title"   : _("Match Groups"),
+        "short"   : _("Match"),
+        "columns" : ["event_match_groups"],
+        "paint"   : paint_ec_match_groups,
     }
 
     multisite_painters["event_first"] = {
@@ -361,7 +372,7 @@ if mkeventd_enabled:
         try:
             return "", dict(config.mkeventd_service_levels)[row["event_sl"]]
         except:
-            return "", row["event_sl"]
+            return "", str(row["event_sl"])
 
     multisite_painters["event_sl"] = {
         "title"   : _("Service-Level"),
@@ -370,11 +381,24 @@ if mkeventd_enabled:
         "paint"   : mkeventd_paint_sl,
     }
 
+    def paint_event_host(row):
+        if row["host_name"]:
+            return "", row["host_name"]
+        else:
+            return "", row["event_host"]
+
     multisite_painters["event_host"] = {
-        "title"   : _("Hostname/IP-Address"),
+        "title"   : _("Hostname"),
         "short"   : _("Host"),
         "columns" : ["event_host", "host_name"],
         "paint"   : paint_event_host,
+    }
+
+    multisite_painters["event_ipaddress"] = {
+        "title"   : _("Original IP-Address"),
+        "short"   : _("Orig. IP"),
+        "columns" : ["event_ipaddress"],
+        "paint"   : lambda row: ("", row["event_ipaddress"]),
     }
 
     multisite_painters["event_owner"] = {
@@ -712,7 +736,8 @@ if mkeventd_enabled:
     declare_1to1_sorter("event_last",        cmp_simple_number)
     declare_1to1_sorter("event_comment",     cmp_simple_string)
     declare_1to1_sorter("event_sl",          cmp_simple_number)
-    declare_1to1_sorter("event_host",        cmp_simple_string)
+    declare_1to1_sorter("event_host",        cmp_num_split)
+    declare_1to1_sorter("event_ipaddress",   cmp_num_split)
     declare_1to1_sorter("event_contact",     cmp_simple_string)
     declare_1to1_sorter("event_application", cmp_simple_string)
     declare_1to1_sorter("event_pid",         cmp_simple_number)
@@ -789,6 +814,7 @@ if mkeventd_enabled:
             'event_contact',
             'event_comment',
             'event_host_regex',
+            'event_ipaddress',
             'event_count',
             'event_phase',
             'event_state',
@@ -843,7 +869,7 @@ if mkeventd_enabled:
             'event_sl_max',
         ],
         'hide_filters': [
-            'site',
+            'siteopt',
             'host',
         ],
     })
@@ -882,7 +908,7 @@ if mkeventd_enabled:
             'event_sl_max',
         ],
         'hide_filters': [
-            'site',
+            'siteopt',
             'event_host',
         ],
     })
@@ -902,10 +928,12 @@ if mkeventd_enabled:
         'painters': [
             ('event_state', None, ''),
             ('event_host', None, ''),
+            ('event_ipaddress', None, ''),
             ('host_address', 'hoststatus', ''),
             ('host_contacts', None, ''),
             ('host_icons', None, ''),
             ('event_text', None, ''),
+            ('event_match_groups', None, ''),
             ('event_comment', None, ''),
             ('event_owner', None, ''),
             ('event_first', None, ''),
@@ -956,6 +984,7 @@ if mkeventd_enabled:
             'event_contact',
             'event_comment',
             'event_host_regex',
+            'event_ipaddress',
             'event_count',
             'event_phase',
             'event_state',
@@ -968,6 +997,7 @@ if mkeventd_enabled:
             'history_time',
             'history_who',
             'history_what',
+            'host_state_type',
         ],
         'hard_filtervars': [
            ('history_time_from', '1'),
@@ -1000,7 +1030,9 @@ if mkeventd_enabled:
             ('history_addinfo', None, ''),
             ('event_state', None, ''),
             ('event_host', 'ec_history_of_host', ''),
+            ('event_ipaddress', None, ''),
             ('event_text', None, ''),
+            ('event_match_groups', None, ''),
             ('event_comment', None, ''),
             ('event_owner', None, ''),
             ('event_first', None, ''),
@@ -1095,6 +1127,7 @@ if mkeventd_enabled:
             ('history_who', None, ''),
             ('event_state', None, ''),
             ('event_host', None, ''),
+            ('event_ipaddress', None, ''),
             ('event_application', None, ''),
             ('event_text', None, ''),
             ('event_sl', None, ''),
@@ -1126,6 +1159,7 @@ if mkeventd_enabled:
           'num_columns': 1,
           'painters': [('event_state', None, None),
                        ('event_host', None, None),
+                       ('event_ipaddress', None, ''),
                        ('host_address', 'hoststatus', None),
                        ('host_contacts', None, None),
                        ('host_icons', None, None),

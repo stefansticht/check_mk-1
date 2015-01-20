@@ -70,6 +70,36 @@ check_icmp_params = [
        )),
 ]
 
+register_rule(group,
+    "active_checks:ssh",
+    Dictionary(
+        title = _("Check SSH service"),
+        help = _("This rulset allow you to configure a SSH check for a host"),
+        elements = [
+            ("port",
+               Integer(
+                    title = _("Port number to be used"),
+                    default_value = 22),
+            ),
+            ("timeout",
+                Integer(
+                    title = _("Connection timeout"),
+                    help = _("Seconds before connection times out"),
+                    default_value = 10),
+            ),
+            ("remote_version",
+               TextAscii(
+                    title = _("Remote Version"),
+                    help = _("Warn if string doesn't match expected server version (ex: OpenSSH_3.9p1)"),
+               )),
+            ("remote_protocol",
+                TextAscii(
+                    title = _("Remote Protocol"),
+                    help = _("Warn if protocol doesn't match expected protocol version (ex: 2.0)"),
+                )),
+        ]
+    ),
+    match="all")
 
 register_rule(group,
     "active_checks:icmp",
@@ -256,10 +286,11 @@ register_rule(group,
                DropdownChoice(
                    title = _("Type of Database"),
                    choices = [
-                      ( "mysql",    _("MySQL") ),
-                      ( "postgres", _("PostgreSQL") ),
-                      ( "mssql", _("MSSQL") ),
-                      ( "oracle",   _("Oracle") ),
+                      ("mysql",    _("MySQL")),
+                      ("postgres", _("PostgreSQL")),
+                      ("mssql",    _("MSSQL")),
+                      ("oracle",   _("Oracle")),
+                      ("db2",      _("DB2")),
                    ],
                    default_value = "postgres",
                ),
@@ -935,14 +966,18 @@ register_rule(group,
                          help = _("You can specify a hostname or IP address different from the IP address "
                                   "of the host as configured in your host properties."))),
                    ( "port",
-                     TextAscii(
-                         title = _("TCP Port to connect to"),
-                         help = _("The TCP Port the SMTP server is listening on. "
-                                  "The default is <tt>25</tt>."),
-                         size = 5,
-                         allow_empty = False,
-                         default_value = "25",
-                     )
+                     Transform(
+                         Integer(
+                             title = _("TCP Port to connect to"),
+                             help = _("The TCP Port the SMTP server is listening on. "
+                                      "The default is <tt>25</tt>."),
+                             size = 5,
+                             minvalue = 1,
+                             maxvalue = 65535,
+                             default_value = "25",
+                         ),
+                         forth = int,
+                      )
                    ),
                    ( "ip_version",
                      Alternative(
@@ -1387,7 +1422,7 @@ register_rule(group,
                  "log file of your monitoring core."),
         elements = [
             TextUnicode(
-                title = _("Name"),
+                title = _("Service Description"),
                 help = _("The name that will be used in the service description"),
                 allow_empty = False
             ),
@@ -1468,6 +1503,431 @@ register_rule(group,
             ),
         ],
         optional_keys = False,
+    ),
+    match = 'all'
+)
+
+register_rule(group,
+    'active_checks:mail_loop',
+    Dictionary(
+        title = _('Check Email Delivery'),
+        help = _('This active check sends out special E-Mails to a defined mail address using '
+                 'the SMTP protocol and then tries to receive these mails back by querying the '
+                 'inbox of a IMAP or POP3 mailbox. With this check you can verify that your whole '
+                 'mail delivery progress is working.'),
+        optional_keys = ['smtp_server', 'smtp_tls', 'smtp_port', 'smtp_auth', 'connect_timeout', 'delete_messages', 'duration'],
+        elements = [
+            ('item', TextUnicode(
+                title = _('Name'),
+                help = _('The service description will be <b>Mail Loop</b> plus this name'),
+                allow_empty = False
+            )),
+            ('smtp_server', TextAscii(
+                title = _('SMTP Server'),
+                allow_empty = False,
+                help = _('You can specify a hostname or IP address different from the IP address '
+                         'of the host this check will be assigned to.')
+            )),
+            ('smtp_tls', FixedValue(True,
+                title = _('Use TLS over SMTP'),
+                totext = _('Encrypt SMTP communication using TLS'),
+            )),
+            ('smtp_port', Integer(
+                title = _('SMTP TCP Port to connect to'),
+                help = _('The TCP Port the SMTP server is listening on. Defaulting to <tt>25</tt>.'),
+                allow_empty = False,
+                default_value = 25,
+            )),
+            ('smtp_auth', Tuple(
+                title = _('SMTP Authentication'),
+                elements = [
+                    TextAscii(
+                        title = _('Username'),
+                        allow_empty = False,
+                        size = 24
+                    ),
+                    Password(
+                        title = _('Password'),
+                        allow_empty = False,
+                        size = 12
+                    ),
+                ],
+            )),
+            ('fetch', CascadingDropdown(
+                title = _('Mail Receiving'),
+                choices = [
+                    ('IMAP', _('IMAP'), Dictionary(
+                        optional_keys = ['server'],
+                        elements = [
+                            ('server', TextAscii(
+                                title = _('IMAP Server'),
+                                allow_empty = False,
+                                help = _('You can specify a hostname or IP address different from the IP address '
+                                         'of the host this check will be assigned to.')
+                            )),
+                            ('ssl', CascadingDropdown(
+                                title = _('SSL Encryption'),
+                                default_value = (False, 143),
+                                choices = [
+                                    (False, _('Use no encryption'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 143,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP Port 143 is used.'),
+                                    )),
+                                    (True, _('Encrypt IMAP communication using SSL'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 993,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP/SSL Port 993 is used.'),
+                                    )),
+                                ],
+                            )),
+                            ('auth', Tuple(
+                                title = _('Authentication'),
+                                elements = [
+                                    TextAscii(
+                                        title = _('Username'),
+                                        allow_empty = False,
+                                        size = 24
+                                    ),
+                                    Password(
+                                        title = _('Password'),
+                                        allow_empty = False,
+                                        size = 12
+                                    ),
+                                ],
+                            )),
+                        ],
+                    )),
+                    ('POP3', _('POP3'), Dictionary(
+                        optional_keys = ['server'],
+                        elements = [
+                            ('server', TextAscii(
+                                title = _('POP3 Server'),
+                                allow_empty = False,
+                                help = _('You can specify a hostname or IP address different from the IP address '
+                                         'of the host this check will be assigned to.')
+                            )),
+                            ('ssl', CascadingDropdown(
+                                title = _('SSL Encryption'),
+                                default_value = (False, 110),
+                                choices = [
+                                    (True, _('Use no encryption'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 110,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP Port 110 is used.'),
+                                    )),
+                                    (False, _('Encrypt POP3 communication using SSL'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 995,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard POP3/SSL Port 995 is used.'),
+                                    )),
+                                ],
+                            )),
+                            ('auth', Tuple(
+                                title = _('Authentication'),
+                                elements = [
+                                    TextAscii(
+                                        title = _('Username'),
+                                        allow_empty = False,
+                                        size = 24
+                                    ),
+                                    Password(
+                                        title = _('Password'),
+                                        allow_empty = False,
+                                        size = 12
+                                    ),
+                                ],
+                            )),
+                        ],
+                    )),
+                ]
+            )),
+            ('mail_from', EmailAddress(
+                title = _('Sender email address'),
+            )),
+            ('mail_to', EmailAddress(
+                title = _('Destination email address'),
+            )),
+            ('connect_timeout', Integer(
+                title = _('Connect Timeout'),
+                minvalue = 1,
+                default_value = 10,
+                unit = _('sec'),
+            )),
+            ("duration", Tuple(
+                title = _("Loop duration"),
+                elements = [
+                    Age(title = _("Warning if above or equal")),
+                    Age(title = _("Critical if above or equal")),
+                ])
+            ),
+            ('delete_messages', FixedValue(True,
+                title = _('Delete processed messages'),
+                totext = _('Delete all processed message belonging to this check'),
+                help = _('Delete all messages identified as being related to this '
+                         'check. This is disabled by default, which will make '
+                         'your mailbox grow when you not clean it up on your own.'),
+            )),
+        ]
+    ),
+    match = 'all'
+)
+
+register_rule(group,
+    'active_checks:mail',
+    Dictionary(
+        title = _('Check Email'),
+        help = _('The basic function of this check is to log in into an IMAP or POP3 mailbox to '
+                 'monitor whether or not the login is possible. A extended feature is, that the '
+                 'check can fetch all (or just some) from the mailbox and forward them as events '
+                 'to the Event Console.'),
+        required_keys = [ 'service_description', 'fetch' ],
+        elements = [
+            ('service_description',
+              TextUnicode(
+                  title = _('Service description'),
+                  help = _('Please make sure that this is unique per host '
+                           'and does not collide with other services.'),
+                  allow_empty = False,
+                  default_value = "Email")
+            ),
+            ('fetch', CascadingDropdown(
+                title = _('Mail Receiving'),
+                choices = [
+                    ('IMAP', _('IMAP'), Dictionary(
+                        optional_keys = ['server'],
+                        elements = [
+                            ('server', TextAscii(
+                                title = _('IMAP Server'),
+                                allow_empty = False,
+                                help = _('You can specify a hostname or IP address different from the IP address '
+                                         'of the host this check will be assigned to.')
+                            )),
+                            ('ssl', CascadingDropdown(
+                                title = _('SSL Encryption'),
+                                default_value = (False, 143),
+                                choices = [
+                                    (False, _('Use no encryption'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 143,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP Port 143 is used.'),
+                                    )),
+                                    (True, _('Encrypt IMAP communication using SSL'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 993,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP/SSL Port 993 is used.'),
+                                    )),
+                                ],
+                            )),
+                            ('auth', Tuple(
+                                title = _('Authentication'),
+                                elements = [
+                                    TextAscii(
+                                        title = _('Username'),
+                                        allow_empty = False,
+                                        size = 24
+                                    ),
+                                    Password(
+                                        title = _('Password'),
+                                        allow_empty = False,
+                                        size = 12
+                                    ),
+                                ],
+                            )),
+                        ],
+                    )),
+                    ('POP3', _('POP3'), Dictionary(
+                        optional_keys = ['server'],
+                        elements = [
+                            ('server', TextAscii(
+                                title = _('POP3 Server'),
+                                allow_empty = False,
+                                help = _('You can specify a hostname or IP address different from the IP address '
+                                         'of the host this check will be assigned to.')
+                            )),
+                            ('ssl', CascadingDropdown(
+                                title = _('SSL Encryption'),
+                                default_value = (False, 110),
+                                choices = [
+                                    (True, _('Use no encryption'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 110,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard IMAP Port 110 is used.'),
+                                    )),
+                                    (False, _('Encrypt POP3 communication using SSL'),
+                                        Optional(Integer(
+                                            allow_empty = False,
+                                            default_value = 995,
+                                        ),
+                                        title = _('TCP Port'),
+                                        help = _('By default the standard POP3/SSL Port 995 is used.'),
+                                    )),
+                                ],
+                            )),
+                            ('auth', Tuple(
+                                title = _('Authentication'),
+                                elements = [
+                                    TextAscii(
+                                        title = _('Username'),
+                                        allow_empty = False,
+                                        size = 24
+                                    ),
+                                    Password(
+                                        title = _('Password'),
+                                        allow_empty = False,
+                                        size = 12
+                                    ),
+                                ],
+                            )),
+                        ],
+                    )),
+                ]
+            )),
+            ('connect_timeout', Integer(
+                title = _('Connect Timeout'),
+                minvalue = 1,
+                default_value = 10,
+                unit = _('sec'),
+            )),
+            ('forward', Dictionary(
+                title = _("Forward mails as events to Event Console"),
+                elements = [
+                    ('method', Alternative(
+                        title = _("Forwarding Method"),
+                        elements = [
+                            Alternative(
+                                title = _("Send events to local event console"),
+                                elements = [
+                                    FixedValue(
+                                        "",
+                                        totext = _("Directly forward to event console"),
+                                        title = _("Send events to local event console in same OMD site"),
+                                    ),
+                                    TextAscii(
+                                        title = _("Send events to local event console into unix socket"),
+                                        allow_empty = False,
+                                    ),
+
+                                    FixedValue(
+                                        "spool:",
+                                        totext = _("Spool to event console"),
+                                        title = _("Spooling: Send events to local event console in same OMD site"),
+                                    ),
+                                    Transform(
+                                        TextAscii(),
+                                        title = _("Spooling: Send events to local event console into given spool directory"),
+                                        allow_empty = False,
+                                        forth = lambda x: x[6:],        # remove prefix
+                                        back  = lambda x: "spool:" + x, # add prefix
+                                    ),
+                                ],
+                                match = lambda x: x and (x == 'spool:' and 2 or x.startswith('spool:') and 3 or 1) or 0
+                            ),
+                            Tuple(
+                                title = _("Send events to remote syslog host"),
+                                elements = [
+                                    DropdownChoice(
+                                        choices = [
+                                            ('udp', _('UDP')),
+                                            ('tcp', _('TCP')),
+                                        ],
+                                        title = _("Protocol"),
+                                    ),
+                                    TextAscii(
+                                        title = _("Address"),
+                                        allow_empty = False,
+                                    ),
+                                    Integer(
+                                        title = _("Port"),
+                                        allow_empty = False,
+                                        default_value = 514,
+                                        minvalue = 1,
+                                        maxvalue = 65535,
+                                        size = 6,
+                                    ),
+                                ]
+                            ),
+                        ],
+                    )),
+                    ('match_subject', RegExpUnicode(
+                        title = _('Only process mails with matching subject'),
+                        help = _('Use this option to not process all messages found in the inbox, '
+                                 'but only the whones whose subject matches the given regular expression. '),
+                    )),
+                    ('facility', DropdownChoice(
+                        title = _("Events: Syslog facility"),
+                        help = _("Use this syslog facility for all created events"),
+                        choices = syslog_facilities,
+                        default_value = 2, # mail
+                    )),
+                    ('application', Alternative(
+                        title = _("Events: Syslog application"),
+                        help = _("Use this syslog application for all created events"),
+                        elements = [
+                            FixedValue(None,
+                                title = _("Use the mail subject"),
+                                totext = _("The mail subject is used as syslog appliaction"),
+                            ),
+                            TextUnicode(
+                                title = _("Specify the application"),
+                                help = _("Use this text as application. You can use macros like <tt>\\1</tt>, <tt>\\2</tt>, ... "
+                                         "here when you configured <i>subject matching</i> in this rule with a regex "
+                                         "which declares match groups (using braces)."),
+                                allow_empty = False,
+                            ),
+                        ]
+                    )),
+                    ('host', TextAscii(
+                        title = _('Events: Hostname'),
+                        help = _('Use this hostname for all created events instead of the name of the mailserver'),
+                    )),
+                    ('body_limit', Integer(
+                        title = _('Limit length of mail body'),
+                        help = _('When forwarding mails from the mailbox to the event console, the '
+                                 'body of the mail is limited to the given number of characters.'),
+                        default_value = 1000,
+                    )),
+                    ('cleanup', Alternative(
+                        title = _("Cleanup messages"),
+                        help = _("The handled messages (see <i>subject matching</i>) can be cleaned up by either "
+                                 "deleting them or moving them to a subfolder. By default nothing is cleaned up."),
+                        elements = [
+                            FixedValue(True,
+                                title = _('Delete messages'),
+                                totext = _('Delete all processed message belonging to this check'),
+                            ),
+                            TextUnicode(
+                                title = _("Move to subfolder"),
+                                help = _("Specify the destination path in the format <tt>Path/To/Folder</tt>, for example"
+                                         "<tt>INBOX/Processed_Mails</tt>."),
+                                allow_empty = False,
+                            ),
+                        ]
+                    )),
+                ]
+            )),
+        ]
     ),
     match = 'all'
 )

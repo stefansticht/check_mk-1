@@ -64,7 +64,7 @@ def check_cisco_wlc(item, params, info):
     if params:
         for ap_name, ap_state in params.get("ap_name", []):
             if item.startswith(ap_name):
-                return ap_state, "Accesspoint 1 not found (State set to %s by rule)" % nagios_state_names[ap_state]
+                return ap_state, "Accesspoint 1 not found (State set to %s by rule)" % core_state_names[ap_state]
 
     return 2, "Accesspoint not found"
 
@@ -76,7 +76,8 @@ check_info["cisco_wlc"] = {
     "node_info"             : True,
     "snmp_scan_function"    : lambda oid: oid('.1.3.6.1.2.1.1.2.0') in [".1.3.6.1.4.1.9.1.1069",
                                                                         ".1.3.6.1.4.1.14179.1.1.4.3",
-                                                                        ".1.3.6.1.4.1.9.1.1645"],
+                                                                        ".1.3.6.1.4.1.9.1.1645",
+                                                                        ".1.3.6.1.4.1.9.1.1279"],
     "snmp_info"             : [( ".1.3.6.1.4.1.14179.2.2.1.1.3", [ OID_END, '' ]),
                                ( ".1.3.6.1.4.1.14179.2.2.1.1.1", [ OID_END, '' ]),
                                ( ".1.3.6.1.4.1.14179.2.2.1.1.6", [ OID_END, '' ]),

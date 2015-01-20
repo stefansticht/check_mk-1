@@ -24,7 +24,37 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import socket, os, sys, time, re, signal, math, tempfile
+#   .--Imports-------------------------------------------------------------.
+#   |               ___                            _                       |
+#   |              |_ _|_ __ ___  _ __   ___  _ __| |_ ___                 |
+#   |               | || '_ ` _ \| '_ \ / _ \| '__| __/ __|                |
+#   |               | || | | | | | |_) | (_) | |  | |_\__ \                |
+#   |              |___|_| |_| |_| .__/ \___/|_|   \__|___/                |
+#   |                            |_|                                       |
+#   +----------------------------------------------------------------------+
+#   |  Import other Python modules                                         |
+#   '----------------------------------------------------------------------'
+
+import sys
+
+# Remove precompiled directory from sys.path. Leaving it in the path
+# makes problems when host names (name of precompiled files) are equal
+# to python module names like "random"
+sys.path.pop(0)
+
+import socket, os, time, re, signal, math, tempfile
+
+# PLANNED CLEANUP:
+# - central functions for outputting verbose information and bailing
+#   out because of errors. Remove all explicit "if opt_debug:...".
+#   Note: these new functions should force a flush() if TTY is not
+#   a terminal (so that error messages arrive the CMC in time)
+# - --debug should *only* influence exception handling
+# - introduce second levels of verbosity, that takes over debug output
+#   from --debug
+# - remove all remaining print commands and use sys.stdout.write instead
+#   or define a new output function
+# - Also create a function bail_out() for printing and error and exiting
 
 # Python 2.3 does not have 'set' in normal namespace.
 # But it can be imported from 'sets'
@@ -33,7 +63,38 @@ try:
 except NameError:
     from sets import Set as set
 
-# colored output, if stdout is a tty
+#.
+#   .--Globals-------------------------------------------------------------.
+#   |                    ____ _       _           _                        |
+#   |                   / ___| | ___ | |__   __ _| |___                    |
+#   |                  | |  _| |/ _ \| '_ \ / _` | / __|                   |
+#   |                  | |_| | | (_) | |_) | (_| | \__ \                   |
+#   |                   \____|_|\___/|_.__/ \__,_|_|___/                   |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |  Definition of global variables and constants.                       |
+#   '----------------------------------------------------------------------'
+
+# Global caches that are valid until the configuration changes. These caches
+# are need to be reset in keepalive mode after a configuration change has
+# been signalled.
+def reset_global_caches():
+    global g_check_table_cache
+    g_check_table_cache = {}    # per-host-checktables
+    global g_singlehost_checks
+    g_singlehost_checks = None  # entries in checks used by just one host
+    global g_multihost_checks
+    g_multihost_checks  = None  # entries in checks used by more than one host
+    global g_nodesof_cache
+    g_nodesof_cache     = {}    # Nodes of cluster hosts
+    global g_dns_cache
+    g_dns_cache         = {}
+    global g_ip_lookup_cache
+    g_ip_lookup_cache   = None  # permanently cached ipaddresses from ipaddresses.cache
+
+reset_global_caches()
+
+# Prepare colored output if stdout is a TTY. No colors in pipe, etc.
 if sys.stdout.isatty():
     tty_red       = '\033[31m'
     tty_green     = '\033[32m'
@@ -75,14 +136,32 @@ else:
     def tty(fg=-1, bg=-1, attr=-1):
         return ''
 
-# global variables used to cache temporary values
-g_dns_cache                  = {}
+# Output text if opt_verbose is set (-v). Adds no linefeed
+def verbose(text):
+    if opt_verbose:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+# Output text if, opt_verbose >= 2 (-vv).
+def vverbose(text):
+    if opt_verbose >= 2:
+        verbose(text)
+
+# Output text to sys.stderr with a linefeed added. Exists
+# afterwards with and exit code of 3, in order to be
+# compatible with monitoring plugin API.
+def bail_out(reason):
+    raise MKBailOut(reason)
+
+# global variables used to cache temporary values that do not need
+# to be reset after a configuration change.
 g_infocache                  = {} # In-memory cache of host info.
 g_agent_already_contacted    = {} # do we have agent data from this host?
 g_counters                   = {} # storing counters of one host
 g_hostname                   = "unknown" # Host currently being checked
 g_aggregated_service_results = {}   # store results for later submission
-compiled_regexes             = {}   # avoid recompiling regexes
+g_inactive_timerperiods      = None # Cache for current state of timeperiods
+g_last_counter_wrap          = None
 nagios_command_pipe          = None # Filedescriptor to open nagios command pipe.
 checkresult_file_fd          = None
 checkresult_file_path        = None
@@ -90,9 +169,13 @@ g_single_oid_hostname        = None
 g_single_oid_cache           = {}
 g_broken_snmp_hosts          = set([])
 g_broken_agent_hosts         = set([])
+g_timeout                    = None
+g_compiled_regexes           = {}
 
 
-# variables set later by getopt
+# variables set later by getopt. These are defined here since in precompiled
+# mode the module check_mk.py is not present and we need all options to be
+# present.
 opt_dont_submit              = False
 opt_showplain                = False
 opt_showperfdata             = False
@@ -102,35 +185,44 @@ opt_no_cache                 = False
 opt_no_snmp_hosts            = False
 opt_use_snmp_walk            = False
 opt_cleanup_autochecks       = False
-fake_dns                     = False
 opt_keepalive                = False
 opt_cmc_relfilename          = "config"
 opt_keepalive_fd             = None
 opt_oids                     = []
 opt_extra_oids               = []
 opt_force                    = False
+fake_dns                     = False
 
-# register SIGINT handler for consistenct CTRL+C handling
-def interrupt_handler(signum, frame):
-    sys.stderr.write('<Interrupted>\n')
-    sys.exit(1)
-signal.signal(signal.SIGINT, interrupt_handler)
+# Names of texts usually output by checks
+core_state_names = ["OK", "WARN", "CRIT", "UNKNOWN"]
 
+# Symbolic representations of states in plugin output
+state_markers = ["", "(!)", "(!!)", "(?)"]
+
+# Constants for counters
+SKIP  = None
+RAISE = False
+ZERO  = 0.0
+
+
+# Exceptions
 class MKGeneralException(Exception):
     def __init__(self, reason):
         self.reason = reason
     def __str__(self):
         return self.reason
 
-class MKCounterWrapped(Exception):
-    def __init__(self, countername, reason):
-        self.name = countername
+class MKBailOut(Exception):
+    def __init__(self, reason):
         self.reason = reason
     def __str__(self):
-        if self.name:
-            return '%s: %s' % (self.name, self.reason)
-        else:
-            return self.reason
+        return self.reason
+
+class MKCounterWrapped(Exception):
+    def __init__(self, reason):
+        self.reason = reason
+    def __str__(self):
+        return self.reason
 
 class MKAgentError(Exception):
     def __init__(self, reason):
@@ -147,98 +239,14 @@ class MKSNMPError(Exception):
 class MKSkipCheck(Exception):
     pass
 
-#   +----------------------------------------------------------------------+
-#   |         _                                    _   _                   |
-#   |        / \   __ _  __ _ _ __ ___  __ _  __ _| |_(_) ___  _ __        |
-#   |       / _ \ / _` |/ _` | '__/ _ \/ _` |/ _` | __| |/ _ \| '_ \       |
-#   |      / ___ \ (_| | (_| | | |  __/ (_| | (_| | |_| | (_) | | | |      |
-#   |     /_/   \_\__, |\__, |_|  \___|\__, |\__,_|\__|_|\___/|_| |_|      |
-#   |             |___/ |___/          |___/                               |
-#   +----------------------------------------------------------------------+
-
-# Compute the name of a summary host
-def summary_hostname(hostname):
-    return aggr_summary_hostname % hostname
-
-# Updates the state of an aggregated service check from the output of
-# one of the underlying service checks. The status of the aggregated
-# service will be updated such that the new status is the maximum
-# (crit > unknown > warn > ok) of all underlying status. Appends the output to
-# the output list and increases the count by 1.
-def store_aggregated_service_result(hostname, detaildesc, aggrdesc, newstatus, newoutput):
-    global g_aggregated_service_results
-    count, status, outputlist = g_aggregated_service_results.get(aggrdesc, (0, 0, []))
-    if status_worse(newstatus, status):
-        status = newstatus
-    if newstatus > 0 or aggregation_output_format == "multiline":
-        outputlist.append( (newstatus, detaildesc, newoutput) )
-    g_aggregated_service_results[aggrdesc] = (count + 1, status, outputlist)
-
-def status_worse(newstatus, status):
-    if status == 2:
-        return False # nothing worse then critical
-    elif newstatus == 2:
-        return True  # nothing worse then critical
-    else:
-        return newstatus > status # 0 < 1 < 3 are in correct order
-
-# Submit the result of all aggregated services of a host
-# to Nagios. Those are stored in g_aggregated_service_results
-def submit_aggregated_results(hostname):
-    if not host_is_aggregated(hostname):
-        return
-
-    if opt_verbose:
-        print "\n%s%sAggregates Services:%s" % (tty_bold, tty_blue, tty_normal)
-    global g_aggregated_service_results
-    items = g_aggregated_service_results.items()
-    items.sort()
-    aggr_hostname = summary_hostname(hostname)
-    for servicedesc, (count, status, outputlist) in items:
-        if aggregation_output_format == "multiline":
-            longoutput = ""
-            statuscounts = [ 0, 0, 0, 0 ]
-            for itemstatus, item, output in outputlist:
-                longoutput += '\\n%s: %s' % (item, output)
-                statuscounts[itemstatus] = statuscounts[itemstatus] + 1
-            summarytexts = [ "%d service%s %s" % (x[0], x[0] != 1 and "s" or "", x[1])
-                           for x in zip(statuscounts, ["OK", "WARN", "CRIT", "UNKNOWN" ]) if x[0] > 0 ]
-            text = ", ".join(summarytexts) + longoutput
-        else:
-            if status == 0:
-                text = "OK - %d services OK" % count
-            else:
-                text = " *** ".join([ item + " " + output for itemstatus, item, output in outputlist ])
-
-        if not opt_dont_submit:
-            submit_to_core(aggr_hostname, servicedesc, status, text)
-
-        if opt_verbose:
-            color = { 0: tty_green, 1: tty_yellow, 2: tty_red, 3: tty_magenta }[status]
-            lines = text.split('\\n')
-            print "%-20s %s%s%-70s%s" % (servicedesc, tty_bold, color, lines[0], tty_normal)
-            if len(lines) > 1:
-                for line in lines[1:]:
-                    print "  %s" % line
-                print "-------------------------------------------------------------------------------"
+# Timeout in keepalive mode.
+class MKCheckTimeout(Exception):
+    pass
 
 
 
-def submit_check_mk_aggregation(hostname, status, output):
-    if not host_is_aggregated(hostname):
-        return
-
-    if not opt_dont_submit:
-        submit_to_core(summary_hostname(hostname), "Check_MK", status, output)
-
-    if opt_verbose:
-        color = { 0: tty_green, 1: tty_yellow, 2: tty_red, 3: tty_magenta }[status]
-        print "%-20s %s%s%-70s%s" % ("Check_MK", tty_bold, color, output, tty_normal)
-
-
-
-
-#   +----------------------------------------------------------------------+
+#.
+#   .--Get data------------------------------------------------------------.
 #   |                 ____      _         _       _                        |
 #   |                / ___| ___| |_    __| | __ _| |_ __ _                 |
 #   |               | |  _ / _ \ __|  / _` |/ _` | __/ _` |                |
@@ -246,6 +254,27 @@ def submit_check_mk_aggregation(hostname, status, output):
 #   |                \____|\___|\__|  \__,_|\__,_|\__\__,_|                |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   |  Functions for getting monitoring data from TCP/SNMP agent.          |
+#   '----------------------------------------------------------------------'
+
+# Collect information needed for one check. In case the check uses
+# extra sections (new feature since 1.2.7i1) only the main section
+# raises exceptions. Error in extra sections are silently ignored
+# and the info is replaced with None.
+def get_info_for_check(hostname, ipaddress, infotype, max_cachefile_age=None, ignore_check_interval=False):
+
+    if infotype in check_info:
+        extra_sections = check_info[infotype]["extra_sections"]
+        if extra_sections:
+            info = [ get_host_info(hostname, ipaddress, infotype, max_cachefile_age, ignore_check_interval) ]
+            for es in extra_sections:
+                try:
+                    info.append(get_host_info(hostname, ipaddress, es, max_cachefile_age, ignore_check_interval=False))
+                except:
+                    info.append(None)
+            return info
+
+    return get_host_info(hostname, ipaddress, infotype, max_cachefile_age, ignore_check_interval)
 
 
 # This is the main function for getting information needed by a
@@ -258,13 +287,13 @@ def submit_check_mk_aggregation(hostname, status, output):
 # If the host is a cluster, the information is fetched from all its
 # nodes an then merged per-check-wise.
 
-# For cluster checks we do not have an ip address from Nagios
-# We need to do DNS-lookups in that case :-(. We could avoid that at
-# least in case of precompiled checks. On the other hand, cluster checks
-# usually use existing cache files, if check_mk is not misconfigured,
+# For cluster checks the monitoring core does not provide the IP addresses
+# of the node.  We need to do DNS-lookups in that case :-(. We could avoid
+# that at least in case of precompiled checks. On the other hand, cluster
+# checks usually use existing cache files, if check_mk is not misconfigured,
 # and thus do no network activity at all...
 
-def get_host_info(hostname, ipaddress, checkname):
+def get_host_info(hostname, ipaddress, checkname, max_cachefile_age=None, ignore_check_interval=False):
     # If the check want's the node info, we add an additional
     # column (as the first column) with the name of the node
     # or None (in case of non-clustered nodes). On problem arises,
@@ -285,7 +314,9 @@ def get_host_info(hostname, ipaddress, checkname):
             # try the other nodes.
             try:
                 ipaddress = lookup_ipaddress(node)
-                new_info = get_realhost_info(node, ipaddress, checkname, cluster_max_cachefile_age)
+                new_info = get_realhost_info(node, ipaddress, checkname,
+                               max_cachefile_age == None and cluster_max_cachefile_age or max_cache_age,
+                               ignore_check_interval)
                 if new_info != None:
                     if add_nodeinfo:
                         new_info = [ [node] + line for line in new_info ]
@@ -307,13 +338,28 @@ def get_host_info(hostname, ipaddress, checkname):
                 raise MKSNMPError(", ".join(exception_texts))
             else:
                 raise MKAgentError(", ".join(exception_texts))
-        return info
+
     else:
-        info = get_realhost_info(hostname, ipaddress, checkname, check_max_cachefile_age)
+        info = get_realhost_info(hostname, ipaddress, checkname,
+                      max_cachefile_age == None and check_max_cachefile_age or max_cachefile_age,
+                      ignore_check_interval)
         if info != None and add_nodeinfo:
-            return [ [ None ] + line for line in info ]
-        else:
-            return info
+            if clusters_of(hostname):
+                add_host = hostname
+            else:
+                add_host = None
+            info = [ [add_host] + line for line in info ]
+
+    # Now some check types define a parse function. In that case the
+    # info is automatically being parsed by that function - on the fly.
+    if checkname in check_info: # e.g. not the case for cpu (check is cpu.loads)
+        parse_function = check_info[checkname]["parse_function"]
+        if parse_function:
+            parsed = parse_function(info)
+            return parsed
+
+    return info
+
 
 # Gets info from a real host (not a cluster). There are three possible
 # ways: TCP, SNMP and external command.  This function raises
@@ -372,12 +418,12 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
         # a separate snmp table. The overall result is then the list
         # of these results.
         if type(oid_info) == list:
-            table = [ get_snmp_table(hostname, ipaddress, entry) for entry in oid_info ]
+            table = [ get_snmp_table(hostname, ipaddress, check_type, entry) for entry in oid_info ]
             # if at least one query fails, we discard the hole table
             if None in table:
                 table = None
         else:
-            table = get_snmp_table(hostname, ipaddress, oid_info)
+            table = get_snmp_table(hostname, ipaddress, check_type, oid_info)
         store_cached_checkinfo(hostname, check_type, table)
         # only write cache file in non interactive mode. Otherwise it would
         # prevent the regular checking from getting status updates during
@@ -390,7 +436,7 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
     # the data comes piggyback!
 
     # No SNMP check. Then we must contact the check_mk_agent. Have we already
-    # tries to get data from the agent? If yes we must not do that again! Even if
+    # tried to get data from the agent? If yes we must not do that again! Even if
     # no cache file is present.
     if g_agent_already_contacted.has_key(hostname):
         raise MKAgentError("")
@@ -457,27 +503,32 @@ def store_persisted_info(hostname, persisted):
         if not os.path.exists(dir):
             os.makedirs(dir)
         file(dir + hostname, "w").write("%r\n" % persisted)
-        if opt_debug:
-            sys.stdout.write("Persisted sections %s.\n" % ", ".join(persisted.keys()))
+        verbose("Persisted sections %s.\n" % ", ".join(persisted.keys()))
 
 def add_persisted_info(hostname, info):
+    file_path = var_dir + "/persisted/" + hostname
     try:
-        path = var_dir + "/persisted/" + hostname
-        persisted = eval(file(path).read())
+        persisted = eval(file(file_path).read())
     except:
         return
 
     now = time.time()
+    modified = False
     for section, (persisted_until, persisted_section) in persisted.items():
-        if now < persisted_until:
+        if now < persisted_until or opt_force:
             if section not in info:
                 info[section] = persisted_section
-                if opt_debug:
-                    sys.stdout.write("Added persisted section %s.\n" % section)
+                verbose("Added persisted section %s.\n" % section)
         else:
-            if opt_debug:
-                sys.stdout.write("Persisted section %s is outdated by %d seconds.\n" % (
-                        section, persisted_until - now))
+            verbose("Persisted section %s is outdated by %d seconds. Deleting it.\n" % (
+                    section, now - persisted_until))
+            del persisted[section]
+            modified = True
+
+    if not persisted:
+        os.remove(file_path)
+    elif modified:
+        store_persisted_info(hostname, persisted)
 
 
 def get_piggyback_info(hostname):
@@ -492,15 +543,12 @@ def get_piggyback_info(hostname):
                 file_path = dir + "/" + sourcehost
 
                 if cachefile_age(file_path) > piggyback_max_cachefile_age:
-                    if opt_debug:
-                        sys.stderr.write("Piggyback file %s is outdated by %d seconds. Deleting it.\n" %
-                            (file_path, cachefile_age(file_path) - piggyback_max_cachefile_age))
+                    verbose("Piggyback file %s is outdated by %d seconds. Deleting it.\n" %
+                        (file_path, cachefile_age(file_path) - piggyback_max_cachefile_age))
                     os.remove(file_path)
                     continue
 
-                if opt_debug:
-                    sys.stderr.write("Using piggyback information from host %s.\n" %
-                      sourcehost)
+                verbose("Using piggyback information from host %s.\n" % sourcehost)
 
                 output += file(file_path).read()
     return output
@@ -509,8 +557,7 @@ def get_piggyback_info(hostname):
 def store_piggyback_info(sourcehost, piggybacked):
     piggyback_path = tmp_dir + "/piggyback/"
     for backedhost, lines in piggybacked.items():
-        if opt_debug:
-            sys.stderr.write("Storing piggyback data for %s.\n" % backedhost)
+        verbose("Storing piggyback data for %s.\n" % backedhost)
         dir = piggyback_path + backedhost
         if not os.path.exists(dir):
             os.makedirs(dir)
@@ -534,8 +581,7 @@ def remove_piggyback_info_from(sourcehost, keep=[]):
         if backedhost not in ['.', '..'] and backedhost not in keep:
             path = piggyback_path + backedhost + "/" + sourcehost
             if os.path.exists(path):
-                if opt_debug:
-                    sys.stderr.write("Removing stale piggyback file %s\n" % path)
+                verbose("Removing stale piggyback file %s\n" % path)
                 os.remove(path)
                 removed += 1
 
@@ -565,7 +611,7 @@ def translate_piggyback_host(sourcehost, backedhost):
         regex, subst = translation.get("regex")
         if not regex.endswith('$'):
             regex += '$'
-        rcomp = get_regex(regex)
+        rcomp = regex(regex)
         mo = rcomp.match(backedhost)
         if mo:
             backedhost = subst
@@ -593,8 +639,7 @@ def read_cache_file(relpath, max_cache_age):
             result = f.read(10000000)
             f.close()
             if len(result) > 0:
-                if opt_debug:
-                    sys.stderr.write("Using data from cachefile %s.\n" % cachefile)
+                verbose("Using data from cachefile %s.\n" % cachefile)
                 return result
         elif opt_debug:
             sys.stderr.write("Skipping cache file %s: Too old "
@@ -618,7 +663,7 @@ def write_cache_file(relpath, output):
             raise MKGeneralException("Cannot create directory %s: %s" % (tcp_cache_dir, e))
     try:
         # write retrieved information to cache file - if we are not root.
-        # We assume that Nagios never runs as root.
+        # We assume that the core never runs as root.
         if not i_am_root():
             f = open(cachefile, "w+")
             f.write(output)
@@ -690,9 +735,7 @@ def get_agent_info_tcp(hostname, ipaddress, port = None):
             s.settimeout(tcp_connect_timeout)
         except:
             pass # some old Python versions lack settimeout(). Better ignore than fail
-        if opt_debug:
-            sys.stderr.write("Connecting via TCP to %s:%d.\n" % (
-                    ipaddress, port))
+        vverbose("Connecting via TCP to %s:%d.\n" % (ipaddress, port))
         s.connect((ipaddress, port))
         try:
             s.setblocking(1)
@@ -822,7 +865,8 @@ def cachefile_age(filename):
                                  % (filename, e))
         return -1
 
-#   +----------------------------------------------------------------------+
+#.
+#   .--Counters------------------------------------------------------------.
 #   |                ____                  _                               |
 #   |               / ___|___  _   _ _ __ | |_ ___ _ __ ___                |
 #   |              | |   / _ \| | | | '_ \| __/ _ \ '__/ __|               |
@@ -830,7 +874,15 @@ def cachefile_age(filename):
 #   |               \____\___/ \__,_|_| |_|\__\___|_|  |___/               |
 #   |                                                                      |
 #   +----------------------------------------------------------------------+
+#   |  Computation of rates from counters, used by checks.                 |
+#   '----------------------------------------------------------------------'
 
+def reset_wrapped_counters():
+    global g_last_counter_wrap
+    g_last_counter_wrap = None
+
+def last_counter_wrap():
+    return g_last_counter_wrap
 
 # Variable                 time_t    value
 # netctr.eth.tx_collisions 112354335 818
@@ -849,6 +901,25 @@ def load_counters(hostname):
         except:
             g_counters = {}
 
+def save_counters(hostname):
+    if not opt_dont_submit and not i_am_root(): # never writer counters as root
+        global g_counters
+        filename = counters_directory + "/" + hostname
+        try:
+            if not os.path.exists(counters_directory):
+                os.makedirs(counters_directory)
+            file(filename, "w").write("%r\n" % g_counters)
+        except Exception, e:
+            raise MKGeneralException("User %s cannot write to %s: %s" % (username(), filename, e))
+
+# determine the name of the current user. This involves
+# a lookup of /etc/passwd. Because this function is needed
+# only in general error cases, the pwd module is imported
+# here - not globally
+def username():
+    import pwd
+    return pwd.getpwuid(os.getuid())[0]
+
 
 # Deletes counters from g_counters matching the given pattern and are older_than x seconds
 def clear_counters(pattern, older_than):
@@ -864,6 +935,23 @@ def clear_counters(pattern, older_than):
     for name in counters_to_delete:
         del g_counters[name]
 
+
+def get_rate(countername, this_time, this_val, allow_negative=False, onwrap=SKIP):
+    try:
+        timedif, rate = get_counter(countername, this_time, this_val, allow_negative)
+        return rate
+    except MKCounterWrapped, e:
+        if onwrap == RAISE:
+            raise
+        elif onwrap == SKIP:
+            global g_last_counter_wrap
+            g_last_counter_wrap = e
+            return 0.0
+        else:
+            return onwrap
+
+
+# Legacy. Do not use this function in checks directly any more!
 def get_counter(countername, this_time, this_val, allow_negative=False):
     global g_counters
 
@@ -874,7 +962,7 @@ def get_counter(countername, this_time, this_val, allow_negative=False):
         # Do not suppress this check on check_mk -nv
         if opt_dont_submit:
             return 1.0, 0.0
-        raise MKCounterWrapped(countername, 'Counter initialization')
+        raise MKCounterWrapped('Counter initialization')
 
     last_time, last_val = g_counters.get(countername)
     timedif = this_time - last_time
@@ -884,7 +972,7 @@ def get_counter(countername, this_time, this_val, allow_negative=False):
         # Do not suppress this check on check_mk -nv
         if opt_dont_submit:
             return 1.0, 0.0
-        raise MKCounterWrapped(countername, 'No time difference')
+        raise MKCounterWrapped('No time difference')
 
     # update counter for next time
     g_counters[countername] = (this_time, this_val)
@@ -898,7 +986,7 @@ def get_counter(countername, this_time, this_val, allow_negative=False):
         # Do not suppress this check on check_mk -nv
         if opt_dont_submit:
             return 1.0, 0.0
-        raise MKCounterWrapped(countername, 'Value overflow')
+        raise MKCounterWrapped('Value overflow')
 
     per_sec = float(valuedif) / timedif
     return timedif, per_sec
@@ -916,7 +1004,7 @@ def get_average(itemname, this_time, this_val, backlog_minutes, initialize_zero 
         if initialize_zero:
             this_val = 0
         g_counters[itemname] = (this_time, this_val)
-        return 1.0, this_val # avoid time diff of 0.0 -> avoid division by zero
+        return this_val # avoid time diff of 0.0 -> avoid division by zero
 
     # Get previous value and time difference
     last_time, last_val = g_counters.get(itemname)
@@ -942,37 +1030,22 @@ def get_average(itemname, this_time, this_val, backlog_minutes, initialize_zero 
 
     new_val = last_val * weight + this_val * (1 - weight)
 
-    # print "Alt: %.5f, Jetzt: %.5f, Timedif: %.1f, Gewicht: %.5f, Neu: %.5f" % \
-    #     (last_val, this_val, timedif, weight, new_val)
-
     g_counters[itemname] = (this_time, new_val)
-    return timedif, new_val
+    return new_val
 
 
-def save_counters(hostname):
-    if not opt_dont_submit and not i_am_root(): # never writer counters as root
-        global g_counters
-        filename = counters_directory + "/" + hostname
-        try:
-            if not os.path.exists(counters_directory):
-                os.makedirs(counters_directory)
-            file(filename, "w").write("%r\n" % g_counters)
-        except Exception, e:
-            raise MKGeneralException("User %s cannot write to %s: %s" % (username(), filename, e))
 
-# writelines([ "%s %d %d\n" % (i[0], i[1][0], i[1][1]) for i in g_counters.items() ])
-
-
-#   +----------------------------------------------------------------------+
+#.
+#   .--Checking------------------------------------------------------------.
 #   |               ____ _               _    _                            |
 #   |              / ___| |__   ___  ___| | _(_)_ __   __ _                |
 #   |             | |   | '_ \ / _ \/ __| |/ / | '_ \ / _` |               |
 #   |             | |___| | | |  __/ (__|   <| | | | | (_| |               |
 #   |              \____|_| |_|\___|\___|_|\_\_|_| |_|\__, |               |
 #   |                                                 |___/                |
-#   |                                                                      |
-#   | All about performing the actual checks and send the data to Nagios.  |
 #   +----------------------------------------------------------------------+
+#   |  Performing the actual checks                                        |
+#   '----------------------------------------------------------------------'
 
 # This is the main check function - the central entry point to all and
 # everything
@@ -1064,14 +1137,245 @@ def do_check(hostname, ipaddress, only_check_types = None):
     if opt_keepalive:
         global total_check_output
         total_check_output += output
-        return status
     else:
-        sys.stdout.write(nagios_state_names[status] + " - " + output)
-        sys.exit(status)
+        sys.stdout.write(core_state_names[status] + " - " + output)
 
-# Keepalive-mode for running cmk as a check helper.
-class MKCheckTimeout(Exception):
-    pass
+    return status
+
+
+def is_expected_agent_version(agent_version, expected_version):
+    try:
+        if agent_version in [ '(unknown)', None, 'None' ]:
+            return False
+
+        if type(expected_version) == str and expected_version != agent_version:
+            return False
+
+        elif type(expected_version) == tuple and expected_version[0] == 'at_least':
+            is_daily_build = len(agent_version) == 10 or '-' in agent_version
+
+            spec = expected_version[1]
+            if is_daily_build and 'daily_build' in spec:
+                expected = int(spec['daily_build'].replace('.', ''))
+                if len(agent_version) == 10: # master build
+                    agent = int(agent_version.replace('.', ''))
+
+                else: # branch build (e.g. 1.2.4-2014.06.01)
+                    agent = int(agent_version.split('-')[1].replace('.', ''))
+
+                if agent < expected:
+                    return False
+
+            elif 'release' in spec:
+                if parse_check_mk_version(agent_version) < parse_check_mk_version(spec['release']):
+                    return False
+
+        return True
+    except Exception, e:
+        raise MKGeneralException("Unable to check agent version (Agent: %s Expected: %s, Error: %s)" %
+                (agent_version, expected_version, e))
+
+
+# Parses versions of Check_MK and converts them into comparable integers.
+# This does not handle daily build numbers, only official release numbers.
+# 1.2.4p1   -> 01020450001
+# 1.2.4     -> 01020450000
+# 1.2.4b1   -> 01020420100
+# 1.2.3i1p1 -> 01020310101
+# 1.2.3i1   -> 01020310100
+def parse_check_mk_version(v):
+    def extract_number(s):
+        number = ''
+        for i, c in enumerate(s):
+            try:
+                int(c)
+                number += c
+            except ValueError:
+                s = s[i:]
+                return number and int(number) or 0, s
+        return number and int(number) or 0, ''
+
+    major, minor, rest = v.split('.')
+    sub, rest = extract_number(rest)
+
+    if not rest:
+        val = 50000
+    elif rest[0] == 'p':
+        num, rest = extract_number(rest[1:])
+        val = 50000 + num
+    elif rest[0] == 'i':
+        num, rest = extract_number(rest[1:])
+        val = 10000 + num*100
+
+        if rest and rest[0] == 'p':
+            num, rest = extract_number(rest[1:])
+            val += num
+    elif rest[0] == 'b':
+        num, rest = extract_number(rest[1:])
+        val = 20000 + num*100
+
+    return int('%02d%02d%02d%05d' % (int(major), int(minor), sub, val))
+
+
+# Loops over all checks for a host, gets the data, calls the check
+# function that examines that data and sends the result to the Core.
+def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
+    global g_aggregated_service_results
+    g_aggregated_service_results = {}
+    global g_hostname
+    g_hostname = hostname
+    num_success = 0
+    error_sections = set([])
+    check_table = get_sorted_check_table(hostname, remove_duplicates=True, world=opt_keepalive and "active" or "config")
+    problems = []
+
+    parsed_infos = {} # temporary cache for section infos, maybe parsed
+
+    for checkname, item, params, description, aggrinfo in check_table:
+        if only_check_types != None and checkname not in only_check_types:
+            continue
+
+        # Make service description globally available
+        global g_service_description
+        g_service_description = description
+
+        # Skip checks that are not in their check period
+        period = check_period_of(hostname, description)
+        if period and not check_timeperiod(period):
+            if opt_debug:
+                sys.stderr.write("Skipping service %s: currently not in timeperiod %s.\n" %
+                        (description, period))
+            continue
+        elif period and opt_debug:
+            sys.stderr.write("Service %s: timeperiod %s is currently active.\n" %
+                    (description, period))
+
+        # In case of a precompiled check table aggrinfo is the aggrated
+        # service name. In the non-precompiled version there are the dependencies
+        if type(aggrinfo) == str:
+            aggrname = aggrinfo
+        else:
+            aggrname = aggregated_service_name(hostname, description)
+
+        infotype = checkname.split('.')[0]
+        try:
+            if infotype in parsed_infos:
+                info = parsed_infos[infotype]
+            else:
+                info = get_info_for_check(hostname, ipaddress, infotype)
+                parsed_infos[infotype] = info
+
+        except MKSkipCheck, e:
+            continue
+
+        except MKSNMPError, e:
+            if str(e):
+                problems.append(str(e))
+            error_sections.add(infotype)
+            g_broken_snmp_hosts.add(hostname)
+            continue
+
+        except MKAgentError, e:
+            if str(e):
+                problems.append(str(e))
+            error_sections.add(infotype)
+            g_broken_agent_hosts.add(hostname)
+            continue
+
+        if info or info == []:
+            num_success += 1
+            try:
+                check_function = check_info[checkname]["check_function"]
+            except:
+                check_function = check_unimplemented
+
+            try:
+                dont_submit = False
+
+                # Call the actual check function
+                reset_wrapped_counters()
+                result = convert_check_result(check_function(item, params, info), check_uses_snmp(checkname))
+                if last_counter_wrap():
+                    raise last_counter_wrap()
+
+
+            # handle check implementations that do not yet support the
+            # handling of wrapped counters via exception. Do not submit
+            # any check result in that case:
+            except MKCounterWrapped, e:
+                if opt_verbose:
+                    print "Cannot compute check result: %s" % e
+                dont_submit = True
+
+            except Exception, e:
+                text = "check failed - please submit a crash report!"
+                try:
+                    import traceback, pprint, tarfile, base64
+                    # Create a crash dump with a backtrace and the agent output.
+                    # This is put into a directory per service. The content is then
+                    # put into a tarball, base64 encoded and put into the long output
+                    # of the check :-)
+                    crash_dir = var_dir + "/crashed_checks/" + hostname + "/" + description.replace("/", "\\")
+                    if not os.path.exists(crash_dir):
+                        os.makedirs(crash_dir)
+                    file(crash_dir + "/trace", "w").write(
+                       (
+                       "  Check output:     %s\n"
+                       "  Check_MK Version: %s\n"
+                       "  Date:             %s\n"
+                       "  Host:             %s\n"
+                       "  Service:          %s\n"
+                       "  Check type:       %s\n"
+                       "  Item:             %r\n"
+                       "  Parameters:       %s\n"
+                       "  %s\n") % (
+                                    text,
+                                    check_mk_version,
+                                    time.strftime("%Y-%d-%m %H:%M:%S"),
+                                    hostname,
+                                    description,
+                                    checkname,
+                                    item,
+                                    pprint.pformat(params),
+                                    traceback.format_exc().replace('\n', '\n      ')))
+                    file(crash_dir + "/info", "w").write(repr(info) + "\n")
+                    cachefile = tcp_cache_dir + "/" + hostname
+                    if os.path.exists(cachefile):
+                        file(crash_dir + "/agent_output", "w").write(file(cachefile).read())
+                    elif os.path.exists(crash_dir + "/agent_output"):
+                        os.remove(crash_dir + "/agent_output")
+
+                    tarcontent = os.popen("tar czf - -C %s ." % quote_shell_string(crash_dir)).read()
+                    encoded = base64.b64encode(tarcontent)
+                    text += "\n" + "Crash dump:\n" + encoded + "\n"
+                except:
+                    pass
+
+                result = 3, text
+
+                if opt_debug:
+                    raise
+            if not dont_submit:
+                submit_check_result(hostname, description, result, aggrname)
+        else:
+            error_sections.add(infotype)
+
+    submit_aggregated_results(hostname)
+
+    try:
+        if is_tcp_host(hostname):
+            version_info = get_host_info(hostname, ipaddress, 'check_mk')
+            agent_version = version_info[0][1]
+        else:
+            agent_version = None
+    except MKAgentError, e:
+        g_broken_agent_hosts.add(hostname)
+        agent_version = "(unknown)"
+    except:
+        agent_version = "(unknown)"
+    error_sections = list(error_sections)
+    error_sections.sort()
+    return agent_version, num_success, error_sections, ", ".join(problems)
 
 
 def check_unimplemented(checkname, params, info):
@@ -1084,7 +1388,7 @@ def convert_check_info():
         if type(info) != dict:
             # Convert check declaration from old style to new API
             check_function, service_description, has_perfdata, inventory_function = info
-            if inventory_function == no_inventory_possible:
+            if inventory_function == no_discovery_possible:
                 inventory_function = None
 
             check_info[check_type] = {
@@ -1102,16 +1406,20 @@ def convert_check_info():
                         snmp_scan_functions.get(basename)),
                 "default_levels_variable" : check_default_levels.get(check_type),
                 "node_info"               : False,
+                "parse_function"          : None,
+                "extra_sections"          : [],
             }
         else:
             # Check does already use new API. Make sure that all keys are present,
             # extra check-specific information into file-specific variables.
             info.setdefault("inventory_function", None)
+            info.setdefault("parse_function", None)
             info.setdefault("group", None)
             info.setdefault("snmp_info", None)
             info.setdefault("snmp_scan_function", None)
             info.setdefault("default_levels_variable", None)
             info.setdefault("node_info", False)
+            info.setdefault("extra_sections", [])
 
             # Include files are related to the check file (= the basename),
             # not to the (sub-)check. So we keep them in check_includes.
@@ -1191,142 +1499,6 @@ def item_not_found(is_snmp):
         return 3, "Item not found in agent output"
 
 
-# Loops over all checks for a host, gets the data, calls the check
-# function that examines that data and sends the result to Nagios
-def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
-    global g_aggregated_service_results
-    g_aggregated_service_results = {}
-    global g_hostname
-    g_hostname = hostname
-    num_success = 0
-    error_sections = set([])
-    check_table = get_sorted_check_table(hostname, remove_duplicates=True)
-    problems = []
-
-    for checkname, item, params, description, info in check_table:
-        if only_check_types != None and checkname not in only_check_types:
-            continue
-
-        # Make service description globally available
-        global g_service_description
-        g_service_description = description
-
-        # Skip checks that are not in their check period
-        period = check_period_of(hostname, description)
-        if period and not check_timeperiod(period):
-            if opt_debug:
-                sys.stderr.write("Skipping service %s: currently not in timeperiod %s.\n" %
-                        (description, period))
-            continue
-        elif period and opt_debug:
-            sys.stderr.write("Service %s: timeperiod %s is currently active.\n" %
-                    (description, period))
-
-        # In case of a precompiled check table info is the aggrated
-        # service name. In the non-precompiled version there are the dependencies
-        if type(info) == str:
-            aggrname = info
-        else:
-            aggrname = aggregated_service_name(hostname, description)
-
-        infotype = checkname.split('.')[0]
-        try:
-            info = get_host_info(hostname, ipaddress, infotype)
-        except MKSkipCheck, e:
-            continue
-        except MKSNMPError, e:
-            if str(e):
-                problems.append(str(e))
-            error_sections.add(infotype)
-            g_broken_snmp_hosts.add(hostname)
-            continue
-
-        except MKAgentError, e:
-            if str(e):
-                problems.append(str(e))
-            error_sections.add(infotype)
-            g_broken_agent_hosts.add(hostname)
-            continue
-
-        if info or info == []:
-            num_success += 1
-            try:
-                check_function = check_info[checkname]["check_function"]
-            except:
-                check_function = check_unimplemented
-
-            try:
-                dont_submit = False
-
-                # Call the actual check function
-                result = convert_check_result(check_function(item, params, info), check_uses_snmp(checkname))
-
-
-            # handle check implementations that do not yet support the
-            # handling of wrapped counters via exception. Do not submit
-            # any check result in that case:
-            except MKCounterWrapped, e:
-                if opt_verbose:
-                    print "Cannot compute check result: %s" % e
-                dont_submit = True
-            except Exception, e:
-                text = "invalid output from agent, invalid check parameters or error in implementation of check %s." % checkname
-                if not debug_log:
-                    text += " Please enable \"Log exceptions in check plugins\" for further information."
-                else:
-                    debug_log_file = debug_log
-                    if debug_log_file == True:
-                        debug_log_file = log_dir + "/crashed-checks.log"
-                    text += " A trace has been written to %s." % debug_log_file
-                result = 3, text
-                if debug_log:
-                    try:
-                        import traceback, pprint
-                        l = file(debug_log_file, "a")
-                        l.write(("Invalid output from plugin or error in check:\n"
-                                "  Check_MK Version: %s\n"
-                                "  Date:             %s\n"
-                                "  Host:             %s\n"
-                                "  Service:          %s\n"
-                                "  Check type:       %s\n"
-                                "  Item:             %r\n"
-                                "  Parameters:       %s\n"
-                                "  %s\n"
-                                "  Agent info:       %s\n\n") % (
-                                check_mk_version,
-                                time.strftime("%Y-%d-%m %H:%M:%S"),
-                                hostname, description, checkname, item, pprint.pformat(params),
-                                traceback.format_exc().replace('\n', '\n      '),
-                                pprint.pformat(info)))
-                    except:
-                        pass
-
-                if opt_debug:
-                    raise
-            if not dont_submit:
-                submit_check_result(hostname, description, result, aggrname)
-        else:
-            error_sections.add(infotype)
-
-    submit_aggregated_results(hostname)
-
-    try:
-        if is_tcp_host(hostname):
-            version_info = get_host_info(hostname, ipaddress, 'check_mk')
-            agent_version = version_info[0][1]
-        else:
-            agent_version = None
-    except MKAgentError, e:
-        g_broken_agent_hosts.add(hostname)
-        agent_version = "(unknown)"
-    except:
-        agent_version = "(unknown)"
-    error_sections = list(error_sections)
-    error_sections.sort()
-    return agent_version, num_success, error_sections, ", ".join(problems)
-
-
-
 def open_checkresult_file():
     global checkresult_file_fd
     global checkresult_file_path
@@ -1347,7 +1519,7 @@ def close_checkresult_file():
         checkresult_file_fd = None
 
 
-def nagios_pipe_open_timeout(signum, stackframe):
+def core_pipe_open_timeout(signum, stackframe):
     raise IOError("Timeout while opening pipe")
 
 
@@ -1356,17 +1528,16 @@ def open_command_pipe():
     if nagios_command_pipe == None:
         if not os.path.exists(nagios_command_pipe_path):
             nagios_command_pipe = False # False means: tried but failed to open
-            raise MKGeneralException("Missing Nagios command pipe '%s'" % nagios_command_pipe_path)
+            raise MKGeneralException("Missing core command pipe '%s'" % nagios_command_pipe_path)
         else:
             try:
-                signal.signal(signal.SIGALRM, nagios_pipe_open_timeout)
+                signal.signal(signal.SIGALRM, core_pipe_open_timeout)
                 signal.alarm(3) # three seconds to open pipe
                 nagios_command_pipe =  file(nagios_command_pipe_path, 'w')
                 signal.alarm(0) # cancel alarm
             except Exception, e:
                 nagios_command_pipe = False
                 raise MKGeneralException("Error writing to command pipe: %s" % e)
-
 
 
 def convert_perf_value(x):
@@ -1378,6 +1549,7 @@ def convert_perf_value(x):
         return ("%.6f" % x).rstrip("0").rstrip(".")
     else:
         return str(x)
+
 
 def convert_perf_data(p):
     # replace None with "" and fill up to 7 values
@@ -1400,7 +1572,13 @@ def submit_check_result(host, servicedesc, result, sa):
         infotext.startswith("WARN -") or
         infotext.startswith("CRIT -") or
         infotext.startswith("UNKNOWN -")):
-        infotext = nagios_state_names[state] + " - " + infotext
+        infotext = core_state_names[state] + " - " + infotext
+
+    # make sure that plugin output does not contain a vertical bar. If that is the
+    # case then replace it with a Uniocode "Light vertical bar"
+    if type(infotext) == unicode:
+        infotext = infotext.encode("utf-8") # should never happen
+    infotext = infotext.replace("|", "\xe2\x9d\x98")
 
     global nagios_command_pipe
     # [<timestamp>] PROCESS_SERVICE_CHECK_RESULT;<host_name>;<svc_description>;<return_code>;<plugin_output>
@@ -1441,7 +1619,7 @@ def submit_check_result(host, servicedesc, result, sa):
         else:
             p = ''
         color = { 0: tty_green, 1: tty_yellow, 2: tty_red, 3: tty_magenta }[state]
-        print "%-20s %s%s%-56s%s%s" % (servicedesc, tty_bold, color, infotext, tty_normal, p)
+        print "%-20s %s%s%-56s%s%s" % (servicedesc, tty_bold, color, infotext.split('\n')[0], tty_normal, p)
 
 
 def submit_to_core(host, service, state, output):
@@ -1487,7 +1665,8 @@ output=%s
         raise MKGeneralException("Invalid setting %r for check_submission. Must be 'pipe' or 'file'" % check_submission)
 
 
-#   +----------------------------------------------------------------------+
+#.
+#   .--Helpers-------------------------------------------------------------.
 #   |                  _   _      _                                        |
 #   |                 | | | | ___| |_ __   ___ _ __ ___                    |
 #   |                 | |_| |/ _ \ | '_ \ / _ \ '__/ __|                   |
@@ -1495,93 +1674,13 @@ output=%s
 #   |                 |_| |_|\___|_| .__/ \___|_|  |___/                   |
 #   |                              |_|                                     |
 #   +----------------------------------------------------------------------+
-
-# determine the name of the current user. This involves
-# a lookup of /etc/passwd. Because this function is needed
-# only in general error cases, the pwd module is imported
-# here - not globally
-def username():
-    import pwd
-    return pwd.getpwuid(os.getuid())[0]
+#   |  Some generic helper functions                                       |
 
 def i_am_root():
     return os.getuid() == 0
 
-# Parses versions of Check_MK and converts them into comparable integers.
-# This does not handle daily build numbers, only official release numbers.
-# 1.2.4p1   -> 01020450001
-# 1.2.4     -> 01020450000
-# 1.2.4b1   -> 01020420100
-# 1.2.3i1p1 -> 01020310101
-# 1.2.3i1   -> 01020310100
-def parse_version(v):
-    def extract_number(s):
-        number = ''
-        for i, c in enumerate(s):
-            try:
-                int(c)
-                number += c
-            except ValueError:
-                s = s[i:]
-                return number and int(number) or 0, s
-        return number and int(number) or 0, ''
-
-    major, minor, rest = v.split('.')
-    sub, rest = extract_number(rest)
-
-    if not rest:
-        val = 50000
-    elif rest[0] == 'p':
-        num, rest = extract_number(rest[1:])
-        val = 50000 + num
-    elif rest[0] == 'i':
-        num, rest = extract_number(rest[1:])
-        val = 10000 + num*100
-
-        if rest and rest[0] == 'p':
-            num, rest = extract_number(rest[1:])
-            val += num
-    elif rest[0] == 'b':
-        num, rest = extract_number(rest[1:])
-        val = 20000 + num*100
-
-    return int('%02d%02d%02d%05d' % (int(major), int(minor), sub, val))
-
-def is_expected_agent_version(agent_version, expected_version):
-    try:
-        if agent_version in [ '(unknown)', None, 'None' ]:
-            return False
-
-        if type(expected_version) == str and expected_version != agent_version:
-            return False
-
-        elif type(expected_version) == tuple and expected_version[0] == 'at_least':
-            is_daily_build = len(agent_version) == 10 or '-' in agent_version
-
-            spec = expected_version[1]
-            if is_daily_build and 'daily_build' in spec:
-                expected = int(spec['daily_build'].replace('.', ''))
-                if len(agent_version) == 10: # master build
-                    agent = int(agent_version.replace('.', ''))
-
-                else: # branch build (e.g. 1.2.4-2014.06.01)
-                    agent = int(agent_version.split('-')[1].replace('.', ''))
-
-                if agent < expected:
-                    return False
-
-            elif 'release' in spec:
-                if parse_version(agent_version) < parse_version(spec['release']):
-                    return False
-
-        return True
-    except Exception, e:
-        raise MKGeneralException("Unable to check agent version (Agent: %s Expected: %s, Error: %s)" %
-                (agent_version, expected_version, e))
-
 # Returns the nodes of a cluster, or None if hostname is
 # not a cluster
-g_nodesof_cache = {}
 def nodes_of(hostname):
     nodes = g_nodesof_cache.get(hostname, False)
     if nodes != False:
@@ -1598,24 +1697,31 @@ def nodes_of(hostname):
 def check_uses_snmp(check_type):
     return snmp_info.get(check_type.split(".")[0]) != None
 
-def pnp_cleanup(s):
-    return s \
-        .replace(' ',  '_') \
-        .replace(':',  '_') \
-        .replace('/',  '_') \
-        .replace('\\', '_')
+# compile regex or look it up in already compiled regexes
+# (compiling is a CPU consuming process. We cache compiled
+# regexes).
+def regex(pattern):
+    reg = g_compiled_regexes.get(pattern)
+    if not reg:
+        try:
+            reg = re.compile(pattern)
+        except Exception, e:
+            raise MKGeneralException("Invalid regular expression '%s': %s" % (pattern, e))
+        g_compiled_regexes[pattern] = reg
+    return reg
 
 
-#   +----------------------------------------------------------------------+
+#.
+#   .--Check helpers-------------------------------------------------------.
 #   |     ____ _               _      _          _                         |
 #   |    / ___| |__   ___  ___| | __ | |__   ___| |_ __   ___ _ __ ___     |
 #   |   | |   | '_ \ / _ \/ __| |/ / | '_ \ / _ \ | '_ \ / _ \ '__/ __|    |
 #   |   | |___| | | |  __/ (__|   <  | | | |  __/ | |_) |  __/ |  \__ \    |
 #   |    \____|_| |_|\___|\___|_|\_\ |_| |_|\___|_| .__/ \___|_|  |___/    |
 #   |                                             |_|                      |
-#   |                                                                      |
-#   | These functions are used in some of the checks.                      |
 #   +----------------------------------------------------------------------+
+#   |  Helper function for being used in checks                            |
+#   '----------------------------------------------------------------------'
 
 # Generic function for checking a value against levels. This also supports
 # predictive levels.
@@ -1666,18 +1772,18 @@ def check_levels(value, dsname, params, unit="", factor=1.0, scale=1.0, statemar
     # Critical cases
     if crit_upper != None and value >= crit_upper:
         state = 2
-        infotexts.append("critical level at %.2f%s" % (crit_upper / factor / scale, unit))
+        infotexts.append("critical level at %.2f%s" % (crit_upper / scale, unit))
     elif crit_lower != None and value <= crit_lower:
         state = 2
-        infotexts.append("too low: critical level at %.2f%s" % (crit_lower / factor / scale, unit))
+        infotexts.append("too low: critical level at %.2f%s" % (crit_lower / scale, unit))
 
     # Warning cases
     elif warn_upper != None and value >= warn_upper:
         state = 1
-        infotexts.append("warning level at %.2f%s" % (warn_upper / factor / scale, unit))
+        infotexts.append("warning level at %.2f%s" % (warn_upper / scale, unit))
     elif warn_lower != None and value <= warn_lower:
         state = 1
-        infotexts.append("too low: warning level at %.2f%s" % (warn_lower / factor / scale, unit))
+        infotexts.append("too low: warning level at %.2f%s" % (warn_lower / scale, unit))
 
     # OK
     else:
@@ -1699,24 +1805,10 @@ def check_levels(value, dsname, params, unit="", factor=1.0, scale=1.0, statemar
 # check range, values might be negative!
 # returns True, if value is inside the interval
 def within_range(value, minv, maxv):
-    if value >= 0: return value >= minv and value <= maxv
-    else: return value <= minv and value >= maxv
-
-# compile regex or look it up in already compiled regexes
-# (compiling is a CPU consuming process. We cache compiled
-# regexes).
-def get_regex(pattern):
-    reg = compiled_regexes.get(pattern)
-    if not reg:
-        reg = re.compile(pattern)
-        compiled_regexes[pattern] = reg
-    return reg
-
-# Names of texts usually output by checks
-nagios_state_names = ["OK", "WARN", "CRIT", "UNKNOWN"]
-
-# Symbolic representations of states (Needed for new 2.0 check api)
-state_markers = ["", "(!)", "(!!)", "(?)"]
+    if value >= 0:
+        return value >= minv and value <= maxv
+    else:
+        return value <= minv and value >= maxv
 
 # int() function that return 0 for strings the
 # cannot be converted to a number
@@ -1815,11 +1907,31 @@ def get_age_human_readable(secs):
 def quote_shell_string(s):
     return "'" + s.replace("'", "'\"'\"'") + "'"
 
+# ThisIsACamel -> this_is_a_camel
+def camelcase_to_underscored(name):
+    previous_lower = False
+    previous_underscore = True
+    result = ""
+    for c in name:
+        if c.isupper():
+            if previous_lower and not previous_underscore:
+                result += "_"
+            previous_lower = False
+            previous_underscore = False
+            result += c.lower()
+        elif c == "_":
+            previous_lower = False
+            previous_underscore = True
+            result += c
+        else:
+            previous_lower = True
+            previous_underscore = False
+            result += c
+    return result
 
 # Check if a timeperiod is currently active. We have no other way than
 # doing a Livestatus query. This is not really nice, but if you have a better
 # idea, please tell me...
-g_inactive_timerperiods = None
 def check_timeperiod(timeperiod):
     global g_inactive_timerperiods
     # Let exceptions happen, they will be handled upstream.
@@ -1842,3 +1954,112 @@ def check_timeperiod(timeperiod):
 
     return timeperiod not in g_inactive_timerperiods
 
+#.
+#   .--Aggregation---------------------------------------------------------.
+#   |         _                                    _   _                   |
+#   |        / \   __ _  __ _ _ __ ___  __ _  __ _| |_(_) ___  _ __        |
+#   |       / _ \ / _` |/ _` | '__/ _ \/ _` |/ _` | __| |/ _ \| '_ \       |
+#   |      / ___ \ (_| | (_| | | |  __/ (_| | (_| | |_| | (_) | | | |      |
+#   |     /_/   \_\__, |\__, |_|  \___|\__, |\__,_|\__|_|\___/|_| |_|      |
+#   |             |___/ |___/          |___/                               |
+#   +----------------------------------------------------------------------+
+#   |  Service aggregation will be removed soon now.                       |
+#   '----------------------------------------------------------------------'
+
+# Compute the name of a summary host
+def summary_hostname(hostname):
+    return aggr_summary_hostname % hostname
+
+# Updates the state of an aggregated service check from the output of
+# one of the underlying service checks. The status of the aggregated
+# service will be updated such that the new status is the maximum
+# (crit > unknown > warn > ok) of all underlying status. Appends the output to
+# the output list and increases the count by 1.
+def store_aggregated_service_result(hostname, detaildesc, aggrdesc, newstatus, newoutput):
+    global g_aggregated_service_results
+    count, status, outputlist = g_aggregated_service_results.get(aggrdesc, (0, 0, []))
+    if status_worse(newstatus, status):
+        status = newstatus
+    if newstatus > 0 or aggregation_output_format == "multiline":
+        outputlist.append( (newstatus, detaildesc, newoutput) )
+    g_aggregated_service_results[aggrdesc] = (count + 1, status, outputlist)
+
+def status_worse(newstatus, status):
+    if status == 2:
+        return False # nothing worse then critical
+    elif newstatus == 2:
+        return True  # nothing worse then critical
+    else:
+        return newstatus > status # 0 < 1 < 3 are in correct order
+
+# Submit the result of all aggregated services of a host
+# to the core. Those are stored in g_aggregated_service_results
+def submit_aggregated_results(hostname):
+    if not host_is_aggregated(hostname):
+        return
+
+    if opt_verbose:
+        print "\n%s%sAggregates Services:%s" % (tty_bold, tty_blue, tty_normal)
+    global g_aggregated_service_results
+    items = g_aggregated_service_results.items()
+    items.sort()
+    aggr_hostname = summary_hostname(hostname)
+    for servicedesc, (count, status, outputlist) in items:
+        if aggregation_output_format == "multiline":
+            longoutput = ""
+            statuscounts = [ 0, 0, 0, 0 ]
+            for itemstatus, item, output in outputlist:
+                longoutput += '\\n%s: %s' % (item, output)
+                statuscounts[itemstatus] = statuscounts[itemstatus] + 1
+            summarytexts = [ "%d service%s %s" % (x[0], x[0] != 1 and "s" or "", x[1])
+                           for x in zip(statuscounts, ["OK", "WARN", "CRIT", "UNKNOWN" ]) if x[0] > 0 ]
+            text = ", ".join(summarytexts) + longoutput
+        else:
+            if status == 0:
+                text = "OK - %d services OK" % count
+            else:
+                text = " *** ".join([ item + " " + output for itemstatus, item, output in outputlist ])
+
+        if not opt_dont_submit:
+            submit_to_core(aggr_hostname, servicedesc, status, text)
+
+        if opt_verbose:
+            color = { 0: tty_green, 1: tty_yellow, 2: tty_red, 3: tty_magenta }[status]
+            lines = text.split('\\n')
+            print "%-20s %s%s%-70s%s" % (servicedesc, tty_bold, color, lines[0], tty_normal)
+            if len(lines) > 1:
+                for line in lines[1:]:
+                    print "  %s" % line
+                print "-------------------------------------------------------------------------------"
+
+
+def submit_check_mk_aggregation(hostname, status, output):
+    if not host_is_aggregated(hostname):
+        return
+
+    if not opt_dont_submit:
+        submit_to_core(summary_hostname(hostname), "Check_MK", status, output)
+
+    if opt_verbose:
+        color = { 0: tty_green, 1: tty_yellow, 2: tty_red, 3: tty_magenta }[status]
+        print "%-20s %s%s%-70s%s" % ("Check_MK", tty_bold, color, output, tty_normal)
+
+
+#.
+#   .--Ctrl-C--------------------------------------------------------------.
+#   |                     ____ _        _        ____                      |
+#   |                    / ___| |_ _ __| |      / ___|                     |
+#   |                   | |   | __| '__| |_____| |                         |
+#   |                   | |___| |_| |  | |_____| |___                      |
+#   |                    \____|\__|_|  |_|      \____|                     |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |  Handling of Ctrl-C                                                  |
+#   '----------------------------------------------------------------------'
+
+# register SIGINT handler for consistent CTRL+C handling
+def interrupt_handler(signum, frame):
+    sys.stderr.write('<Interrupted>\n')
+    sys.exit(1)
+
+signal.signal(signal.SIGINT, interrupt_handler)

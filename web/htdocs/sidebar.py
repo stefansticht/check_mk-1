@@ -158,7 +158,7 @@ def sidebar_head():
     html.write('<a title="%s" target="main" href="%s">'
                '<div id="side_version">%s</div>'
                '</a>'
-               '</div>\n' % (_("Go to main overview"), html.attrencode(config.start_url), defaults.check_mk_version))
+               '</div>\n' % (_("Go to main overview"), html.attrencode(config.user.get("start_url") or config.start_url), defaults.check_mk_version))
 
 def render_messages():
     for msg in notify.get_gui_messages():
@@ -267,11 +267,14 @@ def page_side():
 
     html.body_end()
 
-def render_snapin(name, state):
-    snapin = sidebar_snapins.get(name)
+def render_snapin_styles(snapin):
     styles = snapin.get("styles")
     if styles:
         html.write("<style>\n%s\n</style>\n" % styles)
+
+def render_snapin(name, state):
+    snapin = sidebar_snapins.get(name)
+    render_snapin_styles(snapin)
 
     html.write("<div id=\"snapin_container_%s\" class=snapin>\n" % name)
     if state == "closed":
@@ -555,7 +558,7 @@ def ajax_switch_masterstate():
         html.live.set_only_sites()
         render_master_control()
     else:
-        html.write(_("Command %s/%d not found") % (column, state))
+        html.write(_("Command %s/%d not found") % (html.attrencode(column), state))
 
 def ajax_del_bookmark():
     try:
@@ -697,13 +700,25 @@ def parse_search_query(s):
         current_string = s
         for token_type, token_offset in found[-1::-1]:
             found_filters.append( (types[token_type.lstrip()],
-                                   current_string[token_offset+len(token_type)+1:].replace("*", ".*").strip()) )
+                                   to_regex(current_string[token_offset+len(token_type)+1:]).strip()) )
             current_string = current_string[:token_offset]
 
     if found_filters:
         return found_filters
     else:
-        return [("hosts", s.replace('*', '.*'))]
+        return [("hosts", to_regex(s))]
+
+# Ensures the provided search string is a regex, does some basic conversion
+# and then tries to verify it is a regex
+def to_regex(s):
+    s = s.replace('*', '.*')
+    try:
+        re.compile(s)
+    except re.error:
+        raise MKGeneralException(_('You search statement is not valid. You need to provide a regular '
+            'expression (regex). For example you need to e use <tt>\\\\</tt> instead of <tt>\\</tt> '
+            'if you like to search for a single backslash.'))
+    return s
 
 def is_ipaddress(s):
     try:
@@ -758,45 +773,50 @@ def search_url_tmpl(used_filters, row, exact = True):
     def find_tmpl():
         if exact: # Get the match template
             if plugin.get("match_url_tmpl_func"):
-                return plugin['match_url_tmpl_func'](used_filters, row_data)
+                return False, plugin['match_url_tmpl_func'](used_filters, row_data)
             if plugin.get("match_url_tmpl"):
-                return plugin.get("match_url_tmpl")
+                return False, plugin.get("match_url_tmpl")
 
             # Default match templates
             ty = plugin.get("dftl_url_tmpl", plugin.get("id"))
             if ty == 'hosts':
-                return 'view.py?view_name=host&host=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=host&host=%(name)s&site=%(site)s'
             elif ty == 'hostgroups':
-                return 'view.py?view_name=hostgroup&hostgroup=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=hostgroup&hostgroup=%(name)s&site=%(site)s'
             elif ty == 'servicegroups':
-                return 'view.py?view_name=servicegroup&servicegroup=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=servicegroup&servicegroup=%(name)s&site=%(site)s'
             elif ty == 'services':
-                return 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
+                return True, 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
         else: # Get the search template
             if plugin.get("search_url_tmpl_func"):
-                return plugin['search_url_tmpl_func'](used_filters, row_data)
+                return False, plugin['search_url_tmpl_func'](used_filters, row_data)
             if plugin.get("search_url_tmpl"):
-                return plugin.get("search_url_tmpl")
+                return False, plugin.get("search_url_tmpl")
 
             # Default search templates
             ty = plugin.get("dftl_url_tmpl", plugin.get("id"))
             if ty == 'hosts':
-                return 'view.py?view_name=searchhost&host=%(name)s&filled_in=filter'
+                return False, 'view.py?view_name=searchhost&host_regex=%(name)s&filled_in=filter'
             elif ty == 'hostgroups':
-                return 'view.py?view_name=hostgroups&hostgroup_name=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=hostgroups&hostgroup_regex=%(name)s&site=%(site)s'
             elif ty == 'servicegroups':
-                return 'view.py?view_name=svcgroups&servicegroup_name=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=svcgroups&servicegroup_name=%(name)s&site=%(site)s'
             elif ty == 'services':
-                return 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
+                return False, 'view.py?view_name=allservices&service_regex=%(name)s&site=%(site)s'
 
     # Search the template
-    url_tmpl = find_tmpl()
+    escape_regex, url_tmpl = find_tmpl()
 
     # Some templates with single filters contain %(name)s, %(search)s, %(site)
     if len(used_filters) == 1:
         if exact:
             site = row_data.get("site")
             name = row_data.get(get_row_name(row))
+            # In case of an exact match, not the original search statement is used,
+            # instead the name of the row provided by livestatus is used. This needs
+            # to be escaped as it is no regex
+            if escape_regex:
+                name = name.replace('\\', '\\\\')
         else:
             site = ""
             name = used_filters[0][1]
@@ -914,8 +934,9 @@ def format_result(row, render_options):
     if name_append:
         name = "%s %s" % (name, name_append)
 
+    escaped_name = name.replace('\\', '\\\\')
     html.write('<a id="result_%s" class="%s" href="%s" onClick="mkSearchClose()" target="main">%s' %
-                (name, css, url, name))
+                (escaped_name, css, url, name))
     html.write('</a>\n')
 
 
@@ -964,7 +985,7 @@ def process_search(q):
     data = search_livestatus(used_filters)
     if len(used_filters) == 1 and used_filters[0][0] == "hosts" and not data:
         # When asking for hosts and no host found, try searching services instead
-        data = search_livestatus( [("services", used_filters[0][1])] )
+        data = search_livestatus([("services", used_filters[0][1])])
         return data, [("services", used_filters[0][1])]
 
     return data, used_filters

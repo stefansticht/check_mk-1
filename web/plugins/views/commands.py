@@ -36,9 +36,6 @@
 # - function that outputs the HTML input fields
 # - function that creates the nagios command and title
 
-#import datetime, traceback
-#file('/tmp/1', 'a').write('%s %s\n%s' % (datetime.datetime.now(), current_language, ''.join(traceback.format_stack())))
-
 # RESCHEDULE ACTIVE CHECKS
 def command_reschedule(cmdtag, spec, row, row_nr, total_rows):
     if html.var("_resched_checks"):
@@ -149,8 +146,8 @@ multisite_commands.append({
 
 # CLEAR MODIFIED ATTRIBUTES
 config.declare_permission("action.clearmodattr",
-        _("Clear modified attributes"),
-        _("Remove the information that an attribute (like check enabling) has been changed"),
+        _("Reset modified attributes"),
+        _("Reset all manually modified attributes of a host or service (like disabled notifications)"),
         [ "admin" ])
 
 multisite_commands.append({
@@ -158,11 +155,11 @@ multisite_commands.append({
     "permission"  : "action.clearmodattr",
     "title"       : _("Modified attributes"),
     "render"      : lambda: \
-       html.button("_clear_modattr", _('Clear information about modified attributes')),
+       html.button("_clear_modattr", _('Clear modified attributes')),
     "action"      : lambda cmdtag, spec, row: (
         html.var("_clear_modattr") and (
         "CHANGE_" + cmdtag + "_MODATTR;%s;0" % spec,
-         _("<b>clear the information about modified attributes</b> of"))),
+         _("<b>clear the modified attributes</b> of"))),
 })
 
 # FAKE CHECKS
@@ -172,25 +169,51 @@ config.declare_permission("action.fakechecks",
         [ "admin" ])
 
 def command_fake_checks(cmdtag, spec, row):
-    for s in [0,1,2,3]:
+    for s in [0, 1, 2, 3]:
         statename = html.var("_fake_%d" % s)
         if statename:
-            pluginoutput = _("Manually set to %s by %s") % (html.attrencode(statename), config.user_id)
+            pluginoutput = html.var_utf8("_fake_output").strip()
+            if not pluginoutput:
+                pluginoutput = _("Manually set to %s by %s") % (html.attrencode(statename), config.user_id)
+            perfdata = html.var("_fake_perfdata")
+            if perfdata:
+                pluginoutput += "|" + perfdata
             if cmdtag == "SVC":
                 cmdtag = "SERVICE"
-            command = "PROCESS_%s_CHECK_RESULT;%s;%s;%s" % (cmdtag, spec, s, pluginoutput)
-            title = _("<b>manually set check results to %s</b> for") % statename
+            command = "PROCESS_%s_CHECK_RESULT;%s;%s;%s" % (cmdtag, spec, s, lqencode(pluginoutput))
+            title = _("<b>manually set check results to %s</b> for") % html.attrencode(statename)
             return command, title
 
+
+def render_fake_form(what):
+    html.write("<table><tr><td>")
+    html.write("%s: " % _("Plugin output"))
+    html.write("</td><td>")
+    html.text_input("_fake_output", "", size=50)
+    html.write("</td></tr><tr><td>")
+    html.write("%s: " % _("Performance data"))
+    html.write("</td><td>")
+    html.text_input("_fake_perfdata", "", size=50)
+    html.write("</td></tr><tr><td>")
+    html.write(_("Set to:"))
+    html.write("</td><td>")
+    if what == "host":
+        html.button("_fake_0", _("Up"))
+        html.button("_fake_1", _("Down"))
+        html.button("_fake_2", _("Unreachable"))
+    else:
+        html.button("_fake_0", _("OK"))
+        html.button("_fake_1", _("Warning"))
+        html.button("_fake_2", _("Critical"))
+        html.button("_fake_3", _("Unknown"))
+    html.write("</td></tr></table>")
 
 multisite_commands.append({
     "tables"      : [ "host" ],
     "permission"  : "action.fakechecks",
     "title"       : _("Fake check results"),
-    "render"      : lambda: \
-       html.button("_fake_0", _("Up")) == \
-       html.button("_fake_1", _("Down")) == \
-       html.button("_fake_2", _("Unreachable")),
+    "group"       : _("Fake check results"),
+    "render"      : lambda: render_fake_form("host"),
     "action"      : command_fake_checks,
 })
 
@@ -198,11 +221,8 @@ multisite_commands.append({
     "tables"      : [ "service" ],
     "permission"  : "action.fakechecks",
     "title"       : _("Fake check results"),
-    "render"      : lambda: \
-       html.button("_fake_0", _("OK")) == \
-       html.button("_fake_1", _("Warning")) == \
-       html.button("_fake_2", _("Critical")) == \
-       html.button("_fake_3", _("Unknown")),
+    "group"       : _("Fake check results"),
+    "render"      : lambda: render_fake_form("service"),
     "action"      : command_fake_checks,
 })
 
@@ -219,7 +239,7 @@ def command_custom_notification(cmdtag, spec, row):
         broadcast = html.get_checkbox("_cusnot_broadcast") and 1 or 0
         forced = html.get_checkbox("_cusnot_forced") and 2 or 0
         command = "SEND_CUSTOM_%s_NOTIFICATION;%s;%s;%s;%s" % \
-                ( cmdtag, spec, broadcast + forced, config.user_id, comment)
+                ( cmdtag, spec, broadcast + forced, config.user_id, lqencode(comment))
         title = _("<b>send a custom notification</b> regarding")
         return command, title
 
@@ -250,12 +270,23 @@ def command_acknowledgement(cmdtag, spec, row):
         comment = html.var_utf8("_ack_comment")
         if not comment:
             raise MKUserError("_ack_comment", _("You need to supply a comment."))
+        if ";" in comment:
+            raise MKUserError("_ack_comment", _("The comment must not contain semicolons."))
         sticky = html.var("_ack_sticky") and 2 or 0
         sendnot = html.var("_ack_notify") and 1 or 0
         perscomm = html.var("_ack_persistent") and 1 or 0
+
+        expire_secs = Age().from_html_vars("_ack_expire")
+        if expire_secs:
+            expire = int(time.time()) + expire_secs
+        else:
+            expire = 0
+
         command = "ACKNOWLEDGE_" + cmdtag + "_PROBLEM;%s;%d;%d;%d;%s" % \
-                      (spec, sticky, sendnot, perscomm, config.user_id) + (";%s" % comment)
-        title = _("<b>acknowledge the problems</b> of")
+                      (spec, sticky, sendnot, perscomm, config.user_id) + (";%s" % lqencode(comment)) \
+                      + (";%d" % expire)
+        title = _("<b>acknowledge the problems%s</b> of") % \
+                    (expire and (_(" for a period of %s") % Age().value_to_text(expire_secs)) or "")
         return command, title
 
     elif html.var("_remove_ack"):
@@ -267,7 +298,7 @@ def command_acknowledgement(cmdtag, spec, row):
 multisite_commands.append({
     "tables"      : [ "host", "service" ],
     "permission"  : "action.acknowledge",
-    "title"       : _("Acknowledging Problems"),
+    "title"       : _("Acknowledge Problems"),
     "render"      : lambda: \
         html.button("_acknowledge", _("Acknowledge")) == \
         html.button("_remove_ack", _("Remove Acknowledgement")) == \
@@ -275,6 +306,9 @@ multisite_commands.append({
         html.checkbox("_ack_sticky", True, label=_("sticky")) == \
         html.checkbox("_ack_notify", True, label=_("send notification")) == \
         html.checkbox("_ack_persistent", False, label=_('persistent comment')) == \
+        html.write("<hr>") == \
+        Age(display=["days", "hours", "minutes"], label=_("Expire acknowledgement after")).render_input("_ack_expire", 0) == \
+        html.help(_("Note: Expiration of acknowledgements only works when using the Check_MK Micro Core.")) == \
         html.write("<hr>") == \
         html.write(_("Comment") + ": ") == \
         html.text_input("_ack_comment", size=48, submit="_acknowledge"),
@@ -295,7 +329,7 @@ def command_comment(cmdtag, spec, row):
         if not comment:
             raise MKUserError("_comment", _("You need to supply a comment."))
         command = "ADD_" + cmdtag + "_COMMENT;%s;1;%s" % \
-                  (spec, config.user_id) + (";%s" % comment)
+                  (spec, config.user_id) + (";%s" % lqencode(comment))
         title = _("<b>add a comment to</b>")
         return command, title
 
@@ -426,7 +460,7 @@ def command_downtime(cmdtag, spec, row):
 
         commands = [(("SCHEDULE_" + cmdtag + "_DOWNTIME;%s;" % spec ) \
                    + ("%d;%d;%d;0;%d;%s;" % (down_from, down_to, fixed, duration, config.user_id)) \
-                   + comment) for spec in specs]
+                   + lqencode(comment)) for spec in specs]
         return commands, title
 
 

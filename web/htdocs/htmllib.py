@@ -24,7 +24,29 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import time, os, pwd, urllib, random
+# Notes for future rewrite:
+#
+# - Make clear which functions return values and which write out values
+#   render_*, add_*, write_* (e.g. icon() -> outputs directly,
+#                                  render_icon() -> returns icon
+#                                  render_icon() -> returns icon
+#
+# - Order of arguments:
+#   e.g. icon(help, icon) -> change and make help otional?
+#
+# - Fix names of message() show_error() show_warning()
+#
+# - change naming of html.attrencode() to html.render()
+#
+# - General rules:
+# 1. values of type str that are passed as arguments or
+#    return values or are stored in datastructures most not contain
+#    non-Ascii characters! UTF-8 encoding must just be used in
+#    the last few CPU cycles before outputting. Conversion from
+#    input to str or unicode must happen as early as possible,
+#    directly when reading from file or URL.
+
+import time, os, pwd, urllib, random, re, __builtin__
 
 from lib import *
 # Python 2.3 does not have 'set' in normal namespace.
@@ -42,6 +64,19 @@ class InvalidUserInput(Exception):
     def __init__(self, varname, text):
         self.varname = varname
         self.text = text
+
+# This is a simple class which wraps a string provided by the caller
+# to make html.attrencode() know that this string should not be
+# encoded, html.attrencode() will then return the unmodified value.
+#
+# This way we can implement encodings while still allowing HTML code
+# processing for some special cases. This is useful when one needs
+# to print out HTML tables in messages or help texts.
+class HTML:
+    def __init__(self, value):
+        self.value = value
+
+__builtin__.HTML = HTML
 
 class html:
     def __init__(self):
@@ -170,6 +205,9 @@ class html:
         days = hours / 24
         return "%d days" % days
 
+    def in_form(self):
+        return self.form_name != None
+
     def begin_form(self, name, action = None, method = "GET",
                    onsubmit = None, add_transid = True):
         self.form_vars = []
@@ -249,11 +287,11 @@ class html:
         self.global_vars += varnames
 
     # [('varname1', value1), ('varname2', value2) ]
-    def makeuri(self, addvars, remove_prefix = None, filename=None):
+    def makeuri(self, addvars, remove_prefix=None, filename=None, delvars=None):
         new_vars = [ nv[0] for nv in addvars ]
         vars = [ (v, self.var(v))
                  for v in self.vars
-                 if v[0] != "_" and v not in new_vars ]
+                 if v[0] != "_" and v not in new_vars and (not delvars or v not in delvars) ]
         if remove_prefix != None:
             vars = [ i for i in vars if not i[0].startswith(remove_prefix) ]
         vars = vars + addvars
@@ -313,8 +351,16 @@ class html:
             self.write('</label>')
 
     def icon(self, help, icon):
-       self.write('<img align=absmiddle class=icon title="%s" src="images/icon_%s.png" />' % (
-        help, icon))
+       self.write(self.render_icon(icon, help))
+
+    def render_icon(self, icon, help="", middle=True):
+        align = middle and ' align=absmiddle' or ''
+        title = help and ' title="%s"' % self.attrencode(help) or ""
+        if "/" in icon:
+            src = "images/" + icon
+        else:
+            src = "images/icon_%s.png" % icon
+        return '<img src="%s" class=icon%s%s />' % (src, align, title)
 
     def empty_icon(self):
         self.write('<img class=icon src="images/trans.png" />')
@@ -479,7 +525,7 @@ class html:
         self.text_input(varname, default_value, type="password", size = size, **args)
 
     def text_area(self, varname, deflt="", rows=4, cols=30, attrs = {}):
-        value = self.vars.get(varname, deflt)
+        value = self.var(varname, deflt)
         error = self.user_errors.get(varname)
         if error:
             self.write("<x class=inputerror>")
@@ -492,22 +538,25 @@ class html:
             self.set_focus(varname)
         self.form_vars.append(varname)
 
-    def sorted_select(self, varname, options, deflt="", onchange=None, attrs = {}):
+    def sorted_select(self, varname, choices, deflt="", onchange=None, attrs = {}):
         # Sort according to display texts, not keys
-        sorted = options[:]
+        sorted = choices[:]
         sorted.sort(lambda a,b: cmp(a[1].lower(), b[1].lower()))
         self.select(varname, sorted, deflt, onchange, attrs)
 
-    def select(self, varname, options, deflt="", onchange=None, attrs = {}):
-        current = self.var(varname, deflt)
+    # Choices is a list pairs of (key, title). They keys of the choices
+    # and the default value must be of type None, str or unicode.
+    def select(self, varname, choices, deflt="", onchange=None, attrs = {}):
+        current = self.var_utf8(varname, deflt)
         onchange_code = onchange and " onchange=\"%s\"" % (onchange) or ""
         attrs.setdefault('size', 1)
         attributes = ' ' + ' '.join([ '%s="%s"' % (k, v) for k, v in attrs.iteritems() ])
 
         self.write("<select%s name=\"%s\" id=\"%s\"%s>\n" %
                              (onchange_code, varname, varname, attributes))
-        for value, text in options:
-            if value == None: value = ""
+        for value, text in choices:
+            if value == None:
+                value = ""
             sel = value == current and " selected" or ""
             self.write("<option value=\"%s\"%s>%s</option>\n" %
                 (self.attrencode(value), sel, self.attrencode(text)))
@@ -697,6 +746,7 @@ class html:
             self.write('<title>')
             self.write(self.attrencode(title))
             self.write('</title>\n')
+            self.write('<meta http-equiv="X-UA-Compatible" content="IE=edge" />')
 
             # If the variable _link_target is set, then all links in this page
             # should be targetted to the HTML frame named by _link_target. This
@@ -705,11 +755,17 @@ class html:
                 self.write('<base target="%s">\n' % self.attrencode(self.link_target))
 
             # Load all specified style sheets and all user style sheets in htdocs/css
-            for css in [ "check_mk" ] + stylesheets:
-                self.write('<link rel="stylesheet" type="text/css" href="%s.css" />\n' % css)
-            self.write('<!--[if IE]>\n'
-                       '<link rel="stylesheet" href="ie.css" type="text/css" />\n'
-                       '<![endif]-->\n')
+            for css in [ "check_mk" ] + stylesheets + [ 'ie' ]:
+                if defaults.omd_root:
+                    fname = '%s-%s.css' % (css, defaults.check_mk_version)
+                else:
+                    fname = '%s.css' % css
+
+                if css == 'ie':
+                    self.write('<!--[if IE]>\n')
+                self.write('<link rel="stylesheet" type="text/css" href="%s" />\n' % fname)
+                if css == 'ie':
+                    self.write('<![endif]-->\n')
 
             self.add_custom_style_sheet()
 
@@ -782,7 +838,7 @@ class html:
         self.write('<a id=helpbutton class=%s href="#" onclick="help_toggle();" style="display: none"></a>' %
             cssclass)
         self.write("%s</td></tr></table>" %
-                   _("<a href=\"http://mathias-kettner.de\"><img src=\"images/mk_logo_small.gif\"/></a>"))
+                   _("<a href=\"http://mathias-kettner.de\"><img src=\"images/logo_mk_small.png\"/></a>"))
         self.write("<hr class=header>\n")
         if self.enable_debug:
             self.dump_get_vars()
@@ -860,10 +916,19 @@ class html:
 
         if self.myfile == "view":
             mode_name = self.var('mode') == "availability" and "availability" or "view"
+
+            encoded_vars = {}
+            for k, v in self.page_context.items():
+                if v == None:
+                    v = ''
+                elif type(v) == unicode:
+                    v = v.encode('utf-8')
+                encoded_vars[k] = v
+
             h += '<div class="visualadd"><a class="visualadd" href="javascript:void(0)" ' \
-                 'onclick="toggle_add_to_visual(this, \'%s\', %s, {\'name\': \'%s\'})">' \
+                 'onclick="toggle_add_to_visual(event, this, \'%s\', %s, {\'name\': \'%s\'})">' \
                  '<img class=statusicon src="images/status_add_dashlet.png" title="%s"></a></div>\n' % \
-                 (mode_name, self.attrencode(self.page_context), self.var('view_name'), _("Add this view to..."))
+                 (mode_name, self.attrencode(repr(encoded_vars)), self.var('view_name'), _("Add this view to..."))
 
         for img, tooltip in self.status_icons.items():
             if type(tooltip) == tuple:
@@ -883,41 +948,79 @@ class html:
             h += '</div>'
         return h
 
+    def show_exception(self, e):
+        details = \
+              'Check_MK Version: ' + defaults.check_mk_version + '\r\n' \
+            + 'Page: ' + self.myfile + '.py\r\n\r\n' \
+            + 'GET/POST-Variables:\r\n' \
+            + '\r\n'.join([ ' '+n+'='+v for n, v in sorted(self.vars.items()) ]) + '\r\n' \
+            + '\r\n' \
+            + format_exception()
+
+        mail_body = \
+                 "Dear Check_MK Developer team,\r\n\r\n" \
+               + "I hereby send you a report of a crash in the Check_MK Web GUI:\r\n\r\n" \
+               + details + "\r\n" \
+               + "\r\n\r\nWith best regards,\r\n\r\n"
+
+        self.begin_context_buttons()
+        mailto_url = self.makeuri_contextless([
+            ("subject", "Check_MK GUI Crash Report - " + defaults.check_mk_version),
+            ("body", mail_body)], filename="mailto:feedback@check-mk.org")
+        self.context_button(_("Submit Report"), mailto_url, "email")
+        self.end_context_buttons()
+
+        self.write("<div class=error>")
+        self.write("<b>%s:</b>\n%s<br><br>" % (_('Internal error'), self.attrencode(e)))
+
+        self.begin_foldable_container("html", "exc_details", False, _("Details"))
+        self.write('<div class=log_output>')
+        self.write("<pre>%s</pre>" % details)
+        self.write('</div>')
+        self.end_foldable_container()
+        self.write("</div>")
+
     def show_error(self, msg):
-        if self.mobile:
-            self.write('<center>')
-        if self.output_format == "html":
-            self.write("<div class=error>%s</div>\n" % msg)
-        else:
-            self.write(_("ERROR: "))
-            self.write(self.strip_tags(msg))
-            self.write("\n")
-        if self.mobile:
-            self.write('</center>')
+        self.message(msg, 'error')
 
     def show_warning(self, msg):
-        if self.mobile:
-            self.write('<center>')
-        if self.output_format == "html":
-            self.write("<div class=warning>%s</div>\n" % msg)
-        else:
-            self.write(_("WARNING: "))
-            self.write(self.strip_tags(msg))
-            self.write("\n")
-        if self.mobile:
-            self.write('</center>')
+        self.message(msg, 'warning')
 
-    def message(self, msg):
-        if self.mobile:
-            self.write('<center>')
-        if self.output_format == "html":
-            self.write("<div class=success>%s</div>\n" % msg)
+    # obj might be either a string (str or unicode) or an exception object
+    def message(self, obj, what='message'):
+        if what == 'message':
+            cls    = 'success'
+            prefix = _('MESSAGE')
+        elif what == 'warning':
+            cls    = 'warning'
+            prefix = _('WARNING')
         else:
-            self.write(_("MESSAGE: "))
-            self.write(self.strip_tags(msg))
-            self.write("\n")
-        if self.mobile:
-            self.write('</center>')
+            cls    = 'error'
+            prefix = _('ERROR')
+
+        # Only strip off some tags. We allow some simple tags like
+        # <b>, <tt>, <i> to be part of the exception message. The tags
+        # are escaped first and then fixed again after attrencode.
+        msg = self.attrencode(obj)
+        msg = re.sub(r'&lt;(/?)(b|tt|i|br|pre|a|sup|p)&gt;', r'<\1\2>', msg)
+        # Also repair link definitions
+        msg = re.sub(r'&lt;a href=&quot;(.*)&quot;&gt;', r'<a href="\1">', msg)
+
+        if self.output_format == "html":
+            if self.mobile:
+                self.write('<center>')
+            self.write("<div class=%s>%s</div>\n" % (cls, msg))
+            if self.mobile:
+                self.write('</center>')
+        else:
+            self.write('%s: %s\n' % (prefix, self.strip_tags(msg)))
+
+    def show_localization_hint(self):
+        url = "wato.py?mode=edit_configvar&varname=user_localizations"
+        self.message(HTML("<sup>*</sup>" +
+            _("These texts may be localized depending on the users' "
+              "language. You can configure the localizations "
+              "<a href=\"%s\">in the global settings</a>.") % url))
 
     # Embed help box, whose visibility is controlled by a global
     # button in the page.
@@ -940,8 +1043,8 @@ class html:
             hover = ' onmouseover="this.style.display=\'none\';"'
         else:
             hover = ""
-        self.lowlevel_write('<table %s class=debug_vars>' % hover)
-        self.lowlevel_write("<tr><th colspan=2>POST / GET Variables</th></tr>")
+        self.write('<table %s class=debug_vars>' % hover)
+        self.write("<tr><th colspan=2>POST / GET Variables</th></tr>")
         for name, value in sorted(self.vars.items()):
             if not prefix or name.startswith(prefix):
                 self.write("<tr><td class=left>%s</td><td class=right>%s</td></tr>\n" %
@@ -963,9 +1066,7 @@ class html:
 
     def var_utf8(self, varname, deflt = None):
         val = self.vars.get(varname, deflt)
-        if val == None:
-            return val
-        else:
+        if val != None:
             return val.decode("utf-8")
 
     # Return all values of a variable that possible occurs more
@@ -1119,14 +1220,21 @@ class html:
         else:
             return False
 
-    def confirm(self, msg, method="POST", action=None):
+    # The confirm dialog is normally not a dialog which need to be protected
+    # by a transid itselfs. It is only a intermediate step to the real action
+    # But there are use cases where the confirm dialog is used during rendering
+    # a normal page, for example when deleting a dashlet from a dashboard. In
+    # such cases, the transid must be added by the confirm dialog.
+    def confirm(self, msg, method="POST", action=None, add_transid=False):
         if self.var("_do_actions") == _("No"):
-            return # user has pressed "No"               # None --> "No"
+            # User has pressed "No", now invalidate the unused transid
+            self.check_transaction()
+            return # None --> "No"
         if not self.has_var("_do_confirm"):
             if self.mobile:
                 self.write('<center>')
             self.write("<div class=really>%s" % msg)
-            self.begin_form("confirm", method=method, action=action)
+            self.begin_form("confirm", method=method, action=action, add_transid=add_transid)
             self.hidden_fields(add_action_vars = True)
             self.button("_do_confirm", _("Yes!"), "really")
             self.button("_do_actions", _("No"), "")
@@ -1134,9 +1242,10 @@ class html:
             self.write("</div>")
             if self.mobile:
                 self.write('</center>')
-            return False                                # False --> "Dialog shown, no answer yet"
+            return False # False --> "Dialog shown, no answer yet"
         else:
-            return self.check_transaction() and True or None # True: "Yes", None --> Browser reload
+            # Now check the transaction
+            return self.check_transaction() and True or None # True: "Yes", None --> Browser reload of "yes" page
 
     def register_event(self, name):
         self.events.add(name)
@@ -1189,26 +1298,19 @@ class html:
     # From here: Former not class functions
 
     # Encode HTML attributes: replace " with &quot;, also replace
-    # < and >. This code is slow.
+    # < and >. This code is slow. Works on str and unicode without
+    # changing the type. Also works on things that can be converted
+    # with %s.
     def attrencode(self, value):
-        if type(value) == int:
+        ty = type(value)
+        if ty == int:
             return str(value)
-        elif type(value) not in [str, unicode]:
-            value = str(value)
+        elif isinstance(value, HTML):
+            return value.value # This is HTML code which must not be escaped
+        elif ty not in [str, unicode]: # also possible: type Exception!
+            value = "%s" % value # Note: this allows Unicode. value might not have type str now
 
-        new = ""
-        for c in value:
-            if c == '"':
-                new += "&quot;"
-            elif c == '<':
-                new += "&lt;"
-            elif c == '>':
-                new += "&gt;"
-            else:
-                new += c
-        return new
-
-
+        return value.replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
     # This function returns a str object, never unicode!
     # Beware: this code is crucial for the performance of Multisite!

@@ -84,7 +84,7 @@ def inventory_windows_services(info):
         use_as_item = None
         if svc:
             if svc.startswith("~"):
-                r = get_regex(svc[1:])
+                r = regex(svc[1:])
                 if not r.match(name) and not r.match(description):
                     return []
             elif svc != name and svc != description:
@@ -176,7 +176,7 @@ def inventory_windows_services(info):
 def check_windows_services(item, params, info):
     # Hack for old manually defined checks:
     if params == None:
-        params = factory_settings["services_default_levels"];
+        params = factory_settings["services_default_levels"]
 
     # A service may appear more than once (due to clusters).
     # First make a list of all matching entries with their
@@ -185,7 +185,10 @@ def check_windows_services(item, params, info):
     for line in info:
         # allow to match agains the internal name or agains the display name
         # of the service
-        if item == line[1] or item == " ".join(line[3:]):
+        display_name = " ".join(line[3:])
+        if item == line[1] or item == display_name \
+           or line[1] in params['additional_servicenames'] \
+           or display_name in params['additional_servicenames']:
             # newer agents also send start type as part of state,
             # e.g. running/auto
             if '/' in line[2]:
@@ -195,9 +198,8 @@ def check_windows_services(item, params, info):
                 start_type = "unknown"
             found.append((line[0], state, start_type, " ".join(line[3:])))
 
-    if len(found) == 0:
-        return (3, "service not found")
-
+    if not found:
+        return params["else"], "service not found"
 
     # We take the best found state (neccessary for clusters)
     best_state = None
@@ -222,8 +224,9 @@ def check_windows_services(item, params, info):
 
 
 factory_settings["services_default_levels"] = {
-    "states"      : [ ( "running", None, 0 ) ],
-    "else"        : 2,
+    "states"                    : [ ( "running", None, 0 ) ],
+    "else"                      : 2,
+    "additional_servicenames"   : [],
 }
 
 check_info['services'] = {

@@ -148,7 +148,8 @@ def filt_it(package, relation):
             field = re.sub(list_start+":\*.", "", field)
             for item in field.split("."):
                 value = package[item]
-                if type(value) in (str, int, float) and value == should_be:
+                if type(value) in (str, int, float) and re.search(should_be, value):
+
                     return False
     return True
 
@@ -224,6 +225,9 @@ def list_get(hostname, list_start):
 all_data = {}
 inventory_date = {}
 for hostname in os.listdir(inv_dir):
+    # ignore gziped files and invisible files in directory for now
+    if hostname.endswith(".gz") or hostname.startswith("."):
+        continue
     fn = inv_dir + hostname
     if os.path.isfile(fn):
         a = eval(open(fn,'r').read())

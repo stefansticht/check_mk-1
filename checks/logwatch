@@ -180,10 +180,7 @@ def logwatch_precompile(hostname, item, _unused):
 
 def logwatch_reclassify(counts, patterns, text):
     for level, pattern in patterns:
-        reg = compiled_regexes.get(pattern)
-        if not reg:
-            reg = re.compile(pattern)
-            compiled_regexes[pattern] = reg
+        reg = regex(pattern)
         if reg.search(text):
             # If the level is not fixed like 'C' or 'W' but a pair like (10, 20),
             # then we count how many times this pattern has already matched and
@@ -239,7 +236,7 @@ def check_logwatch(item, params, info):
 check_info['logwatch'] = {
     'check_function':      check_logwatch,
     'inventory_function':  inventory_logwatch,
-    'service_description': "LOG %s",
+    'service_description': "Log %s",
     'group':               'logwatch',
 }
 
@@ -330,11 +327,10 @@ def check_logwatch_generic(item, params, loglines, found, groups=False):
             if www_group != None:
                 try:
                     if i_am_root():
-                        import pwd
-                        to_user = pwd.getpwnam(nagios_user)[2]
+                        to_user = nagios_user
                     else:
-                        to_user = -1 # keep user unchanged
-                    os.chown(logdir, to_user, www_group)
+                        to_user = "" # keep user unchanged
+                    os.system("chown %s:%s %s" % (to_user, www_group, quote_shell_string(logdir)))
                     os.chmod(logdir, 0775)
                 except Exception, e:
                     os.rmdir(logdir)

@@ -10,6 +10,9 @@ description:
 perfdata:
  The number of users
 
+inventory:
+ One service is created per Lotus Domino Server.
+
 [parameters]
 parameters(tuple): parameters is a tuple of two values
 

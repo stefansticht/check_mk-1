@@ -33,39 +33,51 @@ except:
     pass
 
 
-nagios_state_names = { -1: _("NODATA"), 0: _("OK"), 1: _("WARNING"), 2: _("CRITICAL"), 3: _("UNKNOWN")}
+core_state_names = { -1: _("NODATA"), 0: _("OK"), 1: _("WARNING"), 2: _("CRITICAL"), 3: _("UNKNOWN")}
 nagios_short_state_names = { -1: _("PEND"), 0: _("OK"), 1: _("WARN"), 2: _("CRIT"), 3: _("UNKN") }
 nagios_short_host_state_names = { 0: _("UP"), 1: _("DOWN"), 2: _("UNREACH") }
 
-class MKGeneralException(Exception):
+# never used directly in the code. Just some wrapper to make all of our
+# exceptions handleable with one call
+class MKException(Exception):
+    # Do not use the Exception() __str__, because it uses str()
+    # to convert the message. We want to keep unicode strings untouched
+    def __str__(self):
+        return self.message
+
+class MKGeneralException(MKException):
+    plain_title = _("General error")
+    title       = _("Error")
     def __init__(self, reason):
         self.reason = reason
     def __str__(self):
         return self.reason
 
-class MKAuthException(Exception):
+class MKAuthException(MKException):
+    title       = _("Permission denied")
+    plain_title = _("Authentication error")
     def __init__(self, reason):
         self.reason = reason
     def __str__(self):
         return self.reason
 
 class MKUnauthenticatedException(MKGeneralException):
-    pass
+    title       = _("Not authenticated")
+    plain_title = _("Missing authentication credentials")
 
-class MKConfigError(Exception):
-    def __init__(self, msg):
-        Exception.__init__(self, msg)
+class MKConfigError(MKException):
+    title       = _("Configuration error")
+    plain_title = _("Configuration error")
 
-class MKUserError(Exception):
-    def __init__(self, varname, msg):
+class MKUserError(MKException):
+    title       = _("Invalid User Input")
+    plain_title = _("User error")
+    def __init__(self, varname, message):
         self.varname = varname
-        self.message = msg
-        Exception.__init__(self, msg)
+        Exception.__init__(self, message)
 
-class MKInternalError(Exception):
-    def __init__(self, msg):
-        Exception.__init__(self, msg)
-
+class MKInternalError(MKException):
+    pass
 
 # Create directory owned by common group of Nagios and webserver,
 # and make it writable for the group
@@ -116,7 +128,16 @@ def create_user_file(path, mode):
     return f
 
 def write_settings_file(path, content):
-    create_user_file(path, "w").write(pprint.pformat(content) + "\n")
+    try:
+        data = pprint.pformat(content)
+    except UnicodeDecodeError:
+        # When writing a dict with unicode keys and normal strings with garbled
+        # umlaut encoding pprint.pformat() fails with UnicodeDecodeError().
+        # example:
+        #   pprint.pformat({'Z\xc3\xa4ug': 'on',  'Z\xe4ug': 'on', u'Z\xc3\xa4ugx': 'on'})
+        # Catch the exception and use repr() instead
+        data = repr(content)
+    create_user_file(path, "w").write(data + "\n")
 
 def savefloat(f):
     try:
@@ -132,6 +153,20 @@ except:
         a = l[:]
         a.sort()
         return a
+
+# We should use /dev/random here for cryptographic safety. But
+# that involves the great problem that the system might hang
+# because of loss of entropy. So we hope /dev/urandom is enough.
+# Furthermore we filter out non-printable characters. The byte
+# 0x00 for example does not make it through HTTP and the URL.
+def get_random_string(size):
+    secret = ""
+    urandom = file("/dev/urandom")
+    while len(secret) < size:
+        c = urandom.read(1)
+        if ord(c) >= 48 and ord(c) <= 90:
+            secret += c
+    return secret
 
 # Generates a unique id
 def gen_id():
@@ -149,18 +184,18 @@ def gen_id():
 # local-hierarchy for OMD
 def load_web_plugins(forwhat, globalvars):
     plugins_path = defaults.web_dir + "/plugins/" + forwhat
-
-    fns = os.listdir(plugins_path)
-    fns.sort()
-    for fn in fns:
-        file_path = plugins_path + "/" + fn
-        if fn.endswith(".py"):
-            if not os.path.exists(file_path + "c"):
-                execfile(file_path, globalvars)
-        elif fn.endswith(".pyc"):
-            code_bytes = file(file_path).read()[8:]
-            code = marshal.loads(code_bytes)
-            exec code in globalvars
+    if os.path.exists(plugins_path):
+        fns = os.listdir(plugins_path)
+        fns.sort()
+        for fn in fns:
+            file_path = plugins_path + "/" + fn
+            if fn.endswith(".py"):
+                if not os.path.exists(file_path + "c"):
+                    execfile(file_path, globalvars)
+            elif fn.endswith(".pyc"):
+                code_bytes = file(file_path).read()[8:]
+                code = marshal.loads(code_bytes)
+                exec code in globalvars
 
     if defaults.omd_root:
         local_plugins_path = defaults.omd_root + "/local/share/check_mk/web/plugins/" + forwhat
@@ -292,16 +327,22 @@ def format_plugin_output(output, row = None):
     if config.escape_plugin_output:
         output = re.sub("http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+",
                          lambda p: '<a href="%s"><img class=pluginurl align=absmiddle title="%s" src="images/pluginurl.png"></a>' %
-                            (p.group(0), p.group(0)), output)
+                            (p.group(0).replace('&quot;', ''), p.group(0).replace('&quot;', '')), output)
 
     return output
 
 def format_exception():
-    import traceback, StringIO, sys
-    txt = StringIO.StringIO()
-    t, v, tb = sys.exc_info()
-    traceback.print_exception(t, v, tb, None, txt)
-    return txt.getvalue()
+    import traceback
+    return traceback.format_exc()
+
+# Escape/strip unwanted chars from (user provided) strings to
+# use them in livestatus queries. Prevent injections of livestatus
+# protocol related chars or strings
+def lqencode(s):
+    # It is not enough to strip off \n\n, because one might submit "\n \n",
+    # which is also interpreted as termination of the last query and beginning
+    # of the next query.
+    return s.replace('\n', '')
 
 def saveint(x):
     try:
@@ -367,6 +408,14 @@ def regex(r):
     regex_cache[r] = rx
     return rx
 
+def escape_regex_chars(text):
+    escaped = ""
+    for c in text:
+        if c in '().^$[]{}+*\\':
+            escaped += '\\'
+        escaped += c
+    return escaped
+
 
 # Splits a word into sequences of numbers and non-numbers.
 # Creates a tuple from these where the number are converted
@@ -380,7 +429,7 @@ def num_split(s):
         return ( int(first_num), ) + num_split(s[len(first_num):])
     else:
         first_word = regex("[0-9]").split(s)[0]
-        return ( first_word, ) + num_split(s[len(first_word):])
+        return ( first_word.lower(), ) + num_split(s[len(first_word):])
 
 
 __builtin__.default_user_localizations = {
