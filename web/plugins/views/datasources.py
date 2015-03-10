@@ -53,7 +53,7 @@
 # needed for constructing Nagios commands)
 # those columns are always fetched from the datasource for each item
 #
-# idkeys: these are used to generate a key which is uniq for each data row
+# idkeys: these are used to generate a key which is unique for each data row
 # is used to identify an item between http requests
 #
 # join: A view can display e.g. host-rows and include information from e.g.
@@ -89,8 +89,7 @@ multisite_datasources["hostsbygroup"] = {
     "keys"    : [ "host_name", "host_downtimes" ],
     "join"    : ( "services", "host_name" ),
     "idkeys"  : [ "site", "hostgroup_name", "host_name" ],
-    "description" : _("Using this, datasources host rows might appear multiple times depending "
-                      "on their membership in hostgroups."),
+    "description" : _("This datasource has a separate row for each group membership that a host has."),
 }
 
 multisite_datasources["services"] = {

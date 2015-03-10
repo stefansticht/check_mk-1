@@ -681,7 +681,7 @@ def quote_tab(col):
     if type(col) in [ float, int ]:
         return str(col)
     elif type(col) in [ tuple, list ]:
-        col = "\1" + "\1".join(col)
+        col = "\1" + "\1".join(map(str, col))
     elif col == None:
         col = "\2"
 
@@ -847,7 +847,7 @@ def parse_history_file(path, headers, filters, greptexts, limit):
     # Revert lines from the log file to have the newer lines processed first
     cmd = 'tac "%s"' % path
     if greptexts:
-        cmd += ' | grep -i -e %s' % ".*".join(greptexts)
+        cmd += " | grep -i -e %s" % quote_shell_string(".*".join(greptexts))
     grep = subprocess.Popen(cmd, shell=True, close_fds=True, stdout=subprocess.PIPE)
 
     for line in grep.stdout:
@@ -3208,18 +3208,18 @@ def substitute_event_tags(text, event):
 
     for key, value in substs:
         if type(value) == tuple:
-            value = " ".join(value)
+            value = " ".join(map(str,value))
         elif type(value) not in [ str, unicode ]:
             value = str(value)
 
         text = text.replace('$%s$' % key.upper(), value)
     return text
 
-def shell_escape(s):
-    return s.replace("'", "'\"'\"")
+def quote_shell_string(s):
+    return "'" + s.replace("'", "'\"'\"'") + "'"
 
 def send_email(to, subject, body):
-    os.popen("mail -s '%s' '%s'" % (shell_escape(subject), shell_escape(to)), "w").write(body)
+    os.popen("mail -s %s %s" % (quote_shell_string(subject), quote_shell_string(to)), "w").write(body)
 
 def execute_script(body):
     p = subprocess.Popen(

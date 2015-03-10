@@ -64,8 +64,20 @@ notification_fallback_email    = ""
 notification_rules             = []
 notification_bulk_interval     = 10 # Check every 10 seconds for ripe bulks
 
-# Notification Spooling
-notification_spooling = False
+# Notification Spooling.
+
+# Possible values for notification_spooling
+# "off"    - Direct local delivery without spooling
+# "local"  - Asynchronous local delivery by notification spooler
+# "remote" - Forward to remote site by notification spooler
+# "both"   - Asynchronous local delivery plus remote forwarding
+# False    - legacy: sync delivery  (and notification_spool_to)
+# True     - legacy: async delivery (and notification_spool_to)
+notification_spooling = "off"
+
+# Legacy setting. The spool target is now specified in the
+# configuration of the spooler. notification_spool_to has
+# the tuple format (remote_host, tcp_port, also_local)
 notification_spool_to = None
 
 
@@ -133,6 +145,8 @@ Available commands:
 # keepalive mode (used by CMC), sends out one notifications from
 # several possible sources or sends out all ripe bulk notifications.
 def do_notify(args):
+    convert_legacy_configuration()
+
     global notify_mode, notification_logging
     if notification_logging == 0:
         notification_logging = 1 # transform deprecated value 0 to 1
@@ -196,6 +210,21 @@ def do_notify(args):
             (time.strftime("%Y-%m-%d %H:%M:%S"), format_exception()))
 
 
+def convert_legacy_configuration():
+    global notification_spooling
+    # Convert legacy spooling configuration to new one (see above)
+    if notification_spooling in (True, False):
+        if notification_spool_to:
+            remote_host, tcp_port, also_local = notification_spool_to
+            if also_local:
+                notification_spooling = "both"
+            else:
+                notification_spooling = "remote"
+        elif notification_spooling:
+            notification_spooling = "local"
+        else:
+            notification_spooling = "remote"
+
 # This function processes one raw notification and decides wether it
 # should be spooled or not. In the latter cased a local delivery
 # is being done.
@@ -205,9 +234,11 @@ def notify_notify(raw_context, analyse=False):
 
     notify_log("----------------------------------------------------------------------")
     if analyse:
-        notify_log("Analysing notification context with %s variables" % len(raw_context))
+        notify_log("Analysing notification (%s) context with %s variables" % (
+            find_host_service(raw_context), len(raw_context)))
     else:
-        notify_log("Got raw notification context with %s variables" % len(raw_context))
+        notify_log("Got raw notification (%s) context with %s variables" % (
+            find_host_service(raw_context), len(raw_context)))
 
     # Add some further variable for the conveniance of the plugins
 
@@ -228,14 +259,11 @@ def notify_notify(raw_context, analyse=False):
                    + "\n".join(sorted(["                    %s=%s" % (k, raw_context[k]) for k in raw_context if k not in raw_keys])))
 
     # Spool notification to remote host, if this is enabled
-    if notification_spool_to:
-        remote_host, tcp_port, also_local = notification_spool_to
-        target_site = "%s:%s" % (remote_host, tcp_port)
-        create_spoolfile({"context": raw_context, "forward": target_site})
-        if not also_local:
-            return
+    if notification_spooling in ("remote", "both"):
+        create_spoolfile({"context": raw_context, "forward": True})
 
-    return locally_deliver_raw_context(raw_context, analyse=analyse)
+    if notification_spooling != "remote":
+        return locally_deliver_raw_context(raw_context, analyse=analyse)
 
 
 # Here we decide which notification implementation we are using.
@@ -509,7 +537,7 @@ def notify_rulebased(raw_context, analyse=False):
                 if not analyse:
                     if bulk:
                         do_bulk_notify(contact, plugin, params, plugin_context, bulk)
-                    elif notification_spooling:
+                    elif notification_spooling in ("local", "both"):
                         create_spoolfile({"context": plugin_context, "plugin": plugin})
                     else:
                         call_notification_script(plugin, plugin_context)
@@ -571,7 +599,7 @@ def user_notification_rules():
 
 def rbn_fake_email_contact(email):
     return {
-        "name"  : email.split("@")[0],
+        "name"  : email,
         "alias" : "Explicit email adress " + email,
         "email" : email,
         "pager" : "",
@@ -588,7 +616,7 @@ def rbn_add_contact_information(plugin_context, contact):
     else:
         if contact.startswith("mailto:"): # Fake contact
             contact_dict = {
-                "name"  : contact[7:].split("@")[0],
+                "name"  : contact[7:],
                 "alias" : "Email address " + contact,
                 "email" : contact[7:],
                 "pager" : "" }
@@ -1031,7 +1059,7 @@ def notify_flexible(raw_context, notification_table):
 
         plugin_context = create_plugin_context(raw_context, entry.get("parameters", []))
 
-        if notification_spooling:
+        if notification_spooling in ("local", "both"):
             create_spoolfile({"context": plugin_context, "plugin": plugin})
         else:
             call_notification_script(plugin, plugin_context)
@@ -1190,7 +1218,7 @@ def check_notification_type(context, host_events, service_events):
 def notify_plain_email(raw_context):
     plugin_context = create_plugin_context(raw_context, [])
 
-    if notification_spooling:
+    if notification_spooling in ("local", "both"):
         create_spoolfile({"context": plugin_context, "plugin" : None})
     else:
         notify_log("Sending plain email to %s" % plugin_context["CONTACTNAME"])
@@ -1358,7 +1386,7 @@ def call_notification_script(plugin, plugin_context):
     notify_log("     executing %s" % path)
     out = os.popen(path + " 2>&1 </dev/null")
     for line in out:
-        notify_log("Output: %s" % line.rstrip())
+        notify_log("Output: %s" % line.rstrip().decode('utf-8'))
     exitcode = out.close()
     if exitcode:
         notify_log("Plugin exited with code %d" % (exitcode >> 8))
@@ -1400,13 +1428,14 @@ def create_spoolfile(data):
 # 3. Notifications to *got* forwarded. Contain neither of both.
 # Spool files of type 1 are not handled here!
 def handle_spoolfile(spoolfile):
+    notify_log("----------------------------------------------------------------------")
     try:
         data = eval(file(spoolfile).read())
         if "plugin" in data:
             plugin_context = data["context"]
             plugin = data["plugin"]
-            notify_log("Got spool file for local delivery via %s" % (
-                plugin or "plain mail"))
+            notify_log("Got spool file (%s) for local delivery via %s" % (
+                find_host_service(plugin_context), (plugin or "plain mail")))
             return call_notification_script(plugin, plugin_context)
 
         else:
@@ -1601,13 +1630,21 @@ def notify_bulk(dirname, uuids):
     old_params = None
     unhandled_uuids = []
     for mtime, uuid in uuids:
-        params, context = eval(file(dirname + "/" + uuid).read())
+        try:
+            params, context = eval(file(dirname + "/" + uuid).read())
+        except Exception, e:
+            if opt_debug:
+                raise
+            notify_log("    Deleting corrupted or empty bulk file %s/%s: %s" % (dirname, uuid, e))
+            continue
+
         if old_params == None:
             old_params = params
         elif params != old_params:
             notify_log("     Parameters are different from previous, postponing into separate bulk")
             unhandled_uuids.append((mtime, uuid))
             continue
+
         bulk_context.append("\n")
         for varname, value in context.items():
             bulk_context.append("%s=%s\n" % (varname, value.replace("\r", "").replace("\n", "\1")))
@@ -1618,9 +1655,12 @@ def notify_bulk(dirname, uuids):
         plugin_name = "bulk " + (plugin or "plain email")
         core_notification_log(plugin_name, context)
 
-    parameter_context = create_bulk_parameter_context(old_params)
-    context_text = "".join(parameter_context + bulk_context)
-    call_bulk_notification_script(plugin, context_text)
+    if bulk_context: # otherwise: only corrupted files
+        parameter_context = create_bulk_parameter_context(old_params)
+        context_text = "".join(parameter_context + bulk_context)
+        call_bulk_notification_script(plugin, context_text)
+    else:
+        notify_log("No valid notification file left. Skipping this bulk.")
 
     # Remove sent notifications
     for mtime, uuid in uuids:
@@ -1862,6 +1902,13 @@ def substitute_context(template, context):
 #   |  Some generic helper functions                                       |
 #   '----------------------------------------------------------------------'
 
+def find_host_service(context):
+    host = context.get("HOSTNAME", "UNKNOWN")
+    service = context.get("SERVICEDESC")
+    if service:
+        return host + ";" + service
+    else:
+        return host
 
 def livestatus_fetch_query(query):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

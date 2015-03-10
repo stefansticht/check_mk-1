@@ -42,7 +42,7 @@ import sys
 # to python module names like "random"
 sys.path.pop(0)
 
-import socket, os, time, re, signal, math, tempfile
+import socket, os, time, re, signal, math, tempfile, traceback
 
 # PLANNED CLEANUP:
 # - central functions for outputting verbose information and bailing
@@ -91,6 +91,8 @@ def reset_global_caches():
     g_dns_cache         = {}
     global g_ip_lookup_cache
     g_ip_lookup_cache   = None  # permanently cached ipaddresses from ipaddresses.cache
+    global g_converted_rulesets_cache
+    g_converted_rulesets_cache = {}
 
 reset_global_caches()
 
@@ -139,8 +141,11 @@ else:
 # Output text if opt_verbose is set (-v). Adds no linefeed
 def verbose(text):
     if opt_verbose:
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except:
+            pass # avoid exception on broken pipe (e.g. due to | head)
 
 # Output text if, opt_verbose >= 2 (-vv).
 def vverbose(text):
@@ -230,6 +235,13 @@ class MKAgentError(Exception):
     def __str__(self):
         return self.reason
 
+class MKParseFunctionError(Exception):
+    def __init__(self, orig_exception, backtrace):
+        self.orig_exception = orig_exception
+        self.backtrace = backtrace
+    def __str__(self):
+        return str(str(self.orig_exception) + "\n" + self.backtrace)
+
 class MKSNMPError(Exception):
     def __init__(self, reason):
         self.reason = reason
@@ -257,24 +269,32 @@ class MKCheckTimeout(Exception):
 #   |  Functions for getting monitoring data from TCP/SNMP agent.          |
 #   '----------------------------------------------------------------------'
 
-# Collect information needed for one check. In case the check uses
-# extra sections (new feature since 1.2.7i1) only the main section
-# raises exceptions. Error in extra sections are silently ignored
-# and the info is replaced with None.
-def get_info_for_check(hostname, ipaddress, infotype, max_cachefile_age=None, ignore_check_interval=False):
+def apply_parse_function(info, section_name):
+    # Now some check types define a parse function. In that case the
+    # info is automatically being parsed by that function - on the fly.
+    if info != None and section_name in check_info:
+        parse_function = check_info[section_name]["parse_function"]
+        if parse_function:
+            try:
+                return parse_function(info)
+            except Exception, e:
+                if opt_debug:
+                    raise
+                # In case of a failed parse function return the exception instead of
+                # an empty result.
+                raise MKParseFunctionError(e, traceback.format_exc())
+    return info
 
-    if infotype in check_info:
-        extra_sections = check_info[infotype]["extra_sections"]
-        if extra_sections:
-            info = [ get_host_info(hostname, ipaddress, infotype, max_cachefile_age, ignore_check_interval) ]
-            for es in extra_sections:
-                try:
-                    info.append(get_host_info(hostname, ipaddress, es, max_cachefile_age, ignore_check_interval=False))
-                except:
-                    info.append(None)
-            return info
-
-    return get_host_info(hostname, ipaddress, infotype, max_cachefile_age, ignore_check_interval)
+def get_info_for_check(hostname, ipaddress, section_name, max_cachefile_age=None, ignore_check_interval=False):
+    info = apply_parse_function(get_host_info(hostname, ipaddress, section_name, max_cachefile_age, ignore_check_interval), section_name)
+    if section_name in check_info and check_info[section_name]["extra_sections"]:
+        info = [ info ]
+        for es in check_info[section_name]["extra_sections"]:
+            try:
+                info.append(apply_parse_function(get_host_info(hostname, ipaddress, es, max_cachefile_age, ignore_check_interval=False), es))
+            except:
+                info.append(None)
+    return info
 
 
 # This is the main function for getting information needed by a
@@ -349,14 +369,6 @@ def get_host_info(hostname, ipaddress, checkname, max_cachefile_age=None, ignore
             else:
                 add_host = None
             info = [ [add_host] + line for line in info ]
-
-    # Now some check types define a parse function. In that case the
-    # info is automatically being parsed by that function - on the fly.
-    if checkname in check_info: # e.g. not the case for cpu (check is cpu.loads)
-        parse_function = check_info[checkname]["parse_function"]
-        if parse_function:
-            parsed = parse_function(info)
-            return parsed
 
     return info
 
@@ -477,8 +489,7 @@ def get_realhost_info(hostname, ipaddress, check_type, max_cache_age, ignore_che
     elif len(output) < 16:
         raise MKAgentError("Too short output from agent: '%s'" % output)
 
-    lines = [ l.strip() for l in output.split('\n') ]
-    info, piggybacked, persisted = parse_info(lines, hostname)
+    info, piggybacked, persisted = parse_info(output.split("\n"), hostname)
     store_piggyback_info(hostname, piggybacked)
     store_persisted_info(hostname, persisted)
     store_cached_hostinfo(hostname, info)
@@ -518,7 +529,7 @@ def add_persisted_info(hostname, info):
         if now < persisted_until or opt_force:
             if section not in info:
                 info[section] = persisted_section
-                verbose("Added persisted section %s.\n" % section)
+                vverbose("Added persisted section %s.\n" % section)
         else:
             verbose("Persisted section %s is outdated by %d seconds. Deleting it.\n" % (
                     section, now - persisted_until))
@@ -531,10 +542,8 @@ def add_persisted_info(hostname, info):
         store_persisted_info(hostname, persisted)
 
 
-def get_piggyback_info(hostname):
-    output = ""
-    if not hostname:
-        return output
+def get_piggyback_files(hostname):
+    files = []
     dir = tmp_dir + "/piggyback/" + hostname
     if os.path.exists(dir):
         for sourcehost in os.listdir(dir):
@@ -548,9 +557,21 @@ def get_piggyback_info(hostname):
                     os.remove(file_path)
                     continue
 
-                verbose("Using piggyback information from host %s.\n" % sourcehost)
+                files.append((sourcehost, file_path))
+    return files
 
-                output += file(file_path).read()
+
+def has_piggyback_info(hostname):
+    return get_piggyback_files(hostname) != []
+
+
+def get_piggyback_info(hostname):
+    output = ""
+    if not hostname:
+        return output
+    for sourcehost, file_path in get_piggyback_files(hostname):
+        verbose("Using piggyback information from host %s.\n" % sourcehost)
+        output += file(file_path).read()
     return output
 
 
@@ -606,6 +627,11 @@ def translate_piggyback_host(sourcehost, backedhost):
     if translation.get("drop_domain") and not backedhost[0].isdigit():
         backedhost = backedhost.split(".", 1)[0]
 
+    # To make it possible to match umlauts we need to change the backendhost
+    # to a unicode string which can then be matched with regexes etc.
+    # We assume the incoming name is correctly encoded in UTF-8
+    backedhost = backedhost.decode('utf-8')
+
     # 3. Regular expression conversion
     if "regex" in translation:
         regex, subst = translation.get("regex")
@@ -624,8 +650,7 @@ def translate_piggyback_host(sourcehost, backedhost):
             backedhost = to_host
             break
 
-    return backedhost
-
+    return backedhost.encode('utf-8') # change back to UTF-8 encoded string
 
 
 def read_cache_file(relpath, max_cache_age):
@@ -792,7 +817,6 @@ def store_cached_checkinfo(hostname, checkname, table):
 # 2. piggy-backed data for other hosts
 # 3. Sections to be persisted for later usage
 def parse_info(lines, hostname):
-
     info = {}
     piggybacked = {} # unparsed info for other hosts
     persist = {} # handle sections with option persist(...)
@@ -802,8 +826,10 @@ def parse_info(lines, hostname):
     separator = None
     encoding  = None
     for line in lines:
-        if line[:4] == '<<<<' and line[-4:] == '>>>>':
-            host = line[4:-4]
+        line = line.rstrip("\r")
+        stripped_line = line.strip()
+        if stripped_line[:4] == '<<<<' and stripped_line[-4:] == '>>>>':
+            host = stripped_line[4:-4]
             if not host:
                 host = None
             else:
@@ -815,8 +841,8 @@ def parse_info(lines, hostname):
 
         # Found normal section header
         # section header has format <<<name:opt1(args):opt2:opt3(args)>>>
-        elif line[:3] == '<<<' and line[-3:] == '>>>':
-            section_header = line[3:-3]
+        elif stripped_line[:3] == '<<<' and stripped_line[-3:] == '>>>':
+            section_header = stripped_line[3:-3]
             headerparts = section_header.split(":")
             section_name = headerparts[0]
             section_options = {}
@@ -846,7 +872,10 @@ def parse_info(lines, hostname):
             # The section data might have a different encoding
             encoding = section_options.get("encoding")
 
-        elif line != '':
+        elif stripped_line != '':
+            if "nostrip" not in section_options:
+                line = stripped_line
+
             if encoding:
                 try:
                     decoded_line = line.decode(encoding)
@@ -854,6 +883,7 @@ def parse_info(lines, hostname):
                 except:
                     pass
             section.append(line.split(separator))
+
     return info, piggybacked, persist
 
 
@@ -936,6 +966,11 @@ def clear_counters(pattern, older_than):
         del g_counters[name]
 
 
+# Idea (1): We could keep global variables for the name of the checktype and item
+# during a check and that way "countername" would need to be unique only
+# within one checked item. So e.g. you could use "bcast" as name and not "if.%s.bcast" % item
+# Idea (2): Check_MK should fetch a time stamp for each info. This should also be
+# available as a global variable, so that this_time would be an optional argument.
 def get_rate(countername, this_time, this_val, allow_negative=False, onwrap=SKIP):
     try:
         timedif, rate = get_counter(countername, this_time, this_val, allow_negative)
@@ -1282,6 +1317,9 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
             g_broken_agent_hosts.add(hostname)
             continue
 
+        except MKParseFunctionError, e:
+            info = e
+
         if info or info == []:
             num_success += 1
             try:
@@ -1294,6 +1332,10 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
 
                 # Call the actual check function
                 reset_wrapped_counters()
+
+                if isinstance(info, MKParseFunctionError):
+                    raise Exception(str(info))
+
                 result = convert_check_result(check_function(item, params, info), check_uses_snmp(checkname))
                 if last_counter_wrap():
                     raise last_counter_wrap()
@@ -1303,14 +1345,13 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
             # handling of wrapped counters via exception. Do not submit
             # any check result in that case:
             except MKCounterWrapped, e:
-                if opt_verbose:
-                    print "Cannot compute check result: %s" % e
+                verbose("%-20s PEND - Cannot compute check result: %s\n" % (description, e))
                 dont_submit = True
 
             except Exception, e:
                 text = "check failed - please submit a crash report!"
                 try:
-                    import traceback, pprint, tarfile, base64
+                    import pprint, tarfile, base64
                     # Create a crash dump with a backtrace and the agent output.
                     # This is put into a directory per service. The content is then
                     # put into a tarball, base64 encoded and put into the long output
@@ -1364,7 +1405,7 @@ def do_all_checks_on_host(hostname, ipaddress, only_check_types = None):
 
     try:
         if is_tcp_host(hostname):
-            version_info = get_host_info(hostname, ipaddress, 'check_mk')
+            version_info = get_info_for_check(hostname, ipaddress, 'check_mk')
             agent_version = version_info[0][1]
         else:
             agent_version = None
@@ -1867,19 +1908,19 @@ def get_nic_speed_human_readable(speed):
     try:
         speedi = int(speed)
         if speedi == 10000000:
-            speed = "10 MBit/s"
+            speed = "10 Mbit/s"
         elif speedi == 100000000:
-            speed = "100 MBit/s"
+            speed = "100 Mbit/s"
         elif speedi == 1000000000:
-            speed = "1 GBit/s"
+            speed = "1 Gbit/s"
         elif speed < 1500:
-            speed = "%d Bit/s" % speedi
+            speed = "%d bit/s" % speedi
         elif speed < 1000000:
-            speed = "%.1f KBit/s" % (speedi / 1000.0)
+            speed = "%.1f Kbit/s" % (speedi / 1000.0)
         elif speed < 1000000000:
-            speed = "%.2f MBit/s" % (speedi / 1000000.0)
+            speed = "%.2f Mbit/s" % (speedi / 1000000.0)
         else:
-            speed = "%.2f GBit/s" % (speedi / 1000000000.0)
+            speed = "%.2f Gbit/s" % (speedi / 1000000000.0)
     except:
         pass
     return speed
@@ -1902,6 +1943,17 @@ def get_age_human_readable(secs):
     if days < 7 and hours > 0:
         return "%d days %d hours" % (days, hours)
     return "%d days" % days
+
+# Format perc (0 <= perc <= 100 + x) so that precision
+# digits are being displayed. This avoids a "0.00%" for
+# very small numbers
+def get_percent_human_readable(perc, precision=2):
+    if perc > 0:
+        perc_precision = max(1, 2 - int(round(math.log(perc, 10))))
+    else:
+        perc_precision = 1
+    return "%%.%df%%%%" % perc_precision % perc
+
 
 # Quote string for use as arguments on the shell
 def quote_shell_string(s):

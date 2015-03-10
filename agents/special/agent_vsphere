@@ -522,6 +522,9 @@ socket.setdefaulttimeout(opt_timeout)
 def get_agent_info_tcp(hostname):
     output = ""
     try:
+        # TODO: gethostbyname() automatically detects IP addresses and does
+        # *not* contact any nameserver in that case. So the following two
+        # lines of code should not be neccessary:
         if hostname[0] in "123456789":
             ipaddress = hostname
         else:
@@ -559,7 +562,11 @@ systemfields = [
  ("perfManager", None),
  ("sessionManager", None),
  ("licenseManager", None),
- ("propertyCollector", None)
+ ("propertyCollector", None),
+ ("version", None),
+ ("build", None),
+ ("vendor", None),
+ ("osType", None),
 ]
 
 systeminfo = {}
@@ -688,24 +695,32 @@ if not error:
         print "Version: %.1f" % systeminfo["apiVersion"]
         print "AgentOS: %s" %   systeminfo["name"]
 
+        print "<<<esx_systeminfo>>>"
+        for entry in systeminfo.items():
+            print "%s %s" % entry
+
         ###########################
         # Licenses
         ###########################
-        reply_code, reply_msg, reply_headers, licenses_response = query_server(telegram_list["licenseassigned"])
-        license_hosts = get_pattern('<returnval>(.*?)</returnval>', licenses_response)
-        licenses = {}
-        for host in license_hosts:
-            key, name, total, used = get_pattern("<licenseKey>(.*?)</licenseKey>.*?<name>(.*?)</name><total>(.*?)</total><used>(.*?)</used>", host)[0]
-            # We merge all entries with the same name, duplicate keys are ignored since they provide the same data
-            licenses.setdefault(name, {"used_keys": [], "total": 0, "used": 0})
-            if key not in licenses[name]["used_keys"]:
-                licenses[name]["total"] += int(total)
-                licenses[name]["used"]  += int(used)
-                licenses[name]["used_keys"].append(key)
+        if "licenses" in query_objects:
+            reply_code, reply_msg, reply_headers, licenses_response = query_server(telegram_list["licenseassigned"])
+            license_hosts = get_pattern('<returnval>(.*?)</returnval>', licenses_response)
+            licenses = {}
+            for host in license_hosts:
+                license_info = get_pattern("<licenseKey>(.*?)</licenseKey>.*?<name>(.*?)</name><total>(.*?)</total><used>(.*?)</used>", host)
+                if not license_info:
+                    continue
+                key, name, total, used  = license_info[0]
+                # We merge all entries with the same name, duplicate keys are ignored since they provide the same data
+                licenses.setdefault(name, {"used_keys": [], "total": 0, "used": 0})
+                if key not in licenses[name]["used_keys"]:
+                    licenses[name]["total"] += int(total)
+                    licenses[name]["used"]  += int(used)
+                    licenses[name]["used_keys"].append(key)
 
-        print "<<<esx_vsphere_licenses:sep(9)>>>"
-        for license, values in licenses.items():
-            print "%s\t%s %s" % (license, values["used"], values["total"])
+            print "<<<esx_vsphere_licenses:sep(9)>>>"
+            for license, values in licenses.items():
+                print "%s\t%s %s" % (license, values["used"], values["total"])
 
         #############################
         # Determine available host systems

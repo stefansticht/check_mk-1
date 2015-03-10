@@ -154,12 +154,15 @@ class html:
         for tf in self.transformations:
             text = tf(text)
 
-        if type(text) == unicode:
-	    text = text.encode("utf-8")
-
         if self.plugged:
             self.plugged_text += text
         else:
+            # encode when really writing out the data. Not when writing plugged,
+            # because the plugged code will be handled somehow by our code. We
+            # only encode when leaving the pythonic world.
+            if type(text) == unicode:
+	        text = text.encode("utf-8")
+
             self.lowlevel_write(text)
 
     def plug(self):
@@ -356,7 +359,7 @@ class html:
     def render_icon(self, icon, help="", middle=True):
         align = middle and ' align=absmiddle' or ''
         title = help and ' title="%s"' % self.attrencode(help) or ""
-        if "/" in icon:
+        if "/" in icon or "." in icon:
             src = "images/" + icon
         else:
             src = "images/icon_%s.png" % icon
@@ -1002,7 +1005,7 @@ class html:
         # <b>, <tt>, <i> to be part of the exception message. The tags
         # are escaped first and then fixed again after attrencode.
         msg = self.attrencode(obj)
-        msg = re.sub(r'&lt;(/?)(b|tt|i|br|pre|a|sup|p)&gt;', r'<\1\2>', msg)
+        msg = re.sub(r'&lt;(/?)(b|tt|i|br(?: /)?|pre|a|sup|p|li|ul|ol)&gt;', r'<\1\2>', msg)
         # Also repair link definitions
         msg = re.sub(r'&lt;a href=&quot;(.*)&quot;&gt;', r'<a href="\1">', msg)
 
@@ -1066,8 +1069,10 @@ class html:
 
     def var_utf8(self, varname, deflt = None):
         val = self.vars.get(varname, deflt)
-        if val != None:
+        if val != None and type(val) != unicode:
             return val.decode("utf-8")
+        else:
+            return val
 
     # Return all values of a variable that possible occurs more
     # than once in the URL. note: self.listvars does contain those
@@ -1123,7 +1128,7 @@ class html:
 
     def reload_sidebar(self):
         if not self.has_var("_ajaxid"):
-            self.javascript("if(parent && parent.frames[0]) parent.frames[0].location.reload();");
+            self.javascript("reload_sidebar()")
 
     def set_ignore_transids(self):
         self.ignore_transids = True
@@ -1270,7 +1275,7 @@ class html:
     def debug(self, *x):
         import pprint
         for element in x:
-            self.lowlevel_write("<pre>%s</pre>\n" % pprint.pformat(element))
+            self.lowlevel_write("<pre>%s</pre>\n" % self.attrencode(pprint.pformat(element)))
 
 
     def has_cookie(self, varname):

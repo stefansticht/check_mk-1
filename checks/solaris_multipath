@@ -28,35 +28,41 @@
 # <<<solaris_multipath>>>
 # /dev/rdsk/c4t600601608CB02A00DCFD2EEB19A0E111d0s2 4 4
 
+# Note: the number of total paths is not correct. After maintainance
+# they is too high. Also in case of broken paths the number of total
+# paths sometimes changes. So we just use that for informational
+# output. The discovery remembers the number of operational paths
+# and we check agains that later.
+
 def inventory_solaris_multipath(info):
-    for device, total, ok in info:
+    for device, total, operational in info:
         item = device.split('/')[-1]
-        yield item, '{ "total": %s }' % total
+        yield item, int(operational)
 
 def check_solaris_multipath(item, params, info):
-    for device, total, ok in info:
+    for device, total, operational in info:
         if item == device.split('/')[-1]:
 
-            itotal = params.get("total") # total from last service discovery
-            ok    = int(ok)
-            total = int(total)
+            operational = int(operational)
+            total       = int(total)
 
+            infotext = "%d paths operational, %d paths total" % (operational, total)
 
-            if not itotal:
+            if not params:
                 state = 1
-                infotext = "%d of %d paths up, but total paths not yet inventorized, redo service discovery" % (ok, total)
+                infotext += ", expected paths unknown, please redo service discovery"
             else:
-                itotal = int(itotal)
-                infotext = "%d of %d paths up" % (ok, itotal)
-                if total > itotal:
+                expected = int(params) # should be int, just for legacy reasons
+                if operational > expected:
                     state = 1
-                    infotext += ", but total paths increased to %d, redo service discovery" % total
-                elif itotal == ok:
+                elif expected == operational:
                     state = 0
-                elif itotal >= ok * 2: # less than half of paths ok
+                elif expected >= operational * 2: # less than half of paths operational
                     state = 2
                 else:
                     state = 1
+                if state:
+                    infotext += ", %d paths expected to be operational" % expected
 
             return state, infotext
 
@@ -65,4 +71,5 @@ check_info["solaris_multipath"] =  {
     "inventory_function"  : inventory_solaris_multipath,
     "check_function"      : check_solaris_multipath,
     "service_description" : "Multipath %s",
+    "group"               : "multipath"
 }

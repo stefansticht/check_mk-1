@@ -88,6 +88,7 @@ HOST_STATE = ('__HOST_STATE__',)
 HIDDEN = ('__HIDDEN__',)
 class FOREACH_HOST: pass
 class FOREACH_CHILD: pass
+class FOREACH_CHILD_WITH: pass
 class FOREACH_PARENT: pass
 class FOREACH_SERVICE: pass
 class REMAINING: pass
@@ -298,6 +299,8 @@ def roles_of_user(user):
         return [ "user" ]
     elif os.path.exists(config_dir + "/" + user + "/automation.secret"):
         return [ "guest" ] # unknown user with automation account
+    elif 'roles' in default_user_profile:
+        return default_user_profile['roles']
     elif default_user_role:
         return [ default_user_role ]
     else:
@@ -353,8 +356,8 @@ def may(pname):
     user_permissions[pname] = he_may
     return he_may
 
-def user_may(u, pname):
-    return may_with_roles(roles_of_user(u), pname)
+def user_may(user_id, pname):
+    return may_with_roles(roles_of_user(user_id), pname)
 
 def need_permission(pname):
     if not may(pname):

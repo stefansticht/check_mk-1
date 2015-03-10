@@ -37,42 +37,36 @@
 # 8:stp6_300G_01-03:online:managed:15:stp6_300G_01:1.1TB:0000000000000003:BLUBB6:600a0b80006e1d5e00000e9a51305a3200000000000000000000000000000000:generic_hdd
 # 9:stp5_300G_01-04:online:managed:16:stp5_300G_01:1.1TB:0000000000000004:BLUBB5:600a0b80006e1dbc0000f7d051341cc000000000000000000000000000000000:generic_hdd
 
+factory_settings['ibm_svc_mdisk_default_levels'] = {
+    'online_state'   : 0, # online state is OK
+    'degraded_state' : 1, # degraded state is WARN
+    'offline_state'  : 2, # offline state is CRIT
+    'excluded_state' : 2, # excluded state is CRIT
+    'managed_mode'   : 0, # managed mode is OK
+    'array_mode'     : 0, # array mode is OK
+    'image_mode'     : 0, # image mode is OK
+    'unmanaged_mode' : 1, # unmanaged mode is WARN
+}
 
 def inventory_ibm_svc_mdisk(info):
-    inventory = []
-    for mdisk_id, mdisk_name, mdisk_status, mdisk_mode, mdisk_grp_id, mdisk_grp_name, capacity, ctrl_lun_number, controller_name, mdisk_uid, tier in info:
-        inventory.append( (mdisk_name, None) )
-    return inventory
+    for line in info:
+        if len(line) in (11, 12):
+            yield line[1], {}
 
-def check_ibm_svc_mdisk(item, _no_params, info):
-    status = 3
-    for mdisk_id, mdisk_name, mdisk_status, mdisk_mode, mdisk_grp_id, mdisk_grp_name, capacity, ctrl_lun_number, controller_name, mdisk_uid, tier in info:
-        if mdisk_name == item:
+def check_ibm_svc_mdisk(item, params, info):
+    for line in info:
+        if len(line) in (11, 12) and line[1] == item:
+            mdisk_status = line[2]
+            mdisk_mode = line[3]
 
-            # Check mdisk_status
-            message = "%s reports status %s" % (item, mdisk_status)
-            if mdisk_status == "online":
-                status = 0
-            elif mdisk_status == "offline" or mdisk_status == "excluded":
-                status = 2
-                message += "(!!)"
-            else:
-                status = 1
-                message += "(!)"
-
-            # check mdisk_mode
-            message += ", Mode %s" % mdisk_mode
-            if mdisk_mode not in ( "managed", "array" ):
-                status = max(status, 1)
-                message += "(!)"
-
-            return status, message
-    return 3, "MDisk %s not found in agent output" % item
+            yield params.get("%s_state" % mdisk_status, 1), "Status: %s" % mdisk_status
+            yield params.get("%s_mode" % mdisk_mode, 1),    "Mode: %s" % mdisk_mode
 
 check_info["ibm_svc_mdisk"] = {
-    "check_function"        : check_ibm_svc_mdisk,
-    "inventory_function"    : inventory_ibm_svc_mdisk,
-    "service_description"   : "MDisk %s",
-    "has_perfdata"          : False,
+    "check_function"          : check_ibm_svc_mdisk,
+    "inventory_function"      : inventory_ibm_svc_mdisk,
+    "service_description"     : "MDisk %s",
+    "group"                   : "ibm_svc_mdisk",
+    "default_levels_variable" : "ibm_svc_mdisk_default_levels",
 }
 

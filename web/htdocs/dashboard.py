@@ -572,7 +572,7 @@ def render_dashlet(name, board, nr, dashlet, wato_folder, add_url_vars):
     if dashlet_type.get('title_func'):
         title = dashlet_type.get('title_func')(dashlet)
     title = dashlet.get('title', title)
-    if title and dashlet.get('show_title'):
+    if title != None and dashlet.get('show_title'):
         url = dashlet.get("title_url", None)
         if url:
             title = '<a href="%s">%s</a>' % (url, _u(title))
@@ -876,7 +876,7 @@ def page_edit_dashlet():
         ident = None
 
     if ident == None and not ty:
-        raise MKGeneralException(_('The ident of the dashlet is missing.'))
+        raise MKGeneralException(_('The ID of the dashlet is missing.'))
 
     load_dashboards()
 
@@ -933,7 +933,7 @@ def page_edit_dashlet():
     html.end_context_buttons()
 
     vs_general = Dictionary(
-        title = _('General'),
+        title = _('General Settings'),
         render = 'form',
         optional_keys = ['title', 'title_url'],
         elements = [
@@ -941,11 +941,7 @@ def page_edit_dashlet():
                 totext = dashlet_type['title'],
                 title = _('Dashlet Type'),
             )),
-            ('single_infos', FixedValue(single_infos,
-                title = _('Show information of single'),
-                totext = single_infos and ', '.join(single_infos) \
-                                      or _('Not showing information for a specific object.'),
-            )),
+            visuals.single_infos_spec(single_infos),
             ('background', Checkbox(
                 title = _('Colored Background'),
                 label = _('Render background'),

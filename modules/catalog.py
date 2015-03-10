@@ -99,6 +99,7 @@ manpage_catalog_titles = {
         "mssql"         : "Microsoft SQL Server",
         "mysql"         : "MySQL",
         "omd"           : "Open Monitoring Distribution (OMD)",
+        "check_mk"      : "Check_MK Monitoring System",
         "oracle"        : "ORACLE Database",
         "postfix"       : "Postfix",
         "postgresql"    : "PostgreSQL",
@@ -106,6 +107,7 @@ manpage_catalog_titles = {
         "sap"           : "SAP R/3",
         "tsm"           : "IBM Tivoli Storage Manager (TSM)",
         "unitrends"     : "Unitrends",
+        "sansymphony"   : "Datacore SANsymphony",
 
     "os"       : "Operating Systems",
         "aix"           : "AIX",
@@ -120,6 +122,7 @@ manpage_catalog_titles = {
         "solaris"       : "Solaris",
         "vsphere"       : "VMWare ESX (via vSphere)",
         "windows"       : "Microsoft Windows",
+        "z_os"          : "IBM zOS Mainframes",
 
         "hardware"    : "Hardware Sensors",
         "kernel"      : "CPU, Memory and Kernel Performance",

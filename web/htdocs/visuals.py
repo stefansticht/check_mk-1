@@ -247,7 +247,8 @@ def available(what, all_visuals):
 def page_list(what, title, visuals, custom_columns = [],
     render_custom_buttons = None,
     render_custom_columns = None,
-    render_custom_context_buttons = None):
+    render_custom_context_buttons = None,
+    check_deletable_handler = None):
 
     what_s = what[:-1]
     if not config.may("general.edit_" + what):
@@ -268,14 +269,22 @@ def page_list(what, title, visuals, custom_columns = [],
     delname  = html.var("_delete")
     if delname and html.transaction_valid():
         deltitle = visuals[(config.user_id, delname)]['title']
-        c = html.confirm(_("Please confirm the deletion of \"%s\".") % deltitle)
-        if c:
-            del visuals[(config.user_id, delname)]
-            save(what, visuals)
-            html.reload_sidebar()
-        elif c == False:
-            html.footer()
-            return
+
+        try:
+            if check_deletable_handler:
+                check_deletable_handler(visuals, delname)
+
+            c = html.confirm(_("Please confirm the deletion of \"%s\".") % deltitle)
+            if c:
+                del visuals[(config.user_id, delname)]
+                save(what, visuals)
+                html.reload_sidebar()
+            elif c == False:
+                html.footer()
+                return
+        except MKUserError, e:
+            html.write("<div class=error>%s</div>\n" % e.message)
+            html.add_user_error(e.varname, e.message)
 
     keys_sorted = visuals.keys()
     keys_sorted.sort(cmp = lambda a,b: -cmp(a[0],b[0]) or cmp(a[1], b[1]))
@@ -302,7 +311,7 @@ def page_list(what, title, visuals, custom_columns = [],
             table.row(css = 'data')
 
             # Actions
-            table.cell(_('Actions'), css = 'buttons')
+            table.cell(_('Actions'), css = 'buttons visuals')
 
             # Edit
             if owner == config.user_id:
@@ -547,6 +556,8 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
             if not visual:
                 visual = all_visuals.get(('', visualname)) # load builtin visual
                 mode = 'clone'
+                if not visual:
+                    raise MKGeneralException(_('The requested %s does not exist.') % visual_types[what]['title'])
 
         single_infos = visual['single_infos']
 
@@ -601,11 +612,7 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
         render = 'form',
         optional_keys = None,
         elements = [
-            ('single_infos', FixedValue(single_infos,
-                title = _('Specific objects'),
-                totext = single_infos and ', '.join(single_infos) \
-                                      or _('Showing information of multiple objects.'),
-            )),
+            single_infos_spec(single_infos),
             ('name', TextAscii(
                 title = _('Unique ID'),
                 help = _("The ID will be used in URLs that point to a view, e.g. "
@@ -746,7 +753,7 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
         html.button("try", _("Try out"))
         html.end_form()
 
-        if html.has_var("try") or html.has_var("search"):
+        if (html.has_var("try") or html.has_var("search")) and not html.has_user_errors():
             html.set_var("search", "on")
             if visual:
                 import bi
@@ -1089,14 +1096,15 @@ def SingleInfoSelection(info_keys, **args):
 
 # Converts a context from the form { filtername : { ... } } into
 # the for { infoname : { filtername : { } } for editing.
-def pack_context_for_editing(context):
+def pack_context_for_editing(visual, info_handler):
     # We need to pack all variables into dicts with the name of the
     # info. Since we have no mapping from info the the filter variable,
     # we pack into every info every filter. The dict valuespec will
     # pick out what it needs. Yurks.
     packed_context = {}
-    for info_name in infos.keys():
-        packed_context[info_name] = context
+    info_keys = info_handler and info_handler(visual) or infos.keys()
+    for info_name in info_keys:
+        packed_context[info_name] = visual.get('context', {})
     return packed_context
 
 def unpack_context_after_editing(packed_context):
@@ -1118,6 +1126,13 @@ def unpack_context_after_editing(packed_context):
 #   +----------------------------------------------------------------------+
 #   |                                                                      |
 #   '----------------------------------------------------------------------'
+
+def single_infos_spec(single_infos):
+    return ('single_infos', FixedValue(single_infos,
+        title = _('Show information of single'),
+        totext = single_infos and ', '.join(single_infos) \
+                    or _('Not restricted to showing a specific object.'),
+    ))
 
 def verify_single_contexts(what, visual):
     for k, v in get_singlecontext_html_vars(visual).items():
@@ -1307,8 +1322,8 @@ def ajax_popup_add():
             visual_module = __import__(module_name)
             handler = visual_module.__dict__[visual_type["popup_add_handler"]]
             visuals = handler()
-            html.write('<li><span>Add to %s:</span></li>' % visual_type["title"])
-            for name, title in handler():
+            html.write('<li><span>%s %s:</span></li>' % (_('Add to'), visual_type["title"]))
+            for name, title in sorted(handler(), key=lambda x: x[1]):
                 html.write('<li><a href="javascript:void(0)" '
                            'onclick="add_to_visual(\'%s\', \'%s\')"><img src="images/icon_%s.png"> %s</a></li>' %
                            (visual_type_name, name, visual_type_name.rstrip('s'), title))

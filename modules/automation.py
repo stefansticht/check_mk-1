@@ -76,6 +76,8 @@ def do_automation(cmd, args):
 		result = automation_notification_replay(args)
 	    elif cmd == "notification-analyse":
 		result = automation_notification_analyse(args)
+            elif cmd == "bake-agents":
+                result = automation_bake_agents()
             else:
                 raise MKAutomationError("Automation command '%s' is not implemented." % cmd)
 
@@ -191,7 +193,7 @@ def automation_discovery(args):
     return counts, failed_hosts
 
 
-def automation_try_discovery(args): #### , leave_no_tcp=False, with_snmp_scan=False):
+def automation_try_discovery(args):
     use_caches = False
     do_snmp_scan = False
     if args[0] == '@noscan':
@@ -203,6 +205,13 @@ def automation_try_discovery(args): #### , leave_no_tcp=False, with_snmp_scan=Fa
         do_snmp_scan = True
         use_caches = False
 
+    # TODO: Remove this unlucky option opt_use_cachefile. At least do not
+    # handle this option so deep in the code. It should only be handled
+    # by top-level functions.
+    global opt_use_cachefile, check_max_cachefile_age
+    opt_use_cachefile = use_caches
+    if use_caches:
+        check_max_cachefile_age = inventory_max_cachefile_age
     hostname = args[0]
     table = get_check_preview(hostname, use_caches=use_caches, do_snmp_scan=do_snmp_scan)
     return table
@@ -865,23 +874,37 @@ def automation_create_snapshot(args):
             statusinfo[name] = "TODO:0"
         update_status_file()
 
-        if not data.get("wait"):
-            try:
-                pid = os.fork()
-                if pid > 0:
-                    # Exit parent process
-                    return
-                # Decouple from parent environment
-                os.chdir("/")
-                os.umask(0)
-                os.setsid()
-                for fd in range(0, 256):
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-            except OSError, e:
-                raise MKAutomationError(str(e))
+        # Now fork into our own process to have an asynchronous backup creation
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # Exit parent process
+                return
+            # Decouple from parent environment
+            os.chdir("/")
+            os.umask(0)
+            os.setsid()
+
+            # Close all fd except stdin,out,err
+            for fd in range(3, 256):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+            sys.stdout.flush()
+            sys.stderr.flush()
+
+            si = os.open("/dev/null", os.O_RDONLY)
+            so = os.open("/dev/null", os.O_WRONLY)
+            os.dup2(si, 0)
+            os.dup2(so, 1)
+            os.dup2(so, 2)
+            os.close(si)
+            os.close(so)
+
+        except OSError, e:
+            raise MKAutomationError(str(e))
 
         # Save pid of working process.
         file(filename_pid, "w").write("%d" % os.getpid())
@@ -985,13 +1008,14 @@ def automation_create_snapshot(args):
                 command = "tar czf %s --ignore-failed-read --force-local %s -C %s %s" % \
                                         (path_subtar, exclude_options, prefix, " ".join(paths))
 
-            proc = subprocess.Popen(command, shell=True, stdin = None,
-                                    stdout = subprocess.PIPE, stderr = subprocess.PIPE, cwd = prefix)
+            proc = subprocess.Popen(command, shell=True, stdin=None, close_fds=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=prefix)
             stdout, stderr = proc.communicate()
             exit_code      = proc.wait()
             # Allow exit codes 0 and 1 (files changed during backup)
             if exit_code not in [0, 1]:
-                raise MKAutomationError("Error while creating backup of %s (Exit Code %d) - %s.\n%s" % (current_domain, exit_code, stderr, command))
+                raise MKAutomationError("Error while creating backup of %s (Exit Code %d) - %s.\n%s" %
+							(current_domain, exit_code, stderr, command))
 
             subtar_size   = os.stat(path_subtar).st_size
             subtar_hash   = sha256(file(path_subtar).read()).hexdigest()
@@ -1124,3 +1148,6 @@ def execute_check_plugin(commandline):
 def automation_update_dns_cache():
     return do_update_dns_cache()
 
+def automation_bake_agents():
+    if "do_bake_agents" in globals():
+        return do_bake_agents()

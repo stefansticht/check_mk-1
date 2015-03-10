@@ -1986,6 +1986,7 @@ def mode_edithost(phase, new, cluster):
             title = _("Create new host")
             host = {}
         mode = "new"
+        new = True
 
     if phase == "title":
         return title
@@ -2217,6 +2218,10 @@ def check_edit_host_permissions(folder, host, hostname):
 
 def mode_rename_host(phase):
     hostname = html.var("host")
+
+    if hostname not in g_folder[".hosts"]:
+        raise MKGeneralException(_("You called this page with an invalid host name."))
+
     host = g_folder[".hosts"][hostname]
     is_cluster = ".nodes" in host
 
@@ -2564,7 +2569,7 @@ def mode_object_parameters(phase):
             }[origin]
             render_rule_reason(_("Type of check"), None, "", "", False, origin_txt)
 
-            # First case: inventorized checks. They come from var/check_mk/autochecks/HOST.
+            # First case: discovered checks. They come from var/check_mk/autochecks/HOST.
             if origin ==  "auto":
                 checkgroup = serviceinfo["checkgroup"]
                 checktype = serviceinfo["checktype"]
@@ -2580,8 +2585,8 @@ def mode_object_parameters(phase):
                                             serviceinfo["item"], serviceinfo["parameters"])
 
                 else:
-                    # Note: some inventorized checks have a check group but
-                    # *no* ruleset for inventorized checks. One example is "ps".
+                    # Note: some discovered checks have a check group but
+                    # *no* ruleset for discovered checks. One example is "ps".
                     # That can be configured as a manual check or created by
                     # inventory. But in the later case all parameters are set
                     # by the inventory. This will be changed in a later version,
@@ -2728,7 +2733,12 @@ def output_analysed_ruleset(all_rulesets, rulespec, hostname, service, known_set
         pass
 
     elif known_settings is not PARAMETERS_UNKNOWN:
-        html.write(valuespec.value_to_text(known_settings))
+        try:
+            html.write(valuespec.value_to_text(known_settings))
+        except Exception, e:
+            if config.debug:
+                raise
+            html.write(_("Invalid parameter %r: %s") % (known_settings, e))
 
     else:
         # For match type "dict" it can be the case the rule define some of the keys
@@ -3171,7 +3181,7 @@ def show_service_table(host, firsttime):
     except Exception, e:
         if config.debug:
             raise
-        html.show_error("Inventory failed for this host: %s" % e)
+        html.show_error(_("Service discovery failed for this host: %s") % e)
         return
 
     checktable.sort()
@@ -3286,7 +3296,7 @@ def show_service_table(host, firsttime):
                 params_url = make_link([("mode", "object_parameters"),
                                         ("host", hostname),
                                         ("service", descr)])
-                html.icon_button(params_url, _("View and modify the parameters for this service"), "rulesets")
+                html.icon_button(params_url, _("View and edit the parameters for this service"), "rulesets")
 
                 url = make_link([("mode", "edit_ruleset"),
                                  ("varname", varname),
@@ -3666,7 +3676,7 @@ def mode_bulk_import(phase):
         html.text_area('_hosts', cols = 70, rows = 10)
 
         forms.section(_('Options'))
-        html.checkbox('_do_service_detection', False, label = _('Perform automatic service detection'))
+        html.checkbox('_do_service_detection', False, label = _('Perform automatic service discovery'))
         forms.end()
 
         html.button('_import', _('Import'))
@@ -3870,8 +3880,8 @@ def mode_bulk_inventory(phase):
         if not complete_folder:
             html.write(_("You have selected <b>%d</b> hosts for bulk discovery. ") % len(hostnames))
         html.write(_("Check_MK service discovery will automatically find and configure "
-                     "services to be checked on your hosts.</p>"))
-        forms.header(_("Bulk discovery"))
+                     "services to be checked on your hosts."))
+        forms.header(_("Bulk Discovery"))
         forms.section(_("Mode"))
         html.radiobutton("how", "new",     True,  _("Find only new services") + "<br>")
         html.radiobutton("how", "remove",  False, _("Remove obsolete services") + "<br>")
@@ -5033,6 +5043,10 @@ def log_pending(status, linkinfo, what, message, user_id = None):
     log_audit(linkinfo, what, message, user_id)
     need_sidebar_reload()
 
+    # On each change to the Check_MK configuration mark the agents to be rebuild
+    if 'need_to_bake_agents' in globals():
+        need_to_bake_agents()
+
     if not is_distributed():
         if status != SYNC:
             log_entry(linkinfo, what, message, "pending.log", user_id)
@@ -5364,10 +5378,10 @@ def check_mk_local_automation(command, args=[], indata=""):
                 sudoline = "%s ALL = (root) NOPASSWD: %s *" % (html.apache_user(), commandargs[0], " ".join(commandargs[1:]))
 
         sudo_msg = ("<p>The webserver is running as user which has no rights on the "
-                    "needed Check_MK/Nagios files.<br />Please ensure you have set-up "
+                    "needed Check_MK/Nagios files.<br>Please ensure you have set-up "
                     "the sudo environment correctly. e.g. proceed as follows:</p>\n"
                     "<ol><li>install sudo package</li>\n"
-                    "<li>Append the following to the <code>/etc/sudoers</code> file:\n"
+                    "<li>Append the following to the <tt>/etc/sudoers</tt> file:\n"
                     "<pre># Needed for WATO - the Check_MK Web Administration Tool\n"
                     "Defaults:%s !requiretty\n"
                     "%s\n"
@@ -5381,7 +5395,7 @@ def check_mk_local_automation(command, args=[], indata=""):
         except Exception, e:
             if config.debug:
                 raise
-            html.show_error("<h1>Cannot activate changes</h1>%s" % e)
+            html.show_error(_("<h1>Cannot activate changes</h1>%s") % e)
             return
 
     try:
@@ -5393,7 +5407,7 @@ def check_mk_local_automation(command, args=[], indata=""):
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds=True)
     except Exception, e:
         if commandargs[0] == 'sudo':
-            raise MKGeneralException("Cannot execute <tt>%s</tt>: %s<br /><br >%s" % (commandargs[0], e, sudo_msg))
+            raise MKGeneralException("Cannot execute <tt>%s</tt>: %s<br><br>%s" % (commandargs[0], e, sudo_msg))
         else:
             raise MKGeneralException("Cannot execute <tt>%s</tt>: %s" % (commandargs[0], e))
     p.stdin.write(repr(indata))
@@ -5658,7 +5672,7 @@ class TextAttribute(Attribute):
         if self._mandatory and not value:
             raise MKUserError("attr_" + self.name(),
                   _("Please specify a value for %s") % self.title())
-        if value.strip() == "" and not self._allow_empty:
+        if not self._allow_empty and value.strip() == "":
             raise MKUserError("attr_" + self.name(),
                   _("%s may be missing, if must not be empty if it is set.") % self.title())
 
@@ -6493,12 +6507,12 @@ def get_snapshot_status(snapshot, validate_checksums = False):
         using_cmc = os.path.exists(defaults.omd_root + '/etc/check_mk/conf.d/microcore.mk')
         snapshot_cmc = 'conf.d/microcore.mk' in files
         if using_cmc and not snapshot_cmc:
-            raise MKGeneralException(_('You are currently using the Check_MK Microcore, but this snapshot does not use the '
-                                       'Check_MK Microcore. If you need to migrate your data, you could consider changing '
+            raise MKGeneralException(_('You are currently using the Check_MK Micro Core, but this snapshot does not use the '
+                                       'Check_MK Micro Core. If you need to migrate your data, you could consider changing '
                                        'the core, restoring the snapshot and changing the core back again.'))
         elif not using_cmc and snapshot_cmc:
-            raise MKGeneralException(_('You are currently not using the Check_MK Microcore, but this snapshot uses the '
-                                       'Check_MK Microcore. If you need to migrate your data, you could consider changing '
+            raise MKGeneralException(_('You are currently not using the Check_MK Micro Core, but this snapshot uses the '
+                                       'Check_MK Micro Core. If you need to migrate your data, you could consider changing '
                                        'the core, restoring the snapshot and changing the core back again.'))
 
     def snapshot_secret():
@@ -6601,7 +6615,7 @@ def get_snapshot_status(snapshot, validate_checksums = False):
             status["broken_text"] = traceback.format_exc()
             status["broken"]      = True
         else:
-            status["broken_text"] = str(e)
+            status["broken_text"] = '%s' % e
             status["broken"]      = True
     return status
 
@@ -6805,7 +6819,6 @@ def mode_snapshot(phase):
                 snapshot_data["type"]          = "manual"
                 snapshot_data["snapshot_name"] = snapshot_name
                 snapshot_data["domains"]       = store_domains
-                snapshot_data["wait"]          = False
 
                 return None, _("Created snapshot <tt>%s</tt>.") % create_snapshot(snapshot_data)
 
@@ -6830,12 +6843,12 @@ def mode_snapshot(phase):
                                                                             status.get("broken_text"))
                 elif not status.get("checksums") and not config.wato_upload_insecure_snapshots:
                     if status["type"] == "legacy":
-                        raise MKUserError("_upload_file", _('The integrity of this snapshot could not be verified.<br><br>'
+                        raise MKUserError("_upload_file", _('The integrity of this snapshot could not be verified. '
                                           'You are restoring a legacy snapshot which can not be verified. The snapshot contains '
-                                          'files which contain code that will be executed during runtime of the monitoring.<br><br>'
+                                          'files which contain code that will be executed during runtime of the monitoring. '
                                           'The upload of insecure snapshots is currently disabled in WATO. If you want to allow '
-                                          'the upload of insecure snapshots you can activate it in the Global Settings under<br>'
-                                          '<tt>Configuration GUI (WATO) -> Allow upload of insecure WATO snapshots</tt>'))
+                                          'the upload of insecure snapshots you can activate it in the Global Settings under '
+                                          '<i>Configuration GUI (WATO) -> Allow upload of insecure WATO snapshots</i>'))
                     else:
                        raise MKUserError("_upload_file", _('The integrity of this snapshot could not be verified.<br><br>'
                                           'If you restore a snapshot on the same site as where it was created, the checksum should '
@@ -6944,8 +6957,8 @@ def mode_snapshot(phase):
         html.write("<br>")
 
         html.write("<h3>" + _("Restore from uploaded file") + "</h3>")
-        html.write(_("Only supports snapshots up to 100MB. If your snapshot is larger than 100MB please copy it into the sites<br>"
-                   "backup directory %s/wato/snapshots. It will then show up in the snapshots table.<br><br>") % defaults.var_dir)
+        html.write(_("Only supports snapshots up to 100MB. If your snapshot is larger than 100MB please copy it into the sites "
+                   "backup directory <tt>%s/wato/snapshots</tt>. It will then show up in the snapshots table.") % defaults.var_dir)
         html.begin_form("upload_form", method = "POST")
         html.upload_file("_upload_file")
         html.button("upload_button", _("Restore from file"), "submit")
@@ -7022,7 +7035,6 @@ def create_snapshot(data = {}):
     snapshot_data["type"]          = data.get("type", "automatic")
     snapshot_data["snapshot_name"] = snapshot_name
     snapshot_data["domains"]       = remove_functions(data.get("domains", get_backup_domains(["default"])))
-    snapshot_data["wait"]          = data.get("wait", False)
 
     check_mk_local_automation("create-snapshot", [], snapshot_data)
 
@@ -8107,6 +8119,9 @@ def save_group_information(all_groups):
 
 class GroupSelection(ElementSelection):
     def __init__(self, what, **kwargs):
+        kwargs.setdefault('empty_text', _('You have not defined any %s group yet. Please '
+                                          '<a href="wato.py?mode=edit_%s_group">create</a> at least one first.') %
+                                                                                                    (what, what))
         ElementSelection.__init__(self, **kwargs)
         self._what = what
         # Allow to have "none" entry with the following title
@@ -8258,7 +8273,7 @@ def vs_notification_rule(userid = None):
               ListOf(
                   UserSelection(only_contacts = False),
                   title = _("The following users"),
-                  help = _("Enter a list of user ids to be notified here. These users need to be members "
+                  help = _("Enter a list of user IDs to be notified here. These users need to be members "
                            "of at least one contact group in order to be notified."),
                   movable = False,
               )
@@ -8375,9 +8390,9 @@ def vs_notification_rule(userid = None):
             ),
             ( "match_contactgroups",
               GroupChoice("contact",
-                  title = _("Match Contact Groups (cmc only)"),
-                  help = _("The host/ service must be in one of the selected contact groups. Only works with Check_MK Microcore. " \
-                           "If you don't use the CMC, that filter will not apply"),
+                  title = _("Match Contact Groups (CMC only)"),
+                  help = _("The host/service must be in one of the selected contact groups. This only works with Check_MK Micro Core. " \
+                           "If you don't use the CMC that filter will not apply"),
                   allow_empty = False,
               )
             ),
@@ -8903,7 +8918,7 @@ def mode_notifications(phase):
     if not current_settings.get("enable_rulebased_notifications"):
         url = 'wato.py?mode=edit_configvar&varname=enable_rulebased_notifications'
         html.show_warning(
-           _("<p>Warning</b><br><br>Rule based notifications are disabled in your global settings. "
+           _("<b>Warning</b><br><br>Rule based notifications are disabled in your global settings. "
              "The rules that you edit here will have affect only on notifications that are "
              "created by the Event Console. Normal monitoring alerts will <b>not</b> use the "
              "rule based notifications now."
@@ -8942,7 +8957,7 @@ def mode_notifications(phase):
                 context = entry.items()
                 context.sort()
                 tooltip = "".join(("%s: %s\n" % e).decode('utf-8') for e in context)
-                html.icon_button(analyse_url, _("Anaylse ruleset with this notification:\n%s" % tooltip), "analyze")
+                html.icon_button(analyse_url, _("Analyze ruleset with this notification:\n%s" % tooltip), "analyze")
                 replay_url = html.makeactionuri([("_replay", str(nr))])
                 html.icon_button(replay_url, _("Replay this notification, send it again!"), "replay")
                 if html.var("analyse") and nr == int(html.var("analyse")):
@@ -9096,7 +9111,7 @@ def mode_user_notifications(phase, profilemode):
                              _("Do you really want to delete the notification rule <b>%d</b> <i>%s</i>?" %
                                (nr, rule.get("description",""))))
             if c:
-                log_pending(SYNC, None, "notification-delete-user-rule", _("Deleted notification rule %d or user %s") %
+                log_pending(SYNC, None, "notification-delete-user-rule", _("Deleted notification rule %d of user %s") %
                             (nr, userid))
                 del rules[nr]
                 userdb.save_users(users)
@@ -9786,7 +9801,7 @@ def mode_edit_timeperiod(phase):
     # Excludes
     if other_tps:
         forms.section(_("Exclude"))
-        html.help(_('You can use other timeperiod defnitions to exclude the times '
+        html.help(_('You can use other timeperiod definitions to exclude the times '
                     'defined in the other timeperiods from this current timeperiod.'))
         vs_excl.render_input("exclude", timeperiod.get("exclude", []))
 
@@ -9961,33 +9976,26 @@ def mode_sites(phase):
             wato_html_head(_("Login into site '%s'") % site["alias"])
             if error:
                 html.show_error(error)
-            html.write("<div class=message>")
-            html.write("<h3>%s</h3>" % _("Login credentials"))
-            html.write(_("For the initial login into the slave site %s "
+
+            html.write('<p>%s</p>' % (_("For the initial login into the slave site %s "
                          "we need once your administration login for the Multsite "
                          "GUI on that site. Your credentials will only be used for "
                          "the initial handshake and not be stored. If the login is "
                          "successful then both side will exchange a login secret "
-                         "which is used for the further remote calls.") % site["alias"])
+                         "which is used for the further remote calls.") % site["alias"]))
             html.begin_form("login", method="POST")
-            html.write("<table class=form>")
-            html.write("<tr><td class=legend>%s</td>" % _("Administrator login"))
-            html.write("<td class=content>")
-            html.write("<table><tr><td>%s</td><td>" % _("Adminstrator name:"))
+            forms.header(_('Login credentials'))
+            forms.section(_('Adminstrator name:'))
             html.text_input("_name")
             html.set_focus("_name")
-            html.write("</td></tr><tr><td>%s</td><td>" % _("Administrator password:"))
+            forms.section(_('Adminstrator password:'))
             html.password_input("_passwd")
-            html.write("</td></tr></table>")
-            html.write("</td></tr>")
-            html.write("<tr><td class=buttons colspan=2>")
+            forms.end()
             html.button("_do_login", _("Login"))
             html.button("_abort", _("Abort"))
-            html.write("</td></tr></table>")
             html.hidden_field("_login", login_id)
             html.hidden_fields()
             html.end_form()
-            html.write("</div>")
             return ""
         return
 
@@ -10372,6 +10380,9 @@ def mode_edit_site(phase):
 
         # Handle the insecure replication flag
         new_site["insecure"] = html.get_checkbox("insecure")
+
+        # Allow direct user login
+        new_site["user_login"] = html.get_checkbox("user_login")
 
         # Secret is not checked here, just kept
         if not new and "secret" in old_site:
@@ -11463,7 +11474,7 @@ def load_notification_scripts():
 def notification_script_choices():
     scripts = load_notification_scripts()
 
-    choices = [ (name, info["title"]) for (name, info) in scripts.items() ]
+    choices = [ (name, info["title"].decode('utf-8')) for (name, info) in scripts.items() ]
     choices.append((None, _("ASCII Email (legacy)")))
     choices.sort(cmp = lambda a,b: cmp(a[1], b[1]))
     # Make choices localizable
@@ -11617,8 +11628,8 @@ def load_notification_table():
                                   ( "only_hosts",
                                     ListOfStrings(
                                         title = _("Limit to the following hosts"),
-                                        help = _("Configure the hosts for this notification. Without prefix, only exact, case sensitive matches,"
-                                                 "! for negation and ~ for regex matches " ),
+                                        help = _("Configure the hosts for this notification. Without prefix, only exact, case sensitive matches, "
+                                                 "<tt>!</tt> for negation and <tt>~</tt> for regex matches."),
                                         orientation = "horizontal",
                                         valuespec = RegExp(size = 20),
                                     ),
@@ -11776,9 +11787,12 @@ def mode_users(phase):
             auth_method = "<i>%s</i>" % _("none")
         table.cell(_("Authentication"), auth_method)
 
-        # Locked
+        table.cell(_("State"))
         locked = user.get("locked", False)
-        table.cell(_("Locked"), (locked and ("<b>" + _("yes") + "</b>") or _("no")))
+        if user.get("locked", False):
+            html.icon(_('The login is currently locked'), 'user_locked')
+        if user.get("disable_notifications", False):
+            html.icon(_('Notifications are disabled'), 'notif_disabled')
 
         # Full name / Alias
         table.cell(_("Alias"), user.get("alias", ""))
@@ -11883,18 +11897,17 @@ def mode_edit_user(phase):
             if topic is not None and topic != attr['topic']:
                 continue # skip attrs of other topics
 
-            if not attr.get("permission") or config.may(attr["permission"]):
-                vs = attr['valuespec']
-                forms.section(_u(vs.title()))
-                if attr['user_editable'] and not is_locked(name):
-                    vs.render_input("ua_" + name, user.get(name, vs.default_value()))
-                else:
-                    html.write(vs.value_to_text(user.get(name, vs.default_value())))
-                    # Render hidden to have the values kept after saving
-                    html.write('<div style="display:none">')
-                    vs.render_input("ua_" + name, user.get(name, vs.default_value()))
-                    html.write('</div>')
-                html.help(_u(vs.help()))
+            vs = attr['valuespec']
+            forms.section(_u(vs.title()))
+            if attr['user_editable'] and not is_locked(name):
+                vs.render_input("ua_" + name, user.get(name, vs.default_value()))
+            else:
+                html.write(vs.value_to_text(user.get(name, vs.default_value())))
+                # Render hidden to have the values kept after saving
+                html.write('<div style="display:none">')
+                vs.render_input("ua_" + name, user.get(name, vs.default_value()))
+                html.write('</div>')
+            html.help(_u(vs.help()))
 
     # Load data that is referenced - in order to display dropdown
     # boxes and to check for validity.
@@ -11991,9 +12004,9 @@ def mode_edit_user(phase):
                                    roles.keys())
 
         # Language configuration
-        set_lang = html.var('_set_lang')
+        set_lang = html.get_checkbox('_set_lang')
         language = html.var('language')
-        if set_lang and language != config.default_language:
+        if set_lang:
             if language == '':
                 language = None
             new_user['language'] = language
@@ -12112,8 +12125,8 @@ def mode_edit_user(phase):
         html.write("</td></tr><tr><td>%s:</td><td>" % _("Enforce change"))
         # Only make password enforcement selection possible when user is allowed to change the PW
         if new or config.user_may(userid, 'general.edit_profile') and config.user_may(userid, 'general.change_password'):
-            html.checkbox("enforce_pw_change", user.get("enforce_pw_change", False))
-            html.write(_("Change password at next login or access"))
+            html.checkbox("enforce_pw_change", user.get("enforce_pw_change", False),
+                          label=_("Change password at next login or access"))
         else:
             html.write(_("Not permitted to change the password. Change can not be enforced."))
     else:
@@ -12272,7 +12285,7 @@ def mode_edit_user(phase):
         custom_user_attributes('notify')
 
     forms.header(_("Personal Settings"), isopen = False)
-    select_language(user.get('language', ''))
+    select_language(user)
     custom_user_attributes('personal')
 
     # TODO: Later we could add custom macros here, which
@@ -12689,9 +12702,9 @@ def parse_hosttag_title(title):
     else:
         return None, title
 
-def hosttag_topics(hosttags):
+def hosttag_topics(hosttags, auxtags):
     names = set([])
-    for entry in hosttags:
+    for entry in hosttags + auxtags:
         topic, title = parse_hosttag_title(entry[1])
         if topic:
             names.add((topic, topic))
@@ -12901,7 +12914,7 @@ def mode_edit_auxtag(phase):
 
     vs_topic = OptionalDropdownChoice(
         title = _("Topic") + "<sup>*</sup>",
-        choices = hosttag_topics(hosttags),
+        choices = hosttag_topics(hosttags, auxtags),
         explicit = TextUnicode(),
         otherlabel = _("Create New Topic"),
         default_value = None,
@@ -13027,7 +13040,7 @@ def mode_edit_hosttag(phase):
 
     vs_topic = OptionalDropdownChoice(
         title = _("Topic"),
-        choices = hosttag_topics(hosttags),
+        choices = hosttag_topics(hosttags, auxtags),
         explicit = TextUnicode(),
         otherlabel = _("Create New Topic"),
         default_value = None,
@@ -13297,8 +13310,8 @@ def export_hosttags(hosttags, auxtags):
     hosttags_dict =  {}
     for id, title, choices in hosttags:
         tags = {}
-        for tag_id, tag_title, auxtags in choices:
-            tags[tag_id] = tag_title, auxtags
+        for tag_id, tag_title, tag_auxtags in choices:
+            tags[tag_id] = tag_title, tag_auxtags
         topic, title = parse_hosttag_title(title)
         hosttags_dict[id] = topic, title, tags
     auxtags_dict = dict(auxtags)
@@ -14441,6 +14454,8 @@ def rule_button(action, help=None, folder=None, rulenr=0):
             vars.append(("rule_folder", html.var("rule_folder")))
         if html.var("host"):
             vars.append(("host", html.var("host")))
+        if html.var("item"):
+            vars.append(("item", html.var("item")))
         url = make_action_link(vars)
         html.icon_button(url, help, action)
 
@@ -14991,7 +15006,7 @@ def mode_edit_rule(phase, new = False):
             html.write('<img class=ruleyesno align=top src="images/rule_%s.png"> ' % img)
             html.radiobutton("value", img, value == val, _("Make the outcome of the ruleset <b>%s</b><br>") % posneg)
 
-    # Addiitonal rule options
+    # Additonal rule options
     vs_rule_options.render_input("options", rule_options)
 
     forms.end()
@@ -15052,36 +15067,45 @@ def render_condition_editor(tag_specs, varprefix=""):
             varprefix, id, not div_is_open and "display: none;" or ""))
 
 
-    auxtags = dict(group_hosttags_by_topic(config.wato_aux_tags))
+    auxtags = group_hosttags_by_topic(config.wato_aux_tags)
     hosttags = group_hosttags_by_topic(config.wato_host_tags)
-    make_foldable = len(hosttags) > 1
-    for topic, grouped_tags in hosttags:
+    all_topics = set([])
+    for topic, taggroups in auxtags + hosttags:
+        all_topics.add(topic)
+    all_topics = list(all_topics)
+    all_topics.sort()
+    make_foldable = len(all_topics) > 1
+    for topic in all_topics:
         if make_foldable:
             html.begin_foldable_container("topic", topic, True, "<b>%s</b>" % (_u(topic)))
         html.write("<table class=\"hosttags\">")
 
         # Show main tags
-        for entry in grouped_tags:
-            id, title, choices = entry[:3]
-            html.write("<tr><td class=title>%s: &nbsp;</td>" % _u(title))
-            default_tag, deflt = current_tag_setting(choices)
-            tag_condition_dropdown("tag", deflt, id)
-            if len(choices) == 1:
-                html.write(" " + _("set"))
-            else:
-                html.select(varprefix + "tagvalue_" + id,
-                    [(t[0], _u(t[1])) for t in choices if t[0] != None], deflt=default_tag)
-            html.write("</div>")
-            html.write("</td></tr>")
+        for t, grouped_tags in hosttags:
+            if t == topic:
+                for entry in grouped_tags:
+                    id, title, choices = entry[:3]
+                    html.write("<tr><td class=title>%s: &nbsp;</td>" % _u(title))
+                    default_tag, deflt = current_tag_setting(choices)
+                    tag_condition_dropdown("tag", deflt, id)
+                    if len(choices) == 1:
+                        html.write(" " + _("set"))
+                    else:
+                        html.select(varprefix + "tagvalue_" + id,
+                            [(t[0], _u(t[1])) for t in choices if t[0] != None], deflt=default_tag)
+                    html.write("</div>")
+                    html.write("</td></tr>")
 
         # And auxiliary tags
-        for id, title in sorted(auxtags.get(topic, []), key = lambda x: x[0]):
-            html.write("<tr><td class=title>%s: &nbsp;</td>" % _u(title))
-            default_tag, deflt = current_tag_setting([(id, _u(title))])
-            tag_condition_dropdown("auxtag", deflt, id)
-            html.write(" " + _("set"))
-            html.write("</div>")
-            html.write("</td></tr>")
+        for t, grouped_tags in auxtags:
+            if t == topic:
+                for id, title in grouped_tags:
+                    html.write("<tr><td class=title>%s: &nbsp;</td>" % _u(title))
+                    default_tag, deflt = current_tag_setting([(id, _u(title))])
+                    tag_condition_dropdown("auxtag", deflt, id)
+                    html.write(" " + _("set"))
+                    html.write("</div>")
+                    html.write("</td></tr>")
 
         html.write("</table>")
         if make_foldable:
@@ -15293,6 +15317,13 @@ def register_rule(group, varname, valuespec = None, title = None,
         g_rulespec_groups.append((group, rulesets))
         g_rulespec_group[group] = rulesets
     else:
+        # If a ruleset for this variable already exist, then we need to replace
+        # it. How can this happen? If a user puts his own copy of the definition
+        # into some file below local/.
+        for nr, rs in enumerate(g_rulespec_group[group]):
+            if rs["varname"] == varname:
+                del g_rulespec_group[group][nr]
+                break # There cannot be two duplicates!
         g_rulespec_group[group].append(ruleset)
 
     g_rulespecs[varname] = ruleset
@@ -15301,7 +15332,7 @@ def register_rule(group, varname, valuespec = None, title = None,
 # modular here, but we cannot put this function into the plugins file because
 # the order is not defined there.
 def register_check_parameters(subgroup, checkgroup, title, valuespec, itemspec, matchtype, has_inventory=True, register_static_check=True):
-    # Register rule for inventorized checks
+    # Register rule for discovered checks
     if valuespec and has_inventory: # would be useless rule if check has no parameters
         itemenum = None
         if itemspec:
@@ -15665,20 +15696,16 @@ def verify_password_policy(password):
                 'set a password which uses at least %d of them.') % num_groups)
 
 
-def select_language(user_language):
+def select_language(user):
     languages = [ l for l in get_languages() if not config.hide_language(l[0]) ]
-    inactive = not not user_language
-
     if languages:
-        forms.section(_("Language"),
-                      checkbox = ('_set_lang', inactive, 'language'))
-        # html.checkbox('_set_lang', inactive, onclick = 'wato_toggle_attribute(this, \'language\')')
-        # html.write(" ")
+        active = 'language' in user
+        forms.section(_("Language"), checkbox = ('_set_lang', active, 'language'))
         default_label = _('Default: %s') % (get_language_alias(config.default_language) or _('English'))
         html.write('<div class="inherited" id="attr_default_language" style="%s">%s</div>' %
-                                            (inactive and "display: none" or "", default_label))
-        html.write('<div id="attr_entry_language" style="%s">' % ((not inactive) and "display: none" or ""))
-        html.select("language", languages, user_language)
+                                            ((active) and "display: none" or "", default_label))
+        html.write('<div id="attr_entry_language" style="%s">' % ((not active) and "display: none" or ""))
+        html.select("language", languages, user.get('language') or '')
         html.write("</div>")
         html.help(_('Configure the default language '
                     'to be used by the user in the user interface here. If you do not check '
@@ -15763,16 +15790,16 @@ def page_user_profile(change_pw=False):
 
     success = None
     if html.has_var('_save') and html.check_transaction():
-        try:
-            users = userdb.load_users(lock = True)
+        users = userdb.load_users(lock = True)
 
+        try:
             # Profile edit (user options like language etc.)
             if config.may('general.edit_profile'):
                 if not change_pw:
-                    set_lang = html.var('_set_lang')
+                    set_lang = html.get_checkbox('_set_lang')
                     language = html.var('language')
                     # Set the users language if requested
-                    if set_lang and language != config.get_language():
+                    if set_lang:
                         if language == '':
                             language = None
                         # Set custom language
@@ -15852,6 +15879,8 @@ def page_user_profile(change_pw=False):
             success = True
         except MKUserError, e:
             html.add_user_error(e.varname, e.message)
+    else:
+        users = userdb.load_users()
 
     # When in distributed setup, display the replication dialog instead of the normal
     # profile edit dialog after changing the password.
@@ -15894,7 +15923,6 @@ def page_user_profile(change_pw=False):
     if html.has_user_errors():
         html.show_user_errors()
 
-    users = userdb.load_users()
     user = users.get(config.user_id)
     if user == None:
         html.show_warning(_("Sorry, your user account does not exist."))
@@ -15926,7 +15954,7 @@ def page_user_profile(change_pw=False):
         html.password_input('password2', autocomplete = "off")
 
     if not change_pw and config.may('general.edit_profile'):
-        select_language(config.get_language(''))
+        select_language(user)
 
         # Let the user configure how he wants to be notified
         if not rulebased_notifications \
@@ -15940,11 +15968,14 @@ def page_user_profile(change_pw=False):
         if config.may('general.edit_user_attributes'):
             for name, attr in userdb.get_user_attributes():
                 if attr['user_editable']:
+                    vs = attr['valuespec']
+                    forms.section(_u(vs.title()))
+                    value = user.get(name, vs.default_value())
                     if not attr.get("permission") or config.may(attr["permission"]):
-                        vs = attr['valuespec']
-                        forms.section(_u(vs.title()))
-                        vs.render_input("ua_" + name, user.get(name, vs.default_value()))
+                        vs.render_input("ua_" + name, value)
                         html.help(_u(vs.help()))
+                    else:
+                        html.write(vs.value_to_text(value))
 
     # Save button
     forms.end()
@@ -15991,9 +16022,16 @@ def create_sample_config():
             "ps",
             "ps.perf",
             "wmic_process",
+            "services",
             "logwatch",
             "cmk-inventory",
             "hyperv_vms",
+            "ibm_svc_mdiskgrp",
+            "ibm_svc_system",
+            "ibm_svc_systemstats.diskio",
+            "ibm_svc_systemstats.iops",
+            "ibm_svc_systemstats.disk_latency",
+            "ibm_svc_systemstats.cache",
         ],
         "inventory_check_interval": 120,
         "enable_rulebased_notifications": True,
@@ -16083,6 +16121,13 @@ def create_sample_config():
 
     # Global settings
     use_new_descriptions_for = [ "df", "ps" ]
+
+    # Initial baking of agents (when bakery is available)
+    if 'bake_agents' in globals():
+        try:
+            bake_agents()
+        except:
+            pass # silently ignore building errors here
 
 #.
 #   .--Pattern Editor------------------------------------------------------.
@@ -16335,7 +16380,7 @@ def mode_bi_rules(phase):
                   "the id <b>%s</b>?") % ruleid)
             if c:
                 del aggregation_rules[ruleid]
-                log_audit(None, "bi-delete-rule", _("Deleted BI rule with id %s") % ruleid)
+                log_pending(SYNC, None, "bi-delete-rule", _("Deleted BI rule with id %s") % ruleid)
                 save_bi_rules(aggregations, aggregation_rules)
             elif c == False: # not yet confirmed
                 return ""
@@ -16347,7 +16392,7 @@ def mode_bi_rules(phase):
                 _("Do you really want to delete the aggregation number <b>%s</b>?") % (nr+1))
             if c:
                 del aggregations[nr]
-                log_audit(None, "bi-delete-aggregation", _("Deleted BI aggregation number %d") % (nr+1))
+                log_pending(SYNC, None, "bi-delete-aggregation", _("Deleted BI aggregation number %d") % (nr+1))
                 save_bi_rules(aggregations, aggregation_rules)
             elif c == False: # not yet confirmed
                 return ""
@@ -16551,16 +16596,17 @@ class HostTagCondition(ValueSpec):
 # that we can replace back after writing the BI-Rules out
 # with pprint.pformat
 bi_constants = {
-  'ALL_HOSTS'       : 'ALL_HOSTS-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'HOST_STATE'      : 'HOST_STATE-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'HIDDEN'          : 'HIDDEN-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'FOREACH_HOST'    : 'FOREACH_HOST-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'FOREACH_CHILD'   : 'FOREACH_CHILD-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'FOREACH_PARENT'  : 'FOREACH_PARENT-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'FOREACH_SERVICE' : 'FOREACH_SERVICE-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'REMAINING'       : 'REMAINING-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'DISABLED'        : 'DISABLED-f41e728b-0bce-40dc-82ea-51091d034fc3',
-  'HARD_STATES'     : 'HARD_STATES-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'ALL_HOSTS'          : 'ALL_HOSTS-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'HOST_STATE'         : 'HOST_STATE-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'HIDDEN'             : 'HIDDEN-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'FOREACH_HOST'       : 'FOREACH_HOST-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'FOREACH_CHILD'      : 'FOREACH_CHILD-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'FOREACH_CHILD_WITH' : 'FOREACH_CHILD_WITH-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'FOREACH_PARENT'     : 'FOREACH_PARENT-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'FOREACH_SERVICE'    : 'FOREACH_SERVICE-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'REMAINING'          : 'REMAINING-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'DISABLED'           : 'DISABLED-f41e728b-0bce-40dc-82ea-51091d034fc3',
+  'HARD_STATES'        : 'HARD_STATES-f41e728b-0bce-40dc-82ea-51091d034fc3',
 }
 
 # returns aggregations, aggregation_rules
@@ -16621,6 +16667,10 @@ def save_bi_rules(aggregations, aggregation_rules):
             out.write("aggregations.append(\n")
         out.write(replace_constants(pprint.pformat(convert_aggregation_to_bi(aggregation))))
         out.write(")\n")
+
+    # Make sure that BI aggregates are replicated to all other sites that allow
+    # direct user login
+    update_login_sites_replication_status()
 
 def rename_host_in_bi(oldname, newname):
     renamed = 0
@@ -16698,27 +16748,41 @@ def convert_node_from_bi(node):
 
     else: # FOREACH_...
 
+        foreach_spec = node[0]
+        if foreach_spec == bi_constants['FOREACH_CHILD_WITH']:
+            # extract the conditions meant for matching the childs
+            child_conditions = list(node[1:3])
+            if child_conditions[1] == bi_constants['ALL_HOSTS']:
+                child_conditions[1] = None
+            node = node[0:1] + node[3:]
+
+        # Extract the list of tags
         if type(node[1]) == list:
             tags = node[1]
             node = node[0:1] + node[2:]
         else:
             tags = []
-        spec = node[1]
-        if spec == bi_constants['ALL_HOSTS']:
-            spec = None
-        if node[0] == bi_constants['FOREACH_SERVICE']:
+
+        hostspec = node[1]
+        if hostspec == bi_constants['ALL_HOSTS']:
+            hostspec = None
+
+        if foreach_spec == bi_constants['FOREACH_SERVICE']:
             service = node[2]
             subnode = convert_node_from_bi(node[3:])
-            return ("foreach_service", (tags, spec, service, subnode))
+            return ("foreach_service", (tags, hostspec, service, subnode))
         else:
+
             subnode = convert_node_from_bi(node[2:])
-            if node[0] == bi_constants['FOREACH_HOST']:
+            if foreach_spec == bi_constants['FOREACH_HOST']:
                 what = "host"
-            elif node[0] == bi_constants['FOREACH_CHILD']:
+            elif foreach_spec == bi_constants['FOREACH_CHILD']:
                 what = "child"
-            elif node[0] == bi_constants['FOREACH_PARENT']:
+            elif foreach_spec == bi_constants['FOREACH_CHILD_WITH']:
+                what = ("child_with", child_conditions)
+            elif foreach_spec == bi_constants['FOREACH_PARENT']:
                 what = "parent"
-            return ("foreach_host", (what, tags, spec, subnode))
+            return ("foreach_host", (what, tags, hostspec, subnode))
 
 
 def convert_node_to_bi(node):
@@ -16732,12 +16796,22 @@ def convert_node_to_bi(node):
         return node[1]
     elif node[0] == "foreach_host":
         what = node[1][0]
+
         tags = node[1][1]
         if node[1][2]:
-            spec = node[1][2]
+            hostspec = node[1][2]
         else:
-            spec = bi_constants['ALL_HOSTS']
-        return (bi_constants["FOREACH_" + what.upper()], tags, spec) + convert_node_to_bi(node[1][3])
+            hostspec = bi_constants['ALL_HOSTS']
+
+        if type(what == tuple) and what[0] == 'child_with':
+            child_conditions = what[1]
+            what             = what[0]
+            child_tags       = child_conditions[0]
+            child_hostspec   = child_conditions[1] and child_conditions[1] or bi_constants['ALL_HOSTS']
+            return (bi_constants["FOREACH_" + what.upper()], child_tags, child_hostspec, tags, hostspec) \
+                   + convert_node_to_bi(node[1][3])
+        else:
+            return (bi_constants["FOREACH_" + what.upper()], tags, hostspec) + convert_node_to_bi(node[1][3])
     elif node[0] == "foreach_service":
         tags = node[1][0]
         if node[1][1]:
@@ -16801,6 +16875,7 @@ def declare_bi_valuespecs(aggregation_rules):
             DropdownChoice(
                 title = _("Rule:"),
                 choices = rule_choices,
+                sorted = True,
             ),
             ListOfStrings(
                 orientation = "horizontal",
@@ -16861,13 +16936,38 @@ def declare_bi_valuespecs(aggregation_rules):
           ( "foreach_host", _("Create nodes based on a host search"),
              Tuple(
                  elements = [
-                    DropdownChoice(
+                    CascadingDropdown(
                         title = _("Refer to:"),
                         choices = [
-                            ( 'host',   _("The found hosts themselves") ),
-                            ( 'child',  _("The found hosts' childs") ),
-                            ( 'parent', _("The found hosts' parents") ),
-                        ]
+                            ( 'host',       _("The found hosts themselves") ),
+                            ( 'child',      _("The found hosts' childs") ),
+                            ( 'child_with', _("The found hosts' childs (with child filtering)"),
+                                Tuple(elements = [
+                                    HostTagCondition(
+                                        title = _("Child Host Tags:")
+                                    ),
+                                    OptionalDropdownChoice(
+                                        title = _("Child Host Name:"),
+                                        choices = [
+                                            ( None, _("All Hosts")),
+                                        ],
+                                        explicit = TextAscii(size = 60),
+                                        otherlabel = _("Regex for host name"),
+                                        default_value = None,
+                                    ),
+                                ]),
+                            ),
+                            ( 'parent',     _("The found hosts' parents") ),
+                        ],
+                        help = _('When refering to the found hosts childs, this means you '
+                          'configure the conditions (tags and host name) below to match '
+                          'a host, but you will get one node created for each child host. The'
+                          'place holder <tt>$1$</tt> contains the name of the found child.<br><br>'
+                          'When refering to the found hosts parents, you use the conditions '
+                          'to match a host, but you will get one node created for each of the '
+                          'parent hosts of this found host. The conditions are used to match '
+                          'the child hosts. The place holder <tt>$1$</tt> contains the name '
+                          'of the child host and <tt>$2$</tt> the name of the parent host.'),
                     ),
                     HostTagCondition(
                         title = _("Host Tags:")
@@ -17017,10 +17117,10 @@ def mode_bi_edit_aggregation(phase):
                 raise MKUserError('rule_p_groups_0', _("Please define at least one aggregation group"))
             if new:
                 aggregations.append(new_aggr)
-                log_audit(None, "bi-new-aggregation", _("Created new BI aggregation %d") % (len(aggregations)))
+                log_pending(SYNC, None, "bi-new-aggregation", _("Created new BI aggregation %d") % (len(aggregations)))
             else:
                 aggregations[nr] = new_aggr
-                log_audit(None, "bi-new-aggregation", _("Modified BI aggregation %d") % (nr + 1))
+                log_pending(SYNC, None, "bi-new-aggregation", _("Modified BI aggregation %d") % (nr + 1))
             save_bi_rules(aggregations, aggregation_rules)
         return "bi_rules"
 
@@ -17157,14 +17257,14 @@ def mode_bi_edit_rule(phase):
             if new:
                 del new_rule["id"]
                 aggregation_rules[ruleid] = new_rule
-                log_audit(None, "bi-new-rule", _("Create new BI rule %s") % ruleid)
+                log_pending(SYNC, None, "bi-new-rule", _("Create new BI rule %s") % ruleid)
             else:
                 aggregation_rules[ruleid].update(new_rule)
                 new_rule["id"] = ruleid
                 if bi_rule_uses_rule(aggregation_rules, new_rule, new_rule["id"]):
                     raise MKUserError(None, _("There is a cycle in your rules. This rule calls itself - "
                                               "either directly or indirectly."))
-                log_audit(None, "bi-edit-rule", _("Modified BI rule %s") % ruleid)
+                log_pending(SYNC, None, "bi-edit-rule", _("Modified BI rule %s") % ruleid)
 
             save_bi_rules(aggregations, aggregation_rules)
         return "bi_rules"
@@ -17714,10 +17814,12 @@ class API:
             # Check if folder or host file is locked
             if check_folder == host_foldername: # Target folder exists
                 if check_folder.get(".lock_hosts"):
-                    raise MKAuthException(_("Not allowed to change hosts.mk file. It is locked"))
+                    raise MKAuthException(_("You are not allowed to modify hosts in this folder. The host configuration in the folder "
+                                            "is locked, because it has been created by an external application."))
             else:
                 if check_folder.get(".lock_subfolders"):
-                    raise MKAuthException(_("Not allowed create subfolders"))
+                    raise MKAuthException(_("Not allowed to create subfolders in this folder. The Folder has been "
+                                            "created by an external application and is locked."))
 
         if "permissions_create" in validate:
             # Find the closest parent folder. If we can write there, we can also write in our new folder
@@ -17823,7 +17925,11 @@ class API:
                 self.__validate_host_parameters(None, hostname, attributes, all_hosts, True,
                                            ["host_missing", "tags", "site", "permissions_edit"])
             host_foldername = all_hosts[hostname][".folder"][".path"]
-            target_folders.setdefault(host_foldername, {})[hostname] = {"set":   attributes,
+            new_attr = dict([(k, v) for (k, v) in all_hosts[hostname].iteritems() \
+                                    if (not k.startswith('.'))])
+            new_attr.update(attributes)
+
+            target_folders.setdefault(host_foldername, {})[hostname] = {"set":   new_attr,
                                                                         "unset": host_unset_attr}
 
         for target_foldername, update_hosts in target_folders.items():
@@ -18692,7 +18798,7 @@ def load_plugins():
 
     config.declare_permission("wato.notifications",
          _("Notification configuration"),
-         _("This permission is needed for the new rule based notification configuration via the WATO module <i>Notifications</i>.</b>"),
+         _("This permission is needed for the new rule based notification configuration via the WATO module <i>Notifications</i>."),
          [ "admin", ])
 
     config.declare_permission("wato.snapshots",

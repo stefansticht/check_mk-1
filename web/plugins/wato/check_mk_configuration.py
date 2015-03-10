@@ -25,7 +25,6 @@
 # Boston, MA 02110-1301 USA.
 
 
-deprecated = _("Deprecated")
 #   .--Global Settings-----------------------------------------------------.
 #   |  ____ _       _           _   ____       _   _   _                   |
 #   | / ___| | ___ | |__   __ _| | / ___|  ___| |_| |_(_)_ __   __ _ ___   |
@@ -37,6 +36,7 @@ deprecated = _("Deprecated")
 #   | Global configuration settings for main.mk and multisite.mk           |
 #   '----------------------------------------------------------------------'
 
+deprecated = _("Deprecated")
 
 group = _("Status GUI (Multisite)")
 
@@ -290,7 +290,7 @@ register_configvar(group,
         add_label = _("Create new virtual host tree configuration"),
         title = _("Virtual Host Trees"),
         help = _("Here you can define tree configurations for the snapin <i>Virtual Host-Trees</i>. "
-                 "These trees organize your host based on their values in certain host tag groups. "
+                 "These trees organize your hosts based on their values in certain host tag groups. "
                  "Each host tag group you select will create one level in the tree."),
     ),
     domain = "multisite",
@@ -645,7 +645,7 @@ register_configvar(group,
         default_value = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ],
         choices       = [
             ('page',                      _('During regular page processing')),
-            ('wato_users',                _('When opening the users configuration page')),
+            ('wato_users',                _('When opening the users\' configuration page')),
             ('wato_pre_activate_changes', _('Before activating the changed configuration')),
             ('wato_snapshot_pushed',      _('On a remote site, when it receives a new configuration')),
         ],
@@ -974,10 +974,10 @@ register_configvar(group,
     "password_policy",
     Dictionary(
         title = _('htpasswd: Password Policy'),
-        help  = _('You can define some rules which each user password must fit with. By default '
+        help  = _('You can define some rules to which each user password ahers. By default '
                   'all passwords are accepted, even ones which are made of only a single character, '
                   'which is obviously a bad idea. Using this option you can enforce your users '
-                  'to choose more secure passwords of a minimal length having a defined complexity.'),
+                  'to choose more secure passwords.'),
         elements = [
             ('min_length', Integer(
                 title = _("Minimum password length"),
@@ -986,10 +986,13 @@ register_configvar(group,
             ('num_groups', Integer(
                 title = _("Number of character groups to use"),
                 minvalue = 1,
-                help = _("Make the user choose the password from this number of character groups. "
-                         "Character groups are: <ul><li>lowercase letters</li>"
+                maxvalue = 4,
+                help = _("Force the user to choose a password that contains characters from at least "
+                         "this number of different character groups. "
+                         "Character groups are: <ul>"
+                         "<li>lowercase letters</li>"
                          "<li>uppercase letters</li>"
-                         "<li>numbers</li>"
+                         "<li>digits</li>"
                          "<li>special characters such as an underscore or dash</li>"
                          "</ul>"),
             )),
@@ -1094,19 +1097,26 @@ register_configvar(group,
                  "existing installations. Here you can switch to the new descriptions for "
                  "selected check types"),
         choices = [
-            ( "df",                     _("Used space in filesystems")),
-            ( "df_netapp",              _("NetApp Filers: Used Space in Filesystems")),
-            ( "df_netapp32",            _("NetApp Filers: Used space in Filesystem Using 32-Bit Counters")),
-            ( "esx_vsphere_datastores", _("VMWare ESX host systems: Used space")),
-            ( "hr_fs",                  _("Used space in filesystems via SNMP")),
-            ( "vms_diskstat.df",        _("Disk space on OpenVMS")),
-            ( "zfsget",                 _("Used space in ZFS pools and filesystems")),
-            ( "ps",                     _("State and Count of Processes") ),
-            ( "ps.perf",                _("State and Count of Processes (with additional performance data)")),
-            ( "wmic_process",           _("Ressource consumption of windows processes")),
-            ( "logwatch",               _("Check logfiles for relevant new messages")),
-            ( "cmk-inventory",          _("Monitor hosts for unchecked services (Check_MK inventory)")),
-            ( "hyperv_vms",             _("Hyper-V Server: State of VMs")),
+            ( "df",                               _("Used space in filesystems")),
+            ( "df_netapp",                        _("NetApp Filers: Used Space in Filesystems")),
+            ( "df_netapp32",                      _("NetApp Filers: Used space in Filesystem Using 32-Bit Counters")),
+            ( "esx_vsphere_datastores",           _("VMWare ESX host systems: Used space")),
+            ( "hr_fs",                            _("Used space in filesystems via SNMP")),
+            ( "vms_diskstat.df",                  _("Disk space on OpenVMS")),
+            ( "zfsget",                           _("Used space in ZFS pools and filesystems")),
+            ( "ps",                               _("State and Count of Processes") ),
+            ( "ps.perf",                          _("State and Count of Processes (with additional performance data)")),
+            ( "wmic_process",                     _("Resource consumption of windows processes")),
+            ( "services",                         _("Windows Services")),
+            ( "logwatch",                         _("Check logfiles for relevant new messages")),
+            ( "cmk-inventory",                    _("Monitor hosts for unchecked services (Check_MK Discovery)")),
+            ( "hyperv_vms",                       _("Hyper-V Server: State of VMs")),
+            ( "ibm_svc_mdiskgrp",                 _("IBM SVC / Storwize V3700 / V7000: Status and Usage of MDisksGrps")),
+            ( "ibm_svc_system",                   _("IBM SVC / V7000: System Info")),
+            ( "ibm_svc_systemstats.diskio",       _("IBM SVC / V7000: Disk Throughput for Drives/MDisks/VDisks in Total")),
+            ( "ibm_svc_systemstats.iops",         _("IBM SVC / V7000: IO operations/sec for Drives/MDisks/VDisks in Total")),
+            ( "ibm_svc_systemstats.disk_latency", _("IBM SVC / V7000: Latency for Drives/MDisks/VDisks in Total")),
+            ( "ibm_svc_systemstats.cache",        _("IBM SVC / V7000: Cache Usage in Total")),
         ],
         render_orientation = "vertical",
     ),
@@ -1276,7 +1286,7 @@ register_configvar(group,
                 min_value = 1,
                 default_value = 720),
         title = _("Enable regular service discovery checks"),
-        help = _("If enabled, Check_MK will create one additional check per host "
+        help = _("If enabled, Check_MK will create one additional service per host "
                  "that does a regular check, if the service discovery would find new services "
                  "currently un-monitored.")),
     need_restart = True)
@@ -1308,11 +1318,11 @@ register_configvar(group,
 register_configvar(group,
     "inventory_check_autotrigger",
     Checkbox(
-        title = _("Service Discovery triggers service discovery check"),
+        title = _("Service discovery triggers service discovery check"),
         label = _("Automatically schedule service discovery check after service configuration changes"),
         help = _("When this option is enabled then after each change of the service "
                  "configuration of a host via WATO - may it be via manual changes or a bulk "
-                 "discovry - the service discovery check is automatically rescheduled in order "
+                 "discovery - the service discovery check is automatically rescheduled in order "
                  "to reflect the new service state correctly immediately."),
         default_value = True,
     ))
@@ -1520,7 +1530,7 @@ register_configvar(deprecated,
                       "(and switch ports) the current speed setting of the port will "
                       "automatically be coded as a check parameter into the check. That way the check "
                       "will get warning or critical when speed later changes (for example from "
-                      "100 MBit/s to 10 MBit/s). This setting can later "
+                      "100 Mbit/s to 10 Mbit/s). This setting can later "
                       "by overridden on a per-host and per-port base by defining special check "
                       "parameters via a rule.")))
 
@@ -2482,9 +2492,9 @@ register_rule(group,
     Transform(
         CascadingDropdown(
             title = _("Check for correct version of Check_MK agent"),
-            help = _("If you want to make sure all of your Check_MK agents are running"
-                     " one specific version, you may set it by this rule. Agents running "
-                     " some different version return a none ok state then"),
+            help = _("Here you can make sure that all of your Check_MK agents are running"
+                     " one specific version. Agents running "
+                     " a different version return a non-OK state."),
             choices = [
                 ("ignore",   _("Ignore the version")),
                 ("site",     _("Same version as the monitoring site")),

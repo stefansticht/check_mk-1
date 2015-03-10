@@ -95,6 +95,9 @@ def liveproxyd_run():
                 dump_state()
                 last_dump = now
 
+        except SystemExit:
+            # Python <2.5 compat: Simply let exit go through this level
+            raise
         except Exception, e:
             if opt_debug:
                 raise
@@ -854,8 +857,21 @@ def do_inventory_update_of(socket, sitename, host_name, timestamp):
     file(path + ".gz", "w").write(gzipped_invdata)
     os.utime(path + ".gz", (timestamp, timestamp))
     unzipped_invdata = gzip.GzipFile(fileobj=StringIO.StringIO(gzipped_invdata)).read()
+
+    # Move existing inventory data to archive directory. The content should always
+    # be different, because the remote side only updates its inventory file if some
+    # changes have happened.
+    if os.path.exists(path):
+        old_time = os.stat(path).st_mtime
+        arcdir = "%s/%s" % (opt_inventory_archive_dir, host_name)
+        if not os.path.exists(arcdir):
+            os.makedirs(arcdir)
+        os.rename(path, arcdir + ("/%d" % old_time))
+
+    # Now save new inventory data
     file(path, "w").write(unzipped_invdata)
     os.utime(path, (timestamp, timestamp))
+
     log("Site %s: new HW/SW-Inventory data for %s (%d bytes)" % (
             sitename, host_name, len(gzipped_invdata)))
 
@@ -913,7 +929,7 @@ def usage():
 
    -v, --verbose        Enable verbose output
    -g, --foreground     Do not daemonize, run in foreground
-   -c, --conifg CONFIG  Read configuration from file CONFIG
+   -c, --config CONFIG  Read configuration from file CONFIG
    --debug              Enable debug mode (let exceptions through)
    -h, --help           Show this help and exit
    -V, --version        Print version and exit
@@ -1046,6 +1062,7 @@ if omd_root:
     opt_configfile    = omd_root + "/etc/check_mk/liveproxyd.mk"
     opt_socketdir     = omd_root + "/tmp/run/liveproxy"
     opt_inventory_dir = omd_root + "/var/check_mk/inventory"
+    opt_inventory_archive_dir = opt_inventory_dir + "_archive"
 else:
     curdir = os.path.abspath('.')
     opt_logfilepath   = curdir + "/liveproxyd.log"
@@ -1054,6 +1071,7 @@ else:
     opt_configfile    = curdir + "/liveproxyd.mk"
     opt_socketdir     = curdir + "/liveproxy"
     opt_inventory_dir = None # Not supported for non-OMD installations
+    opt_inventory_archive_dir = None # Not supported for non-OMD installations
 
 short_options = "hvVgc"
 long_options = [ "help", "version", "verbose", "debug", "foreground", "config=" ]
@@ -1069,7 +1087,7 @@ try:
             opt_debug = True
         elif o in [ '-g', '--foreground' ]:
             opt_foreground = True
-        elif o in [ '-c', '--conifg' ]:
+        elif o in [ '-c', '--config' ]:
             opt_config = a
 
     # now handle action options
@@ -1112,6 +1130,9 @@ try:
     os.remove(opt_pid_file)
     sys.exit(0)
 
+except SystemExit:
+    # Python <2.5 compat: Simply let exit go through this level
+    raise
 except Exception, e:
     if opt_debug:
         raise

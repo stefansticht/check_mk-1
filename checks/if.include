@@ -88,6 +88,14 @@ def if_extract_node(line, has_nodeinfo):
     else:
         return None, line
 
+def if_item_matches(item, ifIndex, ifAlias, ifDescr):
+    return item.lstrip("0") == ifIndex \
+            or (item == "0" * len(item) and saveint(ifIndex) == 0) \
+            or item == ifAlias \
+            or item == ifDescr \
+            or item == "%s %s" % (ifAlias, ifIndex) \
+            or item == "%s %s" % (ifDescr, ifIndex)
+
 # Pads port numbers with zeroes, so that items
 # nicely sort alphabetically
 def if_pad_with_zeroes(info, ifIndex, has_nodeinfo):
@@ -96,7 +104,13 @@ def if_pad_with_zeroes(info, ifIndex, has_nodeinfo):
     else:
         index = 0
     if if_inventory_pad_portnumbers:
-        max_index = max([int(line[index]) for line in info])
+        def get_index(line):
+            if type(line[index]) == tuple:
+                return line[index][1]
+            else:
+                return line[index]
+
+        max_index = max([int(get_index(line)) for line in info])
         digits = len(str(max_index))
         return ("%0"+str(digits)+"d") % int(ifIndex)
     else:
@@ -117,12 +131,13 @@ def inventory_if_common(info, has_nodeinfo = False):
     porttypes           = settings.get('porttypes', if_inventory_porttypes)
     portstates          = settings.get('portstates', if_inventory_portstates)
     match_alias         = settings.get('match_alias')
+    match_desc          = settings.get('match_desc')
 
-    def alias_matches(alias):
-        if match_alias == None:
+    def port_match(name, what):
+        if what == None:
             return True
-        for r in match_alias:
-            if regex(r).match(alias):
+        for r in what:
+            if regex(r).match(name):
                 return True
         return False
 
@@ -148,6 +163,11 @@ def inventory_if_common(info, has_nodeinfo = False):
             inucast, inmcast, inbcast, ifInDiscards, ifInErrors, ifOutOctets, \
             outucast, outmcast, outbcast, ifOutDiscards, ifOutErrors, \
             ifOutQLen, ifAlias, ifPhysAddress = line
+
+        ifGroup = None
+        if type(ifIndex) == tuple:
+            ifGroup, ifIndex = ifIndex
+
         ifDescr = cleanup_if_strings(ifDescr)
         ifAlias = cleanup_if_strings(ifAlias)
 
@@ -182,13 +202,22 @@ def inventory_if_common(info, has_nodeinfo = False):
                 if pattern.get("single"):
                     is_only_in_group = True
 
+        # The agent output already set this interface to grouped
+        if ifGroup:
+            have_groups.setdefault(ifGroup, {"interfaces": [],
+                                             "iftype": ifType,
+                                             "include_items": []})
+            have_groups[ifGroup]["interfaces"].append((saveint(ifSpeed), ifOperStatus, ifType))
+            is_only_in_group = True
+
         # Prepare single interfaces
         if not is_only_in_group:
             if item in seen_items: # duplicate
                 duplicate.add(item)
             seen_items.add(item)
 
-            if ifType in porttypes and ifOperStatus in portstates and alias_matches(ifAlias):
+            if ifType in porttypes and ifOperStatus in portstates and \
+                port_match(ifAlias, match_alias) and port_match(ifDescr, match_desc):
                 params = {}
                 if if_inventory_monitor_state:
                     params["state"] = [ifOperStatus]
@@ -240,6 +269,9 @@ def check_if_common(item, params, info, has_nodeinfo = False):
         node_offset = has_nodeinfo and 1 or 0
         def get_interface_item(line):
             ifIndex = line[ 0 + node_offset]
+            if type(ifIndex) == tuple:
+                ifGroup, ifIndex = ifIndex
+
             ifDescr = line[ 1 + node_offset]
             ifAlias = line[18 + node_offset]
             if if_inventory_uses_description and ifDescr:
@@ -250,11 +282,21 @@ def check_if_common(item, params, info, has_nodeinfo = False):
                 if_item = if_pad_with_zeroes(info, ifIndex, has_nodeinfo)
             return if_item
 
+
+
         for element in info:
-            match_item = not params.get("include_items") or (get_interface_item(element) in params["include_items"])
-            match_type = not params.get("iftype")        or (params["iftype"] == saveint(element[2 + node_offset]))
-            if match_item and match_type:
+            ifIndex = element[0 + node_offset]
+            ifGroup = None
+            if type(ifIndex) == tuple:
+                ifGroup, ifIndex = ifIndex
+
+            if ifGroup and ifGroup == item:
                 matching_interfaces.append(element)
+            else:
+                match_item = not params.get("include_items") or (get_interface_item(element) in params["include_items"])
+                match_type = not params.get("iftype")        or (params["iftype"] == saveint(element[2 + node_offset]))
+                if match_item and match_type:
+                    matching_interfaces.append(element)
 
         # Accumulate info over matching_interfaces
         wrapped = False
@@ -272,6 +314,10 @@ def check_if_common(item, params, info, has_nodeinfo = False):
                 inucast, inmcast, inbcast, ifInDiscards, ifInErrors, ifOutOctets, \
                 outucast, outmcast, outbcast, ifOutDiscards, ifOutErrors, \
                 ifOutQLen, ifAlias, ifPhysAddress = line
+
+            ifGroup = None
+            if type(ifIndex) == tuple:
+                ifGroup, ifIndex = ifIndex
 
             if_item = get_interface_item(element)
             perfdata = []
@@ -351,11 +397,10 @@ def check_if_common(item, params, info, has_nodeinfo = False):
                     "",                         # ifPhysAddress
         ]
 
-        info.append(group_entry)
         # If applicable, signal the check_if_common_single if the counter of the
         # given interface has wrapped. Actually a wrap of the if group itself is unlikely,
         # however any counter wrap of one of its members causes the accumulation being invalid
-        return check_if_common_single(item, params, info, wrapped, has_nodeinfo=has_nodeinfo)
+        return check_if_common_single(item, params, [group_entry], wrapped, has_nodeinfo=has_nodeinfo)
 
     return check_if_common_single(item, params, info, has_nodeinfo=has_nodeinfo)
 
@@ -377,6 +422,12 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
     else:
         err_warn, err_crit = None, None
 
+    # broadcast storm detection is turned off by default
+    if "nucasts" in params:
+        nucast_warn, nucast_crit = params["nucasts"]
+    else:
+        nucast_warn, nucast_crit = None, None
+
     # Traffic checking might be turned off
     if "traffic" in params:
         bw_warn_param, bw_crit_param = params["traffic"]
@@ -395,16 +446,15 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
             inucast, inmcast, inbcast, ifInDiscards, ifInErrors, ifOutOctets, \
             outucast, outmcast, outbcast, ifOutDiscards, ifOutErrors, \
             ifOutQLen, ifAlias, ifPhysAddress = line
+
+        ifGroup = None
+        if type(ifIndex) == tuple:
+            ifGroup, ifIndex = ifIndex
+
         ifDescr = cleanup_if_strings(ifDescr)
         ifAlias = cleanup_if_strings(ifAlias)
 
-        if item.lstrip("0") == ifIndex \
-            or (item == "0" * len(item) and saveint(ifIndex) == 0) \
-            or item == ifAlias \
-            or item == ifDescr \
-            or item == "%s %s" % (ifAlias, ifIndex) \
-            or item == "%s %s" % (ifDescr, ifIndex):
-
+        if if_item_matches(item, ifIndex, ifAlias, ifDescr):
             # Display port number or alias in infotext if that is not part
             # of the service description anyway
             if item.lstrip("0") == ifIndex \
@@ -551,13 +601,13 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
             for name, counter, warn, crit, mmin, mmax in [
                 ( "in",        ifInOctets, bw_warn_in, bw_crit_in, 0, speed_b_in),
                 ( "inucast",   inucast, None, None, None, None),
-                ( "innucast",  saveint(inmcast) + saveint(inbcast), None, None, None, None),
+                ( "innucast",  saveint(inmcast) + saveint(inbcast), nucast_warn, nucast_crit, None, None),
                 ( "indisc",    ifInDiscards, None, None, None, None),
                 ( "inerr",     ifInErrors, err_warn, err_crit, None, None),
 
                 ( "out",       ifOutOctets, bw_warn_out, bw_crit_out, 0, speed_b_out),
                 ( "outucast",  outucast, None, None, None, None),
-                ( "outnucast", saveint(outmcast) + saveint(outbcast), None, None, None, None),
+                ( "outnucast", saveint(outmcast) + saveint(outbcast), nucast_warn, nucast_crit, None, None),
                 ( "outdisc",   ifOutDiscards, None, None, None, None),
                 ( "outerr",    ifOutErrors, err_warn, err_crit, None, None) ]:
 
@@ -592,9 +642,10 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
                     else:
                         return "%s/s" % get_bytes_human_readable(value)
 
-                for what, errorrate, okrate, traffic, speed, bw_warn, bw_crit, bw_warn_min, bw_crit_min in \
-                   [ ("in",  rates[4], rates[1] + rates[2], rates[0], speed_in, bw_warn_in, bw_crit_in, bw_warn_min_in, bw_crit_min_in),
-                     ("out", rates[9], rates[6] + rates[7], rates[5], speed_out, bw_warn_out, bw_crit_out, bw_warn_min_out, bw_crit_min_out) ]:
+                # loop over incoming and outgoing traffic
+                for what, errorrate, urate, nurate, traffic, speed, bw_warn, bw_crit, bw_warn_min, bw_crit_min in \
+                   [ ("in",  rates[4], rates[1], rates[2], rates[0], speed_in, bw_warn_in, bw_crit_in, bw_warn_min_in, bw_crit_min_in),
+                     ("out", rates[9], rates[6], rates[7], rates[5], speed_out, bw_warn_out, bw_crit_out, bw_warn_min_out, bw_crit_min_out) ]:
 
                     infotext += ", %s: %s" % (what, format_value(traffic))
 
@@ -627,9 +678,10 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
                         state = max(state, 1)
                         infotext += ' (!) >= ' + format_value(bw_warn_min)
 
-                    pacrate = okrate + errorrate
+                    # check percentage of error packets
+                    pacrate = urate + nurate + errorrate
                     if pacrate > 0.0: # any packets transmitted?
-                        errperc = 100.0 * errorrate / (okrate + errorrate)
+                        errperc = 100.0 * errorrate / pacrate
 
                         if errperc > 0:
                             infotext += ", %s-errors: %.2f%%" % (what, errperc)
@@ -640,6 +692,17 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
                         elif err_warn != None and errperc >= err_warn:
                             state = max(state, 1)
                             infotext += "(!) >= " + str(err_warn)
+
+                    # check rate of non-unicast packets
+                    if nucast_crit or nucast_warn:
+                        infotext += ", %s non-unicast packets %.2f/s" % (what, nurate)
+
+                        if nucast_crit and nurate >= nucast_crit:
+                            state = 2
+                            infotext += "(!!) >= " + str(nucast_crit)
+                        elif nucast_warn and nurate >= nucast_warn:
+                            state = max(state,1)
+                            infotext += "(!) >= " + str(nucast_warn)
 
             if node:
                 cluster_items[node] = ( state, infotext, perfdata )
@@ -653,6 +716,7 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
     # which is master
     if cluster_items:
         maxval = 0
+        choosen_node = None
         for node, result in cluster_items.items():
             state, infotext, perfdata = result
             for entry in perfdata:
@@ -661,6 +725,10 @@ def check_if_common_single(item, params, info, force_counter_wrap = False, has_n
                     maxval = max(maxval, value)
                     if maxval == value:
                         choosen_node = node
+        # In case that each node has a counter wrap for
+        # out, we use the last note from the list as source
+        if not choosen_node:
+            choosen_node = node
         return cluster_items[choosen_node]
 
     return (3, "no such interface")

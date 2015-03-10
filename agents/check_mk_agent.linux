@@ -101,6 +101,7 @@ function run_cached () {
 
     # Cache file outdated and new job not yet running? Start it
     if [ -z "$USE_CACHEFILE" -a ! -e "$CACHEFILE.new" ] ; then
+        # When the command fails, the output is throws away ignored
         echo "set -o noclobber ; exec > \"$CACHEFILE.new\" || exit 1 ; $CMDLINE && mv \"$CACHEFILE.new\" \"$CACHEFILE\" || rm -f \"$CACHEFILE\" \"$CACHEFILE.new\"" | nohup bash >/dev/null 2>&1 &
     fi
 }
@@ -196,7 +197,7 @@ grep ^/dev < /proc/mounts
 
 # processes including username, without kernel processes
 echo '<<<ps>>>'
-ps ax -o user,vsz,rss,cputime,pid,command --columns 10000 | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4,\5) /'
+ps ax -o user,vsz,rss,cputime,etime,pid,command --columns 10000 | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4\/\5,\6) /'
 
 # Memory usage
 echo '<<<mem>>>'
@@ -392,7 +393,7 @@ fi
 # Time synchronization with NTP
 if type ntpq > /dev/null 2>&1 ; then
    # remove heading, make first column space separated
-   run_cached -s ntp 30 "waitmax 5 ntpq -np | sed -e 1,2d -e 's/^\(.\)/\1 /' -e 's/^ /%/'"
+   run_cached -s ntp 30 "waitmax 5 ntpq -np | sed -e 1,2d -e 's/^\(.\)/\1 /' -e 's/^ /%/' || true"
 fi
 
 # Time synchronization with Chrony
@@ -418,30 +419,36 @@ fi
 # Status of CUPS printer queues
 if type lpstat > /dev/null 2>&1; then
     if pgrep cups > /dev/null 2>&1; then
-        echo '<<<cups_queues>>>'
-        CPRINTCONF=/etc/cups/printers.conf
-        if [ -r "$CPRINTCONF" ] ; then
-            LOCAL_PRINTERS=$(grep -E "<(Default)?Printer .*>" $CPRINTCONF | awk '{print $2}' | sed -e 's/>//')
-            lpstat -p | while read LINE
-            do
-                PRINTER=$(echo $LINE | awk '{print $2}')
-                if echo "$LOCAL_PRINTERS" | grep -q "$PRINTER"; then
-                    echo $LINE
+        # first define a function to check cups
+        function cups_queues () {
+            CPRINTCONF=/etc/cups/printers.conf
+            if [ -r "$CPRINTCONF" ] ; then
+                LOCAL_PRINTERS=$(grep -E "<(Default)?Printer .*>" $CPRINTCONF | awk '{print $2}' | sed -e 's/>//')
+                lpstat -p | while read LINE
+                do
+                    PRINTER=$(echo $LINE | awk '{print $2}')
+                    if echo "$LOCAL_PRINTERS" | grep -q "$PRINTER"; then
+                        echo $LINE
+                    fi
+                done
+                echo '---'
+                lpstat -o | while read LINE
+                do
+                    PRINTER=${LINE%%-*}
+                    if echo $LOCAL_PRINTERS | grep -q $PRINTER; then
+                        echo $LINE
+                    fi
+                done
+            else
+                lpstat -p
+                echo '---'
+                lpstat -o | sort
                 fi
-            done
-            echo '---'
-            lpstat -o | while read LINE
-            do
-                PRINTER=${LINE%%-*}
-                if echo "$LOCAL_PRINTERS" | grep -q "$PRINTER"; then
-                    echo $LINE
-                fi
-            done
-        else
-            lpstat -p
-            echo '---'
-            lpstat -o | sort
-        fi
+        }
+        # Make cups_queues available for subshell
+        export -f cups_queues
+        # Use cups_queues function with run_cached and cache time of 5 mins
+        run_cached -s cups_queues 300 "cups_queues"
     fi
 fi
 
@@ -497,18 +504,28 @@ elif [ -x /usr/sbin/ssmtp ] ; then
     mailq 2>&1 | sed 's/^[^:]*: \(.*\)/\1/' | tail -n 6
 fi
 
-#Check status of qmail mailqueue
+# Check status of qmail mailqueue
 if type qmail-qstat >/dev/null
 then
    echo "<<<qmail_stats>>>"
    qmail-qstat
 fi
 
-# Check status of OMD sites
+# Check status of OMD sites and Check_MK Notification spooler
 if type omd >/dev/null
 then
-    run_cached -s omd_status 60 "omd status --bare --auto"
+    run_cached -s omd_status 60 "omd status --bare --auto || true"
+    echo '<<<mknotifyd:sep(0)>>>'
+    for statefile in /omd/sites/*/var/log/mknotifyd.state ; do
+        site=${statefile%/var/log*}
+        site=${site#/omd/sites/}
+        echo "[$site]"
+        grep -v '^#' < $statefile
+    done
 fi
+
+# Status of Check_MK Notification Spooler
+
 
 
 # Welcome the ZFS check on Linux
@@ -590,6 +607,56 @@ then
     done
 fi
 
+# MK's runas Executor
+if [ -e "$MK_CONFDIR/runas.cfg" ]
+then
+    grep -Ev '^[[:space:]]*($|#)' "$MK_CONFDIR/runas.cfg" | \
+    while read type user include
+    do
+        if [ -d $include -o \( "$type" == "mrpe" -a -f $include \) ] ; then
+            PREFIX=""
+            if [ "$user" != "-" ] ; then
+                PREFIX="su $user -c "
+            fi
+
+            # mrpe includes
+            if [ "$type" == "mrpe" ] ; then
+                echo "<<<mrpe>>>"
+                grep -Ev '^[[:space:]]*($|#)' "$include" | \
+                while read descr cmdline
+                do
+                    PLUGIN=${cmdline%% *}
+
+                    if [ -n "$PREFIX" ] ; then
+                        cmdline="$PREFIX\"$cmdline\""
+                    fi
+
+                    OUTPUT=$(eval "$cmdline")
+                    echo -n "(${PLUGIN##*/}) $descr $? $OUTPUT" | tr \\n \\1
+                    echo
+                done
+
+            # local and plugin includes
+            elif [ "$type" == "local" -o "$type" == "plugin" ] ; then
+                if [ "$type" == "local" ] ; then
+                    echo "<<<local>>>"
+                fi
+
+                find $include -executable -type f | \
+                while read filename
+                do
+                    if [ -n "$PREFIX" ] ; then
+                        cmdline="$PREFIX\"$filename\""
+                    else
+                        cmdline=$filename
+                    fi
+
+                    $cmdline
+                done
+            fi
+        fi
+    done
+fi
 
 # Local checks
 echo '<<<local>>>'

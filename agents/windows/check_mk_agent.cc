@@ -337,6 +337,13 @@ DWORD    known_record_numbers[MAX_EVENTLOGS];
 char    *eventlog_names[MAX_EVENTLOGS];
 bool     newly_found[MAX_EVENTLOGS];
 
+struct eventlog_hint_t {
+    char  *name;
+    DWORD record_no;
+};
+typedef vector<eventlog_hint_t*> eventlog_hints_t;
+eventlog_hints_t g_eventlog_hints;
+
 // Directories
 char g_agent_directory[256];
 char g_current_directory[256];
@@ -348,6 +355,7 @@ char g_crash_log[256];
 char g_connection_log[256];
 char g_success_log[256];
 char g_logwatch_statefile[256];
+char g_eventlog_statefile[256];
 
 // Configuration of eventlog monitoring (see config parser)
 int num_eventlog_configs = 0;
@@ -844,7 +852,8 @@ void dump_performance_counters(SOCKET &out, unsigned counter_base_number, const 
             verbose("Buffer for RegQueryValueEx too small. Resizing...");
             delete [] data;
             data = new BYTE [size];
-        } else {
+        }
+        else {
             // Es ist ein anderer Fehler aufgetreten. Abbrechen.
             delete [] data;
             return;
@@ -1154,7 +1163,7 @@ bool output_eventlog_entry(SOCKET &out, char *dllpath, EVENTLOGRECORD *event, ch
 
 
 void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
-        DWORD bytesread, DWORD *record_number, bool just_find_end,
+        DWORD bytesread, DWORD *record_number, bool do_not_output,
         int *worst_state, int level, int hide_context)
 {
     WCHAR *strings[64];
@@ -1197,8 +1206,9 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
             *worst_state = this_state;
 
         // If we are not just scanning for the current end and the worst state,
+
         // we output the event message
-        if (!just_find_end && (!hide_context || type_char != '.'))
+        if (!do_not_output && (!hide_context || type_char != '.'))
         {
             // The source name is the name of the application that produced the event
             // It is UTF-16 encoded
@@ -1282,7 +1292,7 @@ void process_eventlog_entries(SOCKET &out, const char *logname, char *buffer,
 
 
 void output_eventlog(SOCKET &out, const char *logname,
-        DWORD *record_number, bool just_find_end, int level, int hide_context)
+        DWORD *record_number, int level, int hide_context)
 {
     crash_log(" - event log \"%s\":", logname);
 
@@ -1297,6 +1307,7 @@ void output_eventlog(SOCKET &out, const char *logname,
     DWORD bytesneeded = 0;
     if (hEventlog) {
         crash_log("   . successfully opened event log");
+
         output(out, "[[[%s]]]\n", logname);
         int worst_state = 0;
         DWORD old_record_number = *record_number;
@@ -1305,14 +1316,14 @@ void output_eventlog(SOCKET &out, const char *logname,
         // at least one warning/error message is present. Only if this
         // is the case we make a second run where we output *all* messages,
         // even the informational ones.
-        for (int t=0; t<2; t++)
+        for (int cycle = 0; cycle < 2; cycle++)
         {
             *record_number = old_record_number;
             verbose("Starting from entry number %u", old_record_number);
             while (true) {
                 DWORD flags;
                 if (*record_number == 0) {
-                    if (t == 1) {
+                    if (cycle == 1) {
                         verbose("Need to reopen Logfile in order to find start again.");
                         CloseEventLog(hEventlog);
                         hEventlog = OpenEventLog(NULL, logname);
@@ -1338,8 +1349,10 @@ void output_eventlog(SOCKET &out, const char *logname,
                             &bytesneeded))
                 {
                     crash_log("   . got entries starting at %d (%d bytes)", *record_number + 1, bytesread);
+
+
                     process_eventlog_entries(out, logname, eventlog_buffer,
-                            bytesread, record_number, just_find_end || t==0, &worst_state, level, hide_context);
+                            bytesread, record_number, cycle == 0, &worst_state, level, hide_context);
                 }
                 else {
                     DWORD error = GetLastError();
@@ -1542,7 +1555,8 @@ process_entry_t get_process_perfdata()
             size += DEFAULT_BUFFER_SIZE;
             delete [] data;
             data = new BYTE [size];
-        } else {
+        }
+        else {
             // Es ist ein anderer Fehler aufgetreten. Abbrechen.
             delete [] data;
             return process_info;
@@ -1819,6 +1833,62 @@ void load_logwatch_offsets()
     }
 }
 
+void save_eventlog_offsets()
+{
+    FILE *file = fopen(g_eventlog_statefile, "w");
+    for (unsigned i=0; i < num_eventlogs; i++) {
+        int level = 1;
+        for (int j=0; j<num_eventlog_configs; j++) {
+            const char *cname = eventlog_config[j].name;
+            if (!strcmp(cname, "*") || !strcasecmp(cname, eventlog_names[i]))
+            {
+                level = eventlog_config[j].level;
+                break;
+            }
+        }
+        if (level != -1)
+            fprintf(file, "%s|%lu\n", eventlog_names[i], known_record_numbers[i]);
+    }
+    fclose(file);
+}
+
+void parse_eventlog_state_line(char *line)
+{
+    /* Example: line = "System|1234" */
+    rstrip(line);
+    char *p = line;
+    while (*p && *p != '|') p++;
+    *p = 0;
+    char *path = line;
+    p++;
+
+    char *token = strtok(p, "|");
+
+    if (!token) return;
+    unsigned long long record_no = string_to_llu(token);
+
+    eventlog_hint_t *elh = new eventlog_hint_t();
+    elh->name      = strdup(path);
+    elh->record_no = record_no;
+    g_eventlog_hints.push_back(elh);
+}
+
+void load_eventlog_offsets()
+{
+    static bool records_loaded = false;
+    if (!records_loaded) {
+        FILE *file = fopen(g_eventlog_statefile, "r");
+        if (file) {
+            char line[256];
+            while (NULL != fgets(line, sizeof(line), file)) {
+                parse_eventlog_state_line(line);
+            }
+            fclose(file);
+        }
+        records_loaded = true;
+    }
+}
+
 void update_script_statistics()
 {
     script_containers_t::iterator it = script_containers.begin();
@@ -1960,7 +2030,8 @@ void update_or_create_logwatch_textfile(const char *full_filename, glob_token* t
                     verbose(" to %s\n", llu_to_string(file_id));
                     textfile->offset = 0;
                     textfile->file_id = file_id;
-                } else if (textfile->file_size < textfile->offset) { // file has been truncated
+                }
+                else if (textfile->file_size < textfile->offset) { // file has been truncated
                     verbose("File %s: file has been truncated\n", full_filename);
                     textfile->offset = 0;
                 }
@@ -1968,7 +2039,8 @@ void update_or_create_logwatch_textfile(const char *full_filename, glob_token* t
                 textfile->missing = false;
             }
             CloseHandle(hFile);
-        } else {
+        }
+        else {
             verbose("Cant open file with CreateFile %s\n", full_filename);
         }
     }
@@ -2079,7 +2151,8 @@ void cleanup_logwatch_textfiles()
             // remove this file from the list
             free((*it_tf)->path);
             it_tf = g_logwatch_textfiles.erase(it_tf);
-        } else
+        }
+        else
             it_tf++;
     }
 }
@@ -2381,6 +2454,38 @@ void section_eventlog(SOCKET &out)
 
     if (find_eventlogs(out))
     {
+        // Special handling on startup (first_run)
+        // The last processed record number of each eventlog is stored in the file eventstate.txt
+        // If there is no entry for the given eventlog we start at the end
+        if (first_run && !logwatch_send_initial_entries) {
+            for (unsigned i=0; i < num_eventlogs; i++) {
+                char *logname      = eventlog_names[i];
+                bool found_hint = false;
+                for (eventlog_hints_t::iterator it_el  = g_eventlog_hints.begin();
+                                                it_el != g_eventlog_hints.end(); it_el++) {
+                    eventlog_hint_t *hint = *it_el;
+                    if (!strcmp(hint->name, logname)) {
+                        known_record_numbers[i] = hint->record_no;
+                        found_hint = true;
+                        break;
+                    }
+                }
+                if (!found_hint)
+                {
+                    HANDLE hEventlog = OpenEventLog(NULL, logname);
+                    if (hEventlog)
+                    {
+                        DWORD no_records;
+                        DWORD oldest_record;
+                        GetNumberOfEventLogRecords(hEventlog, &no_records);
+                        GetOldestEventLogRecord(hEventlog, &oldest_record);
+                        if (no_records > 0)
+                           known_record_numbers[i] = oldest_record + no_records - 1;
+                    }
+                }
+            }
+        }
+
         for (unsigned i=0; i < num_eventlogs; i++) {
             if (!newly_found[i]) // not here any more!
                 output(out, "[[[%s:missing]]]\n", eventlog_names[i]);
@@ -2399,11 +2504,11 @@ void section_eventlog(SOCKET &out)
                     }
                 }
                 if (level != -1) {
-                    output_eventlog(out, eventlog_names[i], &known_record_numbers[i],
-                            first_run && !logwatch_send_initial_entries, level, hide_context);
+                    output_eventlog(out, eventlog_names[i], &known_record_numbers[i], level, hide_context);
                 }
             }
         }
+        save_eventlog_offsets();
     }
     first_run = false;
 }
@@ -2549,7 +2654,8 @@ bool handle_script_config_variable(char *var, char *value, script_type type)
             cache_configs_plugin.push_back(entry);
         else
             cache_configs_local.push_back(entry);
-    } else if (!strncmp(var, "retry_count ", 12)) {
+    }
+    else if (!strncmp(var, "retry_count ", 12)) {
         char *plugin_pattern = lstrip(var + 12);
         retry_config *entry  = new retry_config();
         entry->pattern       = strdup(plugin_pattern);
@@ -2558,7 +2664,8 @@ bool handle_script_config_variable(char *var, char *value, script_type type)
             retry_configs_plugin.push_back(entry);
         else
             retry_configs_local.push_back(entry);
-    } else if (!strncmp(var, "execution ", 10)) {
+    }
+    else if (!strncmp(var, "execution ", 10)) {
         char *plugin_pattern = lstrip(var + 10);
         execution_mode_config *entry  = new execution_mode_config();
         entry->pattern       = strdup(plugin_pattern);
@@ -2567,7 +2674,8 @@ bool handle_script_config_variable(char *var, char *value, script_type type)
             execution_mode_configs_plugin.push_back(entry);
         else
             execution_mode_configs_local.push_back(entry);
-    } else if (!strncmp(var, "include", 7)) {
+    }
+    else if (!strncmp(var, "include", 7)) {
         char *user = NULL;
         if (strlen(var) > 7)
             user = lstrip(var + 7);
@@ -2697,7 +2805,7 @@ bool banned_exec_name(char *name)
                 return false;
         return true;
     }
-    else{
+    else {
         return  ( !strcasecmp(extension, ".dir")
                 || !strcasecmp(extension, ".txt"));
     }
@@ -2746,7 +2854,15 @@ int launch_program(script_container* cont)
     si.dwFlags = STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
     si.hStdOutput = newstdout;
-    si.hStdError = newstdout;
+
+
+    // Redirect sterr to NUL device
+    SECURITY_ATTRIBUTES secattr;
+    secattr.nLength = sizeof secattr;
+    secattr.lpSecurityDescriptor = NULL;
+    secattr.bInheritHandle = TRUE;
+    HANDLE hnul = CreateFile("NUL", GENERIC_WRITE, 0, &secattr, OPEN_EXISTING, 0, NULL);
+    si.hStdError = hnul;
 
     // spawn the child process
     if (!CreateProcess(NULL,cont->path,NULL,NULL,TRUE,CREATE_NEW_CONSOLE,
@@ -2827,6 +2943,7 @@ int launch_program(script_container* cont)
     CloseHandle(pi.hProcess);
     CloseHandle(newstdout);
     CloseHandle(read_stdout);
+    CloseHandle(hnul);
     return exit_code;
 }
 
@@ -2934,7 +3051,8 @@ void output_external_programs(SOCKET &out, script_type type)
                 cont->buffer      = cont->buffer_work;
                 cont->buffer_work = NULL;
                 cont->status      = SCRIPT_IDLE;
-            } else if (cont->retry_count < 0 && cont->buffer != NULL) {
+            }
+            else if (cont->retry_count < 0 && cont->buffer != NULL) {
                 // Remove outdated cache entries
                 HeapFree(GetProcessHeap(), 0, cont->buffer);
                 cont->buffer = NULL;
@@ -3120,7 +3238,11 @@ void section_local(SOCKET &out)
 
 void section_plugins(SOCKET &out)
 {
+    // Prevent errors from plugins with missing section
+    output(out, "<<<>>>\n");
     output_external_programs(out, PLUGIN);
+    // Prevent errors from plugins with missing final newline
+    output(out, "<<<>>>\n");
 }
 
 
@@ -3897,6 +4019,7 @@ bool handle_logfiles_config_variable(char *var, char *value)
 
 bool handle_logwatch_config_variable(char *var, char *value)
 {
+    load_eventlog_offsets();
     if (!strncmp(var, "logfile ", 8)) {
         int level;
         char *logfilename = lstrip(var + 8);
@@ -4300,7 +4423,8 @@ void listen_tcp_loop()
                     ip = remote_addr.sin_addr.s_addr;
                     snprintf(ip_hr, sizeof(ip_hr), "%u.%u.%u.%u",
                              ip & 0xff, (ip >> 8) & 0xff, (ip >> 16) & 0xff, (ip >> 24) & 0xff);
-                } else
+                }
+                else
                     snprintf(ip_hr, sizeof(ip_hr), "None");
                 if (check_only_from(ip)) {
                     open_crash_log();
@@ -4701,6 +4825,7 @@ void determine_directories()
     snprintf(g_local_dir, sizeof(g_local_dir), "%s\\local", g_agent_directory);
     snprintf(g_spool_dir, sizeof(g_spool_dir), "%s\\spool", g_agent_directory);
     snprintf(g_logwatch_statefile, sizeof(g_logwatch_statefile), "%s\\logstate.txt", g_agent_directory);
+    snprintf(g_eventlog_statefile, sizeof(g_eventlog_statefile), "%s\\eventstate.txt", g_agent_directory);
 
     // Set these directories as environment variables. Some scripts might use them...
     SetEnvironmentVariable("PLUGINSDIR", g_plugins_dir);
@@ -4773,6 +4898,117 @@ int get_perf_counter_id(const char *counter_name)
     return -1;
 }
 
+void do_unpack_plugins(char *plugin_filename) {
+    snprintf(g_logwatch_statefile, sizeof(g_logwatch_statefile), "%s\\logstate.txt", g_agent_directory);
+
+    FILE *file = fopen(plugin_filename, "rb");
+    if (!file) {
+        printf("Unable to open Check_MK-Agent package %s\n", plugin_filename);
+        exit(1);
+    }
+
+
+    char uninstall_file_path[512];
+    snprintf(uninstall_file_path, 512, "%s\\uninstall_plugins.bat", g_agent_directory);
+    FILE *uninstall_file = fopen(uninstall_file_path, "w");
+    fprintf(uninstall_file, "REM * If you want to uninstall the plugins which were installed during the\n"
+                            "REM * last 'check_mk_agent.exe unpack' command, just execute this script\n\n");
+
+
+    bool had_error = false;
+    while (true) {
+        int   read_bytes;
+        BYTE  filepath_length;
+        int   content_length;
+        BYTE *filepath;
+        BYTE *content;
+
+        // Read Filename
+        read_bytes = fread(&filepath_length, 1, 1, file);
+        if (read_bytes != 1) {
+            if (feof(file))
+                break;
+            else {
+                had_error = true;
+                break;
+            }
+        }
+        filepath = (BYTE *)malloc(filepath_length + 1);
+        read_bytes = fread(filepath, 1, filepath_length, file);
+        filepath[filepath_length] = 0;
+
+        if (read_bytes != filepath_length) {
+            had_error = true;
+            break;
+        }
+
+        // Read Content
+        read_bytes = fread(&content_length, 1, sizeof(content_length), file);
+        if (read_bytes != sizeof(content_length)) {
+            had_error = true;
+            break;
+        }
+
+        // Maximum plugin size is 20 MB
+        if (content_length > 20 * 1024 * 1024) {
+            had_error = true;
+            break;
+        }
+        content = (BYTE *)malloc(content_length);
+        read_bytes = fread(content, 1, content_length, file);
+        if (read_bytes != content_length) {
+            had_error = true;
+            break;
+        }
+
+        // Extract filename and path to file
+        BYTE *filename = NULL;
+        BYTE *dirname  = NULL;
+        for (int i = filepath_length - 1; i >= 0; i--)
+        {
+            if (filepath[i] == '/') {
+                if (filename == NULL) {
+                    filename = filepath + i + 1;
+                    dirname  = filepath;
+                    filepath[i] = 0;
+                }
+                else {
+                    filepath[i] = '\\';
+                }
+            }
+        }
+
+        if (dirname != NULL) {
+            char new_dir[1024];
+            snprintf(new_dir, sizeof(new_dir), "%s\\%s", g_agent_directory, dirname);
+            CreateDirectory(new_dir, NULL);
+        }
+
+        // Add uninstall information for this plugin
+        fprintf(uninstall_file, "del \"%s\\%s\\%s\"\n", g_agent_directory, dirname, filename);
+
+        // Write plugin
+        char plugin_path[512];
+        snprintf(plugin_path, sizeof(plugin_path), "%s\\%s\\%s", g_agent_directory, dirname, filename);
+        FILE *plugin_file = fopen(plugin_path, "wb");
+        fwrite(content, 1, content_length, plugin_file);
+        fclose(plugin_file);
+
+        free(filepath);
+        free(content);
+    }
+
+    fclose(uninstall_file);
+    fclose(file);
+
+    if (had_error) {
+        printf("There was an error on unpacking the Check_MK-Agent package: File integrety is broken\n."
+               "The file might have been installed partially.");
+        exit(1);
+    }
+
+}
+
 int main(int argc, char **argv)
 {
     wsa_startup();
@@ -4786,7 +5022,7 @@ int main(int argc, char **argv)
 
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)ctrl_handler, TRUE);
 
-    if ( ( argc > 2) and  (strcmp(argv[1], "file")) )
+    if ( ( argc > 2) and  (strcmp(argv[1], "file") && strcmp(argv[1], "unpack")) )
         usage();
     else if (argc <= 1)
         RunService();
@@ -4812,6 +5048,8 @@ int main(int argc, char **argv)
         do_install();
     else if (!strcmp(argv[1], "remove"))
         do_remove();
+    else if (!strcmp(argv[1], "unpack"))
+        do_unpack_plugins(argv[2]);
     else if (!strcmp(argv[1], "debug"))
         do_debug();
     else if (!strcmp(argv[1], "version"))

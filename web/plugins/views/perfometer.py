@@ -26,10 +26,29 @@
 
 # Painters for Perf-O-Meter
 import math
+import metrics
 
 perfometers = {}
 
-# Helper functions for perfometers
+# TODO: Umbau: alle Funktionen perfometer_.. geben eine logische Struktur
+# zurück.
+# perfometer_td() -> perfometer_segment() ergebit (breite_in_proz, farbe)
+# Ein perfometer ist eine Liste von Listen.
+# [ [segment, segment, segment], [segment, segment] ] --> horizontal gespaltet.
+# Darin die vertikalen Balken.
+
+#.
+#   .--Old Style-----------------------------------------------------------.
+#   |                ___  _     _   ____  _         _                      |
+#   |               / _ \| | __| | / ___|| |_ _   _| | ___                 |
+#   |              | | | | |/ _` | \___ \| __| | | | |/ _ \                |
+#   |              | |_| | | (_| |  ___) | |_| |_| | |  __/                |
+#   |               \___/|_|\__,_| |____/ \__|\__, |_|\___|                |
+#   |                                         |___/                        |
+#   +----------------------------------------------------------------------+
+#   |  Perf-O-Meter helper functions for old classical Perf-O-Meters.      |
+#   '----------------------------------------------------------------------'
+
 def perfometer_td(perc, color):
     return '<td class="inner" style="background-color: %s; ' \
            'width: %d%%;"></td>' % (color, int(float(perc)))
@@ -44,22 +63,7 @@ def perfometer_linear(perc, color):
 # Paint logarithm with base 10, half_value is being
 # displayed at 50% of the width
 def perfometer_logarithmic(value, half_value, base, color):
-    value = float(value)
-    if value == 0.0:
-        pos = 0
-    else:
-        half_value = float(half_value)
-        h = math.log(half_value, base) # value to be displayed at 50%
-        pos = 50 + 10.0 * (math.log(value, base) - h)
-        if pos < 2:
-            pos = 2
-        if pos > 98:
-            pos = 98
-
-    return "<table><tr>" + \
-      perfometer_td(pos, color) + \
-      perfometer_td(100 - pos, "white") + \
-      "</tr></table>"
+    return render_metricometer([metrics.metricometer_logarithmic(value, half_value, base, color)])
 
 
 # Dual logarithmic Perf-O-Meter
@@ -116,104 +120,13 @@ def perfometer_logarithmic_dual_independent\
 
     return result + '</tr></table>'
 
-def number_human_readable(n, precision=1, unit="B"):
-    base = 1024.0
-    if unit == "Bit":
-        base = 1000.0
-
-    n = float(n)
-    f = "%." + str(precision) + "f"
-    if abs(n) > base * base * base:
-        return (f + "G%s") % (n / (base * base * base), unit)
-    elif abs(n) > base * base:
-        return (f + "M%s") % (n / (base * base), unit)
-    elif abs(n) > base:
-        return (f + "k%s") % (n / base, unit)
-    else:
-        return (f + "%s") % (n, unit)
-
-def age_human_readable(secs, min_only=False):
-    if min_only:
-        mins = secs / 60.0
-        return "%.1f min" % mins
-    if secs < 240:
-        return "%d sec" % secs
-    mins = secs / 60
-    if mins < 240:
-        return "%d min" % mins
-    hours = mins / 60
-    if hours < 48:
-        return "%d hours" % hours
-    days = hours / 24
-    return "%d days" % days
-
-def bytes_human_readable(b, base=1024.0, bytefrac=True, unit="B"):
-    base = float(base)
-    # Handle negative bytes correctly
-    prefix = ''
-    if b < 0:
-        prefix = '-'
-        b *= -1
-
-    if b >= base * base * base * base:
-        return '%s%.2f T%s' % (prefix, b / base / base / base / base, unit)
-    elif b >= base * base * base:
-        return '%s%.2f G%s' % (prefix, b / base / base / base, unit)
-    elif b >= base * base:
-        return '%s%.2f M%s' % (prefix, b / base / base, unit)
-    elif b >= base:
-        return '%s%.2f k%s' % (prefix, b / base, unit)
-    elif bytefrac:
-        return '%s%.2f %s' % (prefix, b, unit)
-    else: # Omit byte fractions
-        return '%s%.0f %s' % (prefix, b, unit)
-
 
 def paint_perfometer(row):
-    perfstring = unicode(row["service_perf_data"].strip())
-    if not perfstring:
+    perf_data_string = unicode(row["service_perf_data"].strip())
+    if not perf_data_string:
         return "", ""
 
-    parts = perfstring.split()
-    # Try if check command is appended to performance data
-    # in a PNP like style
-    if parts[-1].startswith("[") and parts[-1].endswith("]"):
-        check_command = parts[-1][1:-1]
-        del parts[-1]
-    else:
-        check_command = row["service_check_command"]
-
-    # Strip away arguments like in "check_http!-H mathias-kettner.de"
-    check_command = check_command.split("!")[0]
-
-    # Find matching perf-o-meter function
-    perf_painter = perfometers.get(check_command)
-    if not perf_painter:
-        return "", ""
-
-    # Python's isdigit() works only on str. We deal with unicode since
-    # we deal with data coming from Livestatus
-    def isdigit(x):
-        return x in [ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' ]
-
-    # Parse performance data, at least try
-    try:
-        perf_data = []
-        for part in parts:
-            varname, values = part.split("=")
-            value_parts = values.split(";")
-            while len(value_parts) < 5:
-                value_parts.append(None)
-            value, warn, crit, min, max = value_parts[0:5]
-            # separate value from unit
-            i = 0
-            while i < len(value) and (isdigit(value[i]) or value[i] in ['.', ',', '-']):
-                i += 1
-            unit = value[i:]
-            value = value[:i]
-            perf_data.append((varname, value, unit, warn, crit, min, max))
-    except:
-        perf_data = None
+    perf_data, check_command = metrics.parse_perf_data(perf_data_string, row["service_check_command"])
     if not perf_data:
         return "", ""
 
@@ -221,24 +134,86 @@ def paint_perfometer(row):
         stale_css = " stale"
     else:
         stale_css = ""
+
     try:
-        title, h = perf_painter(row, check_command, perf_data)
-        content =  '<div class=content>%s</div>' % h
-        content += '<div class=title>%s</div>' % title
-        content += '<img class=glass src="images/perfometer-bg.png">'
+        # Try new metrics module
+        translated_metrics = metrics.translate_metrics(perf_data, check_command)
+        if translated_metrics: # definition for this check type exists
+            perfometer_definitions = list(metrics.get_perfometers(translated_metrics))
+            if perfometer_definitions:
+                title, h = render_metrics_perfometer(perfometer_definitions[0], translated_metrics)
+            else:
+                return "", ""
 
-        # pnpgraph_present: -1 means unknown (path not configured), 0: no, 1: yes
-        if 'X' in html.display_options and \
-           row["service_pnpgraph_present"] != 0:
-            return "perfometer" + stale_css, ('<a href="%s">%s</a>' % (pnp_url(row, "service"), content))
+        # Legacy Perf-O-Meters: find matching Perf-O-Meter function
         else:
-            return "perfometer" + stale_css, content
+            perf_painter = perfometers.get(check_command)
+            if not perf_painter:
+                return "", ""
 
+            title, h = perf_painter(row, check_command, perf_data)
+            if not h:
+                return "", ""
+            # Test code for optically detecting old-style Perf-O-Meters
+            if config.debug:
+                title = '{ ' + title + ' }'
 
     except Exception, e:
         if config.debug:
             raise
         return "perfometer", ("invalid data: %s" % e)
+
+    content =  '<div class=content>%s</div>' % h
+    content += '<div class=title>%s</div>' % title
+    content += '<img class=glass src="images/perfometer-bg.png">'
+
+    # pnpgraph_present: -1 means unknown (path not configured), 0: no, 1: yes
+    if 'X' in html.display_options and \
+       row["service_pnpgraph_present"] != 0:
+        return "perfometer" + stale_css, ('<a href="%s">%s</a>' % (pnp_url(row, "service"), content))
+    else:
+        return "perfometer" + stale_css, content
+
+
+#.
+#   .--New Style--(Metric-O-Meters)----------------------------------------.
+#   |            _   _                 ____  _         _                   |
+#   |           | \ | | _____      __ / ___|| |_ _   _| | ___              |
+#   |           |  \| |/ _ \ \ /\ / / \___ \| __| | | | |/ _ \             |
+#   |           | |\  |  __/\ V  V /   ___) | |_| |_| | |  __/             |
+#   |           |_| \_|\___| \_/\_/   |____/ \__|\__, |_|\___|             |
+#   |                                            |___/                     |
+#   +----------------------------------------------------------------------+
+#   |  Perf-O-Meters created by new metrics system                         |
+#   '----------------------------------------------------------------------'
+
+# Create HTML representation of Perf-O-Meter
+def render_metricometer(stack):
+    if len(stack) not in (1, 2):
+        raise MKGeneralException(_("Invalid Perf-O-Meter definition %r: only one or two entries are allowed") % stack)
+
+    h = ""
+    if len(stack) == 2:
+        h += '<div class="stacked">'
+
+    for entry in stack:
+        h += '<table><tr>'
+        for percentage, color in entry:
+            h += perfometer_td(percentage, color)
+        h += "</tr></table>"
+
+    if len(stack) == 2:
+        h += '</div>'
+    return h
+
+# Compute logarithmic Perf-O-Meter
+
+
+def render_metrics_perfometer(perfometer, translated_metrics):
+    label, stack = metrics.build_perfometer(perfometer, translated_metrics)
+    return label, render_metricometer(stack)
+
+
 
 multisite_painters["perfometer"] = {
     "title" : _("Service Perf-O-Meter"),
@@ -247,7 +222,7 @@ multisite_painters["perfometer"] = {
                   "service_check_command", "service_pnpgraph_present", "service_plugin_output" ],
     "paint" : paint_perfometer,
     "sorter" : "svc_perf_val01",
-    "printable" : False, # No printable on PDF, only in HTML
+    "printable" : "perfometer", # Special rendering in PDFs
 }
 
 load_web_plugins("perfometer", globals())

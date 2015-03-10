@@ -35,7 +35,12 @@ foreach ($NAME as $i => $n) {
     $MAX[$n]  = $MAX[$i];
 }
 
-$opt[1] = "--vertical-label 'Load average' -l0  -u 1 --title \"CPU Load for $hostname\" ";
+$title = "CPU Load for $hostname";
+if ($MAX[1]) {
+    $title .= " - $MAX[1] CPU Cores";
+}
+
+$opt[1] = "--vertical-label 'Load average' -l0  -u 1 --title \"$title\" ";
 
 $def[1] =  ""
          . "DEF:load1=$RRD[load1] "
@@ -57,6 +62,7 @@ if ($WARN[1]) {
          . "HRULE:$CRIT[1]#FF0000 "
          . "";
 }
+
 
 if (isset($RRD["predict_load15"])) {
     $def[1] .= ""

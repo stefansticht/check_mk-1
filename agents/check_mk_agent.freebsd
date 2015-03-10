@@ -46,7 +46,7 @@ export MK_TMPDIR="/var/run/check_mk"
 
 
 # Make sure, locally installed binaries are found
-PATH=$PATH:/usr/local/bin
+PATH=$PATH:/usr/local/bin:/usr/local/sbin
 
 # All executables in PLUGINSDIR will simply be executed and their
 # ouput appended to the output of the agent. Plugins define their own
@@ -253,11 +253,11 @@ if which MegaCli >/dev/null ; then
 fi
 
 
-# OpenVPN Clients. 
+# OpenVPN Clients.
 # Correct log location unknown, sed call might also be broken
 if [ -e /var/log/openvpn/openvpn-status.log ] ; then
     echo '<<<openvpn_clients:sep(44)>>>'
-    sed -n -e '/CLIENT LIST/,/ROUTING TABLE/p' < /var/log/openvpn/openvpn-status.log  | sed -e 1,3d -e '$d' 
+    sed -n -e '/CLIENT LIST/,/ROUTING TABLE/p' < /var/log/openvpn/openvpn-status.log  | sed -e 1,3d -e '$d'
 fi
 
 
@@ -375,8 +375,9 @@ if [ -r "$MK_CONFDIR/fileinfo.cfg" ] ; then
 fi
 
 
-# Plugins
-if cd $PLUGINSDIR ; then
+# Local checks
+echo '<<<local>>>'
+if cd $LOCALDIR ; then
     for skript in $(ls) ; do
         if [ -f "$skript" -a -x "$skript" ] ; then
             ./$skript
@@ -385,7 +386,7 @@ if cd $PLUGINSDIR ; then
     # Call some plugins only every X'th minute
     for skript in [1-9]*/* ; do
         if [ -x "$skript" ] ; then
-            run_cached plugins_${skript//\//\\} ${skript%/*} "$skript"
+            run_cached local_${skript//\//\\} ${skript%/*} "$skript"
         fi
     done
 fi

@@ -64,7 +64,7 @@ register_rule(group,
                 ( "tcp_port",
                   Integer(
                        title = _("TCP Port number"),
-                       help = _("Port number for https connection to vSphere"),
+                       help = _("Port number for HTTPS connection to vSphere"),
                        default_value = 443,
                        minvalue = 1,
                        maxvalue = 65535,
@@ -72,7 +72,7 @@ register_rule(group,
                 ),
                 ( "timeout",
                   Integer(
-                      title = _("Connection timeout"),
+                      title = _("Connect Timeout"),
                       help = _("The network timeout in seconds when communicating with vSphere or "
                                "to the Check_MK Agent. The default is 60 seconds. Please note that this "
                                "is not a total timeout but is applied to each individual network transation."),
@@ -197,12 +197,12 @@ register_rule(group,
             optional_keys = False
     ),
     title = _("Check NetApp via WebAPI"),
-    help  = _("This rule selects the NetApp agent instead of the normal Check_MK Agent "
+    help  = _("This rule set selects the NetApp special agent instead of the normal Check_MK Agent "
               "and allows monitoring via the NetApp API. Right now only <i>7-Mode</i> is supported, "
-              "<i>Cluster Mode</i> is following soon. Important: To make this special agent NetApp work "
-              "you will have to provide two additional python files (NaServer.py, NaElement.py) "
+              "<i>Cluster Mode</i> will follow soon. Important: To make this special agent NetApp work "
+              "you will have to provide two additional python files (<tt>NaServer.py</tt>, <tt>NaElement.py</tt>) "
               "from the NetApp Manageability SDK. They need to be put into the site directory "
-              "<tt>~/local/lib/python</tt>. The user requires a number of permissions for specific API classes. "
+              "into <tt>~/local/lib/python</tt>. The user requires a number of permissions for specific API classes. "
               "They are displayed if you call the agent with <tt>agent_netapp --help</tt>. The agent itself "
               "is located in the site directory under <tt>~/share/check_mk/agents/special</tt>."),
     match = 'first')
@@ -284,7 +284,7 @@ register_rule(group,
     "special_agents:ibmsvc",
      Dictionary(
         title = _("Check state of IBM SVC / V7000 storage systems"),
-        help = _("This rule selects the ibmsvc agent instead of the normal Check_MK Agent "
+        help = _("This rule set selects the <tt>ibmsvc</tt> agent instead of the normal Check_MK Agent "
                  "and allows monitoring of IBM SVC / V7000 storage systems by calling "
                  "ls* commands there over SSH. "
                  "Make sure you have SSH key authentication enabled for your monitoring user. "
@@ -305,8 +305,6 @@ register_rule(group,
                    title = _("Accept any SSH Host Key"),
                    label = _("Accept any SSH Host Key"),
                    default_value = False,
-                   true_label = _("True"),
-                   false_label = _("False"),
                    help = _("Accepts any SSH Host Key presented by the storage device. "
                             "Please note: This might be a security issue because man-in-the-middle "
                             "attacks are not recognized! Better solution would be to add the "
@@ -328,6 +326,7 @@ register_rule(group,
                          ( "lssystemstats",   _("System Stats") ),
                          ( "lseventlog",      _("Event Log") ),
                          ( "lsportfc",        _("FC Ports") ),
+                         ( "lsportsas",       _("SAS Ports") ),
                          ( "lsenclosure",     _("Enclosures") ),
                          ( "lsenclosurestats", _("Enclosure Stats") ),
                          ( "lsarray",         _("RAID Arrays") ),
@@ -368,7 +367,7 @@ register_rule(group,
         elements = [
             ( "timeout",
               Integer(
-                  title = _("Connection timeout"),
+                  title = _("Connect Timeout"),
                   help = _("The network timeout in seconds when communicating via UPNP. "
                            "The default is 10 seconds. Please note that this "
                            "is not a total timeout, instead it is applied to each API call."),
@@ -407,8 +406,8 @@ register_rule(group,
 register_rule(group,
     "special_agents:hivemanager",
     Tuple(
-        title = _("Hivemanager"),
-        help = _( "Connect to AeroHive HiveManger via a webcall to get a list of all devices"),
+        title = _("Aerohive HiveManager"),
+        help = _( "Activate monitoring of host via a HTTP connect to the HiveManager"),
         elements = [
            TextAscii(title = _("Username")),
            Password( title = _("Password")),
@@ -427,7 +426,7 @@ register_rule(group,
         elements = [
             ( "timeout",
               Integer(
-                  title = _("Connection timeout"),
+                  title = _("Connect Timeout"),
                   help = _("The network timeout in seconds when communicating via HTTP. "
                            "The default is 10 seconds."),
                   default_value = 10,
@@ -442,4 +441,112 @@ register_rule(group,
     match = 'first')
 
 
+register_rule(group,
+    "special_agents:ucs_bladecenter",
+    Dictionary(
+        elements = [
+            ( "username",
+              TextAscii(
+                  title = _("Username"),
+                  allow_empty = False,
+              )
+            ),
+            ( "password",
+              Password(
+                  title = _("Password"),
+                  allow_empty = False,
+              )
+            ),
+        ],
+        optional_keys = False
+    ),
+    title = _("Check state of UCS Bladecenter"),
+    help = _("This rule selects the UCS Bladecenter agent instead of the normal Check_MK Agent "
+             "which collects the data through the UCS Bladecenter Web API"),
+    match = 'first')
 
+
+def validate_siemens_plc_values(value, varprefix):
+    valuetypes = {}
+    for index, (db_number, address, datatype, valuetype, ident) in enumerate(value):
+        valuetypes.setdefault(valuetype, [])
+        if ident in valuetypes[valuetype]:
+            raise MKUserError("%s_%d_%d" % (varprefix, index+1, 4),
+                              _("The ident of a value needs to be unique per valuetype."))
+        valuetypes[valuetype].append(ident)
+
+group = "datasource_programs"
+register_rule(group,
+    "special_agents:siemens_plc",
+    Dictionary(
+        elements = [
+            ("rack", Integer(
+                title = _("Number of the Rack"),
+                minvalue = 0,
+            )),
+            ("slot", Integer(
+                title = _("Number of the Slot"),
+                minvalue = 0,
+            )),
+            ("tcp_port", Integer(
+                title = _("TCP Port number"),
+                help = _("Port number for communicating with the PLC"),
+                default_value = 102,
+                minvalue = 1,
+                maxvalue = 65535,
+            )),
+            ("timeout", Integer(
+                title = _("Connect Timeout"),
+                help = _("The connect timeout in seconds when establishing a connection "
+                         "with the PLC."),
+                default_value = 60,
+                minvalue = 1,
+                unit = _("seconds"),
+            )),
+            ("values", ListOf(
+                Tuple(
+                    elements = [
+                        Integer(
+                            title = "<nobr>%s</nobr>" % _("DB Number"),
+                            minvalue = 1,
+                        ),
+                        Integer(
+                            title = _("Address"),
+                        ),
+                        DropdownChoice(
+                            title = _("Datatype"),
+                            choices = [
+                                ("dint", _("Double Integer (DINT)")),
+                                ("real", _("Real Number (REAL)")),
+                            ],
+                        ),
+                        DropdownChoice(
+                            title = _("Type of the value"),
+                            choices = [
+                                (None,    _("Unclassified")),
+                                ("temp",  _("Temperature")),
+                                ("hours", _("Hours")),
+                            ],
+                        ),
+                        ID(
+                            title = _("Ident of the value"),
+                            help = _(" An identifier of your choice. This identifier "
+                                     "is used by the Check_MK checks to access "
+                                     "and identify the single values. The identifier "
+                                     "needs to be unique within a group of VALUETYPES."),
+                        ),
+                    ],
+                    orientation = "horizontal",
+                ),
+                title = _("Values to fetch"),
+                validate = validate_siemens_plc_values,
+            )),
+        ],
+        optional_keys = ["timeout"],
+        title = _("Siemens PLC (SPS)"),
+        help = _("This rule selects the Siemens PLC agent instead of the normal Check_MK Agent "
+                 "and allows monitoring of Siemens PLC using the Snap7 API. You can configure "
+                 "your connection settings and values to fetch here."),
+    ),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
+    match = 'first')

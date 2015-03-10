@@ -26,7 +26,7 @@
 
 import subprocess
 from lib import *
-import table, defaults
+import table, defaults, config
 
 def fetch_file_from_tar(tardata, filename):
     p = subprocess.Popen(['tar', 'xzf', '-', '--to-stdout', filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -39,7 +39,7 @@ def output_box(title, content):
                % html.attrencode(content).replace("\n", "<br>"))
 
 def page_crashed_check():
-    html.header(_("Crash Check Report"), stylesheets=["status", "pages",])
+    html.header(_("Crashed Check Report"), stylesheets=["status", "pages",])
 
     site    = html.var("site")
     host    = html.var("host")
@@ -86,7 +86,7 @@ def page_crashed_check():
 
     html.begin_context_buttons()
     mailto_url = html.makeuri([("subject", "Check_MK Crash Report - " + defaults.check_mk_version),
-                               ("body", body)], filename="mailto:feedback@check-mk.org")
+                               ("body", body)], filename="mailto:" + config.crash_report_target)
     html.context_button(_("Submit Report"), mailto_url, "email")
     html.end_context_buttons()
 

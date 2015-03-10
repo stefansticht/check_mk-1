@@ -142,15 +142,12 @@ def cmp_service_name_equiv(r):
         return 0
 
 def cmp_service_name(column, r1, r2):
-    o = cmp(cmp_service_name_equiv(r1[column]), cmp_service_name_equiv(r2[column]))
-    if o == 0:
-        return cmp_simple_string(column, r1, r2)
-    else:
-        return o
+    return cmp(cmp_service_name_equiv(r1[column]), cmp_service_name_equiv(r2[column])) or \
+           cmp_num_split(column, r1, r2)
 
-#                      name           title                    column                       sortfunction
+#                      name                      title                              column                       sortfunction
 declare_simple_sorter("svcdescr",                _("Service description"),         "service_description",        cmp_service_name)
-declare_simple_sorter("svcdispname",             _("Service alternative display name"),   "service_display_name",  cmp_simple_string)
+declare_simple_sorter("svcdispname",             _("Service alternative display name"), "service_display_name",  cmp_simple_string)
 declare_simple_sorter("svcoutput",               _("Service plugin output"),       "service_plugin_output",      cmp_simple_string)
 declare_simple_sorter("svc_long_plugin_output",  _("Long output of check plugin"), "service_long_plugin_output", cmp_simple_string)
 declare_simple_sorter("site",                    _("Site"),                        "site",                       cmp_simple_string)

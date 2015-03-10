@@ -1896,6 +1896,7 @@ _("services")
 _("hosts")
 _("commands")
 _("downtimes")
+_("aggregations")
 
 # Returns:
 # True -> Actions have been done
@@ -1918,19 +1919,27 @@ def do_actions(view, what, action_rows, backurl):
     command = None
     title, executor = core_command(what, action_rows[0], 0, len(action_rows))[1:3] # just get the title and executor
     if not html.confirm(_("Do you really want to %(title)s the following %(count)d %(what)s?") %
-            { "title" : title, "count" : len(action_rows), "what" : _(what + "s"), }, method = 'GET'):
+            { "title" : title, "count" : len(action_rows), "what" : visuals.infos[what]["title_plural"], }, method = 'GET'):
         return False
 
     count = 0
     already_executed = set([])
     for nr, row in enumerate(action_rows):
         core_commands, title, executor = core_command(what, row, nr, len(action_rows))
-        for command in core_commands:
-            if command not in already_executed:
+        for command_entry in core_commands:
+            if command_entry not in already_executed:
+                # Some command functions return the information about the site per-command (e.g. for BI)
+                if type(command_entry) == tuple:
+                    site, command = command_entry
+                else:
+                    command = command_entry
+                    site = row["site"]
+
                 if type(command) == unicode:
                     command = command.encode("utf-8")
-                executor(command, row["site"])
-                already_executed.add(command)
+
+                executor(command, site)
+                already_executed.add(command_entry)
                 count += 1
 
     message = None
@@ -2017,26 +2026,29 @@ def paint(p, row, tdattrs=""):
         html.write("<td %s>%s</td>" % (tdattrs, content))
     return content != ""
 
-def paint_painter(painter, row, join_key=None):
-    if join_key != None:
-        row = row.get("JOIN", {}).get(join_key)
-        if not row:
-            return "", ""  # no join information available for that column
+def paint_painter(painter, row):
+    if not row:
+        return "", ""  # no join information available for that column
 
     if "args" in painter:
         return painter["paint"](row, *painter["args"])
     else:
         return painter["paint"](row)
 
-def get_join_key(p):
-    return len(p) >= 4 and p[3] or None
+def join_row(row, p):
+    join_key = len(p) >= 4 and p[3] or None
+    if join_key != None:
+        return row.get("JOIN", {}).get(join_key)
+    else:
+        return row
 
 def prepare_paint(p, row):
     painter = p[0]
     linkview = p[1]
     tooltip = len(p) > 2 and p[2] or None
 
-    tdclass, content = paint_painter(painter, row, join_key=get_join_key(p))
+    row = join_row(row, p)
+    tdclass, content = paint_painter(painter, row)
     if tdclass == "" and content == "":
         return tdclass, content
 
@@ -2237,7 +2249,7 @@ def paint_header(view, p):
     onclick = ''
     title = ''
     if 'L' in html.display_options \
-       and view.get('user_sortable', True) \
+       and view.get('user_sortable', False) \
        and get_sorter_name_of_painter(painter) is not None:
         params = [
             ('sort', sort_url(view, painter, join_index)),
@@ -2386,11 +2398,15 @@ def declare_1to1_sorter(painter_name, func, col_num = 0, reverse = False):
 def ajax_inv_render_tree():
     hostname = html.var("host")
     invpath = html.var("path")
-    tree = inventory.host(hostname)
+    tree_id = html.var("treeid", "")
+    if tree_id:
+        tree = inventory.load_delta_tree(hostname, int(tree_id[1:]))
+    else:
+        tree = inventory.host(hostname)
     node = inventory.get(tree, invpath)
     if not node:
         html.show_error(_("Invalid path %s in inventory tree") % invpath)
     else:
-        render_inv_subtree_container(hostname, invpath, node)
+        render_inv_subtree_container(hostname, tree_id, invpath, node)
 
 

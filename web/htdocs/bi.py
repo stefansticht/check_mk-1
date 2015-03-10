@@ -488,6 +488,7 @@ def compile_rule_node(aggr_type, calllist, lvl):
     if what in [
             config.FOREACH_HOST,
             config.FOREACH_CHILD,
+            config.FOREACH_CHILD_WITH,
             config.FOREACH_PARENT,
             config.FOREACH_SERVICE ]:
         matches = find_matching_services(aggr_type, what, calllist[1:])
@@ -505,6 +506,11 @@ def compile_rule_node(aggr_type, calllist, lvl):
 
 
 def find_matching_services(aggr_type, what, calllist):
+    if what == config.FOREACH_CHILD_WITH: # extract foreach child specific parameters
+        required_child_tags = calllist[0]
+        child_re = calllist[1]
+        calllist = calllist[2:]
+
     # honor list of host tags preceding the host_re
     if type(calllist[0]) == list:
         required_tags = calllist[0]
@@ -516,7 +522,7 @@ def find_matching_services(aggr_type, what, calllist):
         raise MKConfigError(_("Invalid syntax in FOREACH_..."))
 
     host_re = calllist[0]
-    if what in [ config.FOREACH_HOST, config.FOREACH_CHILD, config.FOREACH_PARENT ]:
+    if what in [ config.FOREACH_HOST, config.FOREACH_CHILD, config.FOREACH_CHILD_WITH, config.FOREACH_PARENT ]:
         service_re = config.HOST_STATE
     else:
         service_re = calllist[1]
@@ -546,43 +552,25 @@ def find_matching_services(aggr_type, what, calllist):
         if aggr_type == AGGR_HOST and (site, hostname) in g_user_cache['compiled_hosts']:
             continue
 
-        host_matches = None
-        if not match_host_tags(tags, required_tags):
-            continue
-
-        host_matches = None
-
-        if host_re == '(.*)':
-            host_matches = (hostname, )
-        else:
-            # For regex to have '$' anchor for end. Users might be surprised
-            # to get a prefix match on host names. This is almost never what
-            # they want. For services this is useful, however.
-            if host_re.endswith("$"):
-                anchored = host_re
-            else:
-                anchored = host_re + "$"
-
-            # In order to distinguish hosts with the same name on different
-            # sites we prepend the site to the host name. If the host specification
-            # does not contain the site separator - though - we ignore the site
-            # an match the rule for all sites.
-            if honor_site:
-                host_matches = do_match(anchored, "%s%s%s" % (site, SITE_SEP, hostname))
-            else:
-                host_matches = do_match(anchored, hostname)
-
+        host_matches = match_host(hostname, host_re, tags, required_tags, site, honor_site)
         if host_matches != None:
             if what == config.FOREACH_CHILD:
                 list_of_matches  = [ host_matches + (child,) for child in childs ]
-            if what == config.FOREACH_PARENT:
+            elif what == config.FOREACH_CHILD_WITH:
+                list_of_matches = []
+                for child_name in childs:
+                    child_tags = g_services_by_hostname[child_name][0][1][0]
+                    child_matches = match_host(child_name, child_re, child_tags, required_child_tags, site, honor_site)
+                    if child_matches != None:
+                        list_of_matches.append(host_matches + child_matches)
+            elif what == config.FOREACH_PARENT:
                 list_of_matches  = [ host_matches + (parent,) for parent in parents ]
             else:
                 list_of_matches = [ host_matches ]
 
-            for host_matches in list_of_matches:
+            for matched_host in list_of_matches:
                 if service_re == config.HOST_STATE:
-                    matches.add(host_matches)
+                    matches.add(matched_host)
                 else:
                     for service in services:
                         mo = (service_re, service)
@@ -591,7 +579,7 @@ def find_matching_services(aggr_type, what, calllist):
                         m = regex(service_re).match(service)
                         if m:
                             svc_matches = tuple(m.groups())
-                            matches.add(host_matches + svc_matches)
+                            matches.add(matched_host + svc_matches)
                         else:
                             service_nomatch_cache.add(mo)
 
@@ -718,13 +706,13 @@ def compile_aggregation_rule(aggr_type, rule, args, lvl):
         )
 
     if len(rule) != 4:
-        raise MKConfigError(_("<h3>Invalid aggregation rule</h1>"
+        raise MKConfigError(_("<b>Invalid aggregation rule</b><br><br>"
                 "Aggregation rules must contain four elements: description, argument list, "
                 "aggregation function and list of nodes. Your rule has %d elements: "
                 "<pre>%s</pre>") % (len(rule), pprint.pformat(rule)))
 
     if lvl == 50:
-        raise MKConfigError(_("<h3>Depth limit reached</h3>"
+        raise MKConfigError(_("<b>Depth limit reached</b><br><br>"
                 "The nesting level of aggregations is limited to 50. You either configured "
                 "too many levels or built an infinite recursion. This happened in rule <pre>%s</pre>")
                   % pprint.pformat(rule))
@@ -733,7 +721,7 @@ def compile_aggregation_rule(aggr_type, rule, args, lvl):
 
     # check arguments and convert into dictionary
     if len(arglist) != len(args):
-        raise MKConfigError(_("<h1>Invalid rule usage</h1>"
+        raise MKConfigError(_("<b>Invalid rule usage</b><br><br>"
                 "The rule '%s' needs %d arguments: <tt>%s</tt><br>"
                 "You've specified %d arguments: <tt>%s</tt>") % (
                     description, len(arglist), repr(arglist), len(args), repr(args)))
@@ -891,6 +879,30 @@ def match_host_tags(have_tags, required_tags):
         if has_it == negate:
             return False
     return True
+
+def match_host(hostname, host_re, tags, required_tags, site, honor_site):
+    if not match_host_tags(tags, required_tags):
+        return None
+
+    if host_re == '(.*)':
+        return (hostname, )
+    else:
+        # For regex to have '$' anchor for end. Users might be surprised
+        # to get a prefix match on host names. This is almost never what
+        # they want. For services this is useful, however.
+        if host_re.endswith("$"):
+            anchored = host_re
+        else:
+            anchored = host_re + "$"
+
+        # In order to distinguish hosts with the same name on different
+        # sites we prepend the site to the host name. If the host specification
+        # does not contain the site separator - though - we ignore the site
+        # an match the rule for all sites.
+        if honor_site:
+            return do_match(anchored, "%s%s%s" % (site, SITE_SEP, hostname))
+        else:
+            return do_match(anchored, hostname)
 
 def compile_leaf_node(host_re, service_re = config.HOST_STATE):
     found = []
@@ -1331,8 +1343,6 @@ def aggr_countok(nodes, needed_for_ok=2, needed_for_warn=1):
 
 config.aggregation_functions["count_ok"] = aggr_countok
 
-
-import re
 
 def aggr_running_on(nodes, regex):
     first_check = nodes[0]

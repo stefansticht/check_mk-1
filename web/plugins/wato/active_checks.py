@@ -70,6 +70,111 @@ check_icmp_params = [
        )),
 ]
 
+mail_receiving_params = [
+    ('fetch', CascadingDropdown(
+        title = _('Mail Receiving'),
+        choices = [
+            ('IMAP', _('IMAP'), Dictionary(
+                optional_keys = ['server'],
+                elements = [
+                    ('server', TextAscii(
+                        title = _('IMAP Server'),
+                        allow_empty = False,
+                        help = _('You can specify a hostname or IP address different from the IP address '
+                                 'of the host this check will be assigned to.')
+                    )),
+                    ('ssl', CascadingDropdown(
+                        title = _('SSL Encryption'),
+                        default_value = (False, 143),
+                        choices = [
+                            (False, _('Use no encryption'),
+                                Optional(Integer(
+                                    allow_empty = False,
+                                    default_value = 143,
+                                ),
+                                title = _('TCP Port'),
+                                help = _('By default the standard IMAP Port 143 is used.'),
+                            )),
+                            (True, _('Encrypt IMAP communication using SSL'),
+                                Optional(Integer(
+                                    allow_empty = False,
+                                    default_value = 993,
+                                ),
+                                title = _('TCP Port'),
+                                help = _('By default the standard IMAP/SSL Port 993 is used.'),
+                            )),
+                        ],
+                    )),
+                    ('auth', Tuple(
+                        title = _('Authentication'),
+                        elements = [
+                            TextAscii(
+                                title = _('Username'),
+                                allow_empty = False,
+                                size = 24
+                            ),
+                            Password(
+                                title = _('Password'),
+                                allow_empty = False,
+                                size = 12
+                            ),
+                        ],
+                    )),
+                ],
+            )),
+            ('POP3', _('POP3'), Dictionary(
+                optional_keys = ['server'],
+                elements = [
+                    ('server', TextAscii(
+                        title = _('POP3 Server'),
+                        allow_empty = False,
+                        help = _('You can specify a hostname or IP address different from the IP address '
+                                 'of the host this check will be assigned to.')
+                    )),
+                    ('ssl', CascadingDropdown(
+                        title = _('SSL Encryption'),
+                        default_value = (False, 110),
+                        choices = [
+                            (True, _('Use no encryption'),
+                                Optional(Integer(
+                                    allow_empty = False,
+                                    default_value = 110,
+                                ),
+                                title = _('TCP Port'),
+                                help = _('By default the standard POP3 Port 110 is used.'),
+                            )),
+                            (False, _('Encrypt POP3 communication using SSL'),
+                                Optional(Integer(
+                                    allow_empty = False,
+                                    default_value = 995,
+                                ),
+                                title = _('TCP Port'),
+                                help = _('By default the standard POP3/SSL Port 995 is used.'),
+                            )),
+                        ],
+                    )),
+                    ('auth', Tuple(
+                        title = _('Authentication'),
+                        elements = [
+                            TextAscii(
+                                title = _('Username'),
+                                allow_empty = False,
+                                size = 24
+                            ),
+                            Password(
+                                title = _('Password'),
+                                allow_empty = False,
+                                size = 12
+                            ),
+                        ],
+                    )),
+                ],
+            )),
+        ]
+    ))
+]
+
+
 register_rule(group,
     "active_checks:ssh",
     Dictionary(
@@ -78,23 +183,23 @@ register_rule(group,
         elements = [
             ("port",
                Integer(
-                    title = _("Port number to be used"),
+                    title = _("TCP port number"),
                     default_value = 22),
             ),
             ("timeout",
                 Integer(
-                    title = _("Connection timeout"),
+                    title = _("Connect Timeout"),
                     help = _("Seconds before connection times out"),
                     default_value = 10),
             ),
             ("remote_version",
                TextAscii(
-                    title = _("Remote Version"),
+                    title = _("Version of Server"),
                     help = _("Warn if string doesn't match expected server version (ex: OpenSSH_3.9p1)"),
                )),
             ("remote_protocol",
                 TextAscii(
-                    title = _("Remote Protocol"),
+                    title = _("Protocol of Server"),
                     help = _("Warn if protocol doesn't match expected protocol version (ex: 2.0)"),
                 )),
         ]
@@ -127,6 +232,12 @@ register_rule(group,
     Transform(
         Dictionary(
             elements = [
+                ("port",
+                    Integer(
+                        title = _("Portnumber"),
+                        default_value = 21,
+                        )
+                ),
                 ( "response_time",
                   Tuple(
                       title = _("Expected response time"),
@@ -234,8 +345,7 @@ register_rule(group,
                          value  = True,
                          title  = _("Expect Authoritative DNS Server"),
                          totext = _("Expect Authoritative"),
-                         help   = _("Optional expect the DNS server to be authoriative "
-                                    "for the lookup")),
+                     )
                    ),
                    ( "response_time",
                      Tuple(
@@ -243,11 +353,11 @@ register_rule(group,
                          elements = [
                              Float(
                                  title = _("Warning if above"),
-                                 unit = "sec",
+                                 unit = _("sec"),
                                  default_value = 1),
                              Float(
                                  title = _("Critical if above"),
-                                 unit = "sec",
+                                 unit = _("sec"),
                                  default_value = 2),
                          ])
                     ),
@@ -510,10 +620,11 @@ register_rule(group,
     "active_checks:uniserv", Dictionary(
         title = _("Check uniserv service"), optional_keys = False, elements = [
             ("port",
-                Integer( title = _("Port") )),
+                Integer(title = _("Port") )),
             ("service",
-                TextAscii( title = _("Service String"),
-                           help = _("Enter here the uniserve service name. (Has nothing to do with service description)")
+              TextAscii(
+                  title = _("Service Name"),
+                  help = _("Enter the uniserve service name here (has nothing to do with service description).")
             )),
             ("job",
                 CascadingDropdown(
@@ -545,12 +656,18 @@ register_rule(group,
 
         ]))
 
+# cert_days was only an integer for warning level until version 1.2.7
+def transform_check_http_cert_days(cert_days):
+    if type(cert_days) != tuple:
+        cert_days = (cert_days, 0)
+    return cert_days
+
 register_rule(group,
     "active_checks:http",
     Tuple(
         title = _("Check HTTP service"),
         help = _("Check HTTP/HTTPS service using the plugin <tt>check_http</tt> "
-                 "from the standard Nagios Plugins. "
+                 "from the standard Monitoring Plugins. "
                  "This plugin tests the HTTP service on the specified host. "
                  "It can test normal (HTTP) and secure (HTTPS) servers, follow "
                  "redirects, search for strings and regular expressions, check "
@@ -559,7 +676,7 @@ register_rule(group,
             TextUnicode(
                 title = _("Name"),
                 help = _("Will be used in the service description. If the name starts with "
-                         "a caret (^), the service description will not be prefixed with HTTP." ),
+                         "a caret (<tt>^</tt>), the service description will not be prefixed with <tt>HTTP</tt>." ),
                 allow_empty = False),
             Alternative(
                 title = _("Mode of the Check"),
@@ -568,230 +685,248 @@ register_rule(group,
                     Dictionary(
                         title = _("Check the URL"),
                         elements = [
-                           ( "virthost",
-                             Tuple(
-                               title = _("Virtual host"),
-                               elements = [
-                                 TextAscii(
-                                   title = _("Name of the virtual host"),
-                                   help = _("Set this in order to specify the name of the "
-                                    "virtual host for the query (using HTTP/1.1). If you "
-                                    "leave this empty, then the IP address of the host "
-                                    "will be used instead."),
-                                   allow_empty = False),
-                                 Checkbox(
-                                    label = _("Omit specifying an IP address"),
-                                    help = _("Usually Check_MK will nail this check to the "
-                                      "IP address of the host it is attached to. With this "
-                                      "option you can have the check use the name of the "
-                                      "virtual host instead and do a dynamic DNS lookup."),
-                                    true_label = _("omit IP address"),
-                                    false_label = _("specify IP address"),
-                                  ),
-                                ]
-                              )
-                           ),
-                           ( "uri",
-                             TextAscii(
-                               title = _("URI to fetch (default is <tt>/</tt>)"),
-                               allow_empty = False,
-                               default_value = "/")
-                           ),
-                           ( "port",
-                             Integer(
-                               title = _("TCP Port"),
-                               minvalue = 1,
-                               maxvalue = 65535,
-                               default_value = 80)
-                           ),
-                           ( "ssl",
-                             FixedValue(
-                                 value = True,
-                                 totext = _("use SSL/HTTPS"),
-                                 title = _("Use SSL/HTTPS for the connection."))
-                           ),
-                           ( "sni",
-                             FixedValue(
-                                 value = True,
-                                 totext = _("enable SNI"),
-                                 title = _("Enable SSL/TLS hostname extension support (SNI)"),
-                             )
-                           ),
-                           ( "response_time",
-                             Tuple(
-                                 title = _("Expected response time"),
-                                 elements = [
-                                     Float(
-                                         title = _("Warning if above"),
-                                         unit = "ms",
-                                         default_value = 100.0),
-                                     Float(
-                                         title = _("Critical if above"),
-                                         unit = "ms",
-                                         default_value = 200.0),
-                                 ])
+                            ( "virthost",
+                                Tuple(
+                                    title = _("Virtual host"),
+                                    elements = [
+                                        TextAscii(
+                                            title = _("Name of the virtual host"),
+                                            help = _("Set this in order to specify the name of the "
+                                                     "virtual host for the query (using HTTP/1.1). If you "
+                                                     "leave this empty, then the IP address of the host "
+                                                     "will be used instead."),
+                                            allow_empty = False
+                                        ),
+                                        Checkbox(
+                                            label = _("Omit specifying an IP address"),
+                                            help = _("Usually Check_MK will nail this check to the "
+                                                     "IP address of the host it is attached to. With this "
+                                                     "option you can have the check use the name of the "
+                                                     "virtual host instead and do a dynamic DNS lookup."),
+                                            true_label = _("omit IP address"),
+                                            false_label = _("specify IP address"),
+                                        ),
+                                    ]
+                                )
+                            ),
+                            ( "uri",
+                                TextAscii(
+                                    title = _("URI to fetch (default is <tt>/</tt>)"),
+                                    allow_empty = False,
+                                    default_value = "/"
+                                )
+                            ),
+                            ( "port",
+                                Integer(
+                                    title = _("TCP Port"),
+                                    minvalue = 1,
+                                    maxvalue = 65535,
+                                    default_value = 80
+                                )
+                            ),
+                            ( "ssl",
+                                FixedValue(
+                                    value = True,
+                                    totext = _("use SSL/HTTPS"),
+                                    title = _("Use SSL/HTTPS for the connection.")
+                                )
+                            ),
+                            ( "sni",
+                                FixedValue(
+                                    value = True,
+                                    totext = _("enable SNI"),
+                                    title = _("Enable SSL/TLS hostname extension support (SNI)"),
+                                )
+                            ),
+                            ( "response_time",
+                                Tuple(
+                                    title = _("Expected response time"),
+                                    elements = [
+                                        Float(
+                                            title = _("Warning if above"),
+                                            unit = "ms",
+                                            default_value = 100.0
+                                        ),
+                                        Float(
+                                            title = _("Critical if above"),
+                                            unit = "ms",
+                                            default_value = 200.0
+                                        ),
+                                    ]
+                                )
                             ),
                             ( "timeout",
-                              Integer(
-                                  title = _("Seconds before connection times out"),
-                                  unit = _("sec"),
-                                  default_value = 10,
-                              )
+                                Integer(
+                                    title = _("Seconds before connection times out"),
+                                    unit = _("sec"),
+                                    default_value = 10,
+                                )
                             ),
                             ( "user_agent",
-                              TextAscii(
-                                  title = _("User Agent"),
-                                  help = _("String to be sent in http header as \"User Agent\""),
-                                  allow_empty = False,
-                              ),
+                                TextAscii(
+                                    title = _("User Agent"),
+                                    help = _("String to be sent in http header as \"User Agent\""),
+                                    allow_empty = False,
+                                ),
                             ),
                             ( "add_headers",
-                              ListOfStrings(
-                                  title = _("Additional header lines"),
-                                  orientation = "vertical",
-                                  valuespec = TextAscii(size = 40),
-                              ),
+                                ListOfStrings(
+                                    title = _("Additional header lines"),
+                                    orientation = "vertical",
+                                    valuespec = TextAscii(size = 40),
+                                ),
                             ),
                             ( "auth",
-                              Tuple(
-                                  title = _("Authorization"),
-                                  help = _("Credentials for HTTP Basic Authentication"),
-                                  elements = [
-                                      TextAscii(
-                                          title = _("Username"),
-                                          size = 12,
-                                          allow_empty = False),
-                                      Password(
-                                          title = _("Password"),
-                                          size = 12,
-                                          allow_empty = False),
-                                  ])
+                                Tuple(
+                                    title = _("Authorization"),
+                                    help = _("Credentials for HTTP Basic Authentication"),
+                                    elements = [
+                                        TextAscii(
+                                            title = _("Username"),
+                                            size = 12,
+                                            allow_empty = False
+                                        ),
+                                        Password(
+                                            title = _("Password"),
+                                            size = 12,
+                                            allow_empty = False
+                                        ),
+                                    ]
+                                )
                             ),
                             ( "proxy_auth",
-                              Tuple(
-                                  title = _("Proxy-Authorization"),
-                                  help = _("Credentials for HTTP Proxy with basic authentication"),
-                                  elements = [
-                                      TextAscii(
-                                          title = _("Username"),
-                                          size = 12,
-                                          allow_empty = False),
-                                      Password(
-                                          title = _("Password"),
-                                          size = 12,
-                                          allow_empty = False),
-                                  ])
+                                Tuple(
+                                    title = _("Proxy-Authorization"),
+                                    help = _("Credentials for HTTP Proxy with basic authentication"),
+                                    elements = [
+                                        TextAscii(
+                                            title = _("Username"),
+                                            size = 12,
+                                            allow_empty = False
+                                        ),
+                                        Password(
+                                            title = _("Password"),
+                                            size = 12,
+                                            allow_empty = False
+                                        ),
+                                    ]
+                                )
                             ),
                             ( "onredirect",
-                              DropdownChoice(
-                                  title = _("How to handle redirect"),
-                                  choices = [
-                                    ( 'ok',         _("Make check OK") ),
-                                    ( 'warning',    _("Make check WARNING") ),
-                                    ( 'critical',   _("Make check CRITICAL") ),
-                                    ( 'follow',     _("Follow the redirection") ),
-                                    ( 'sticky',     _("Follow, but stay to same IP address") ),
-                                    ( 'stickyport', _("Follow, but stay to same IP-address and port") ),
-                                  ],
-                                  default_value = 'follow'),
+                                DropdownChoice(
+                                    title = _("How to handle redirect"),
+                                    choices = [
+                                        ( 'ok',         _("Make check OK") ),
+                                        ( 'warning',    _("Make check WARNING") ),
+                                        ( 'critical',   _("Make check CRITICAL") ),
+                                        ( 'follow',     _("Follow the redirection") ),
+                                        ( 'sticky',     _("Follow, but stay to same IP address") ),
+                                        ( 'stickyport', _("Follow, but stay to same IP-address and port") ),
+                                    ],
+                                    default_value = 'follow'
+                                ),
                             ),
                             ( "expect_response_header",
-                              TextAscii(
-                                  title = _("String to expect in response headers"),
-                              )
+                                TextAscii(
+                                    title = _("String to expect in response headers"),
+                                )
                             ),
                             ( "expect_response",
-                              ListOfStrings(
-                                  title = _("Strings to expect in server response"),
-                                  help = _("At least one of these strings is expected in "
-                                           "the first (status) line of the server response "
-                                           "(default: <tt>HTTP/1.</tt>). If specified skips "
-                                           "all other status line logic (ex: 3xx, 4xx, 5xx "
-                                           "processing)"),
-                              )
+                                ListOfStrings(
+                                    title = _("Strings to expect in server response"),
+                                    help = _("At least one of these strings is expected in "
+                                             "the first (status) line of the server response "
+                                             "(default: <tt>HTTP/1.</tt>). If specified skips "
+                                             "all other status line logic (ex: 3xx, 4xx, 5xx "
+                                             "processing)"),
+                                )
                             ),
                             ( "expect_string",
-                              TextAscii(
-                                  title = _("Fixed string to expect in the content"),
-                                  allow_empty = False,
-                              )
+                                TextAscii(
+                                    title = _("Fixed string to expect in the content"),
+                                    allow_empty = False,
+                                )
                             ),
                             ( "expect_regex",
-                              Transform(
-                                Tuple(
-                                    orientation = "vertical",
-                                    show_titles = False,
-                                    elements = [
-                                        RegExp(label = _("Regular expression: ")),
-                                        Checkbox(label = _("Case insensitive")),
-                                        Checkbox(label = _("return CRITICAL if found, OK if not")),
-                                        Checkbox(label = _("Multiline string matching")),
-                                    ]
+                                Transform(
+                                    Tuple(
+                                        orientation = "vertical",
+                                        show_titles = False,
+                                        elements = [
+                                            RegExp(label = _("Regular expression: ")),
+                                            Checkbox(label = _("Case insensitive")),
+                                            Checkbox(label = _("return CRITICAL if found, OK if not")),
+                                            Checkbox(label = _("Multiline string matching")),
+                                        ]
+                                    ),
+                                    forth = lambda x: len(x) == 3 and tuple(list(x) + [False]) or x,
+                                    title = _("Regular expression to expect in content"),
                                 ),
-                                forth = lambda x: len(x) == 3 and tuple(list(x) + [False]) or x,
-                                title = _("Regular expression to expect in content"),
-                              ),
                             ),
                             ( "post_data",
-                              Tuple(
-                                  title = _("Send HTTP POST data"),
-                                  elements = [
-                                      TextUnicode(
-                                          title = _("HTTP POST data"),
-                                          help = _("Data to send via HTTP POST method. "
-                                                   "Please make sure, that the data is URL-encoded."),
-                                          size = 40,
-                                      ),
-                                      TextAscii(
-                                          title = _("Content-Type"),
-                                          default_value = "text/html"),
-                                 ])
+                                Tuple(
+                                    title = _("Send HTTP POST data"),
+                                    elements = [
+                                        TextUnicode(
+                                            title = _("HTTP POST data"),
+                                            help = _("Data to send via HTTP POST method. "
+                                                     "Please make sure, that the data is URL-encoded."),
+                                            size = 40,
+                                        ),
+                                        TextAscii(
+                                            title = _("Content-Type"),
+                                            default_value = "text/html"),
+                                    ]
+                                )
                             ),
                             ( "method",
-                              DropdownChoice(
-                                  title = _("HTTP Method"),
-                                  default_value = "GET",
-                                  choices = [
-                                    ( "GET", "GET" ),
-                                    ( "POST", "POST" ),
-                                    ( "OPTIONS", "OPTIONS" ),
-                                    ( "TRACE", "TRACE" ),
-                                    ( "PUT", "PUT" ),
-                                    ( "DELETE", "DELETE" ),
-                                    ( "HEAD", "HEAD" ),
-                                    ( "CONNECT", "CONNECT" ),
-                                  ])
+                                DropdownChoice(
+                                    title = _("HTTP Method"),
+                                    default_value = "GET",
+                                    choices = [
+                                        ( "GET", "GET" ),
+                                        ( "POST", "POST" ),
+                                        ( "OPTIONS", "OPTIONS" ),
+                                        ( "TRACE", "TRACE" ),
+                                        ( "PUT", "PUT" ),
+                                        ( "DELETE", "DELETE" ),
+                                        ( "HEAD", "HEAD" ),
+                                        ( "CONNECT", "CONNECT" ),
+                                    ]
+                                )
                             ),
                             ( "no_body",
-                              FixedValue(
-                                  value = True,
-                                  title = _("Don't wait for document body"),
-                                  help = _("Note: this still does an HTTP GET or POST, not a HEAD."),
-                                  totext = _("don't wait for body"))
+                                FixedValue(
+                                    value = True,
+                                    title = _("Don't wait for document body"),
+                                    help = _("Note: this still does an HTTP GET or POST, not a HEAD."),
+                                    totext = _("don't wait for body")
+                                )
                             ),
                             ( "page_size",
-                              Tuple(
-                                  title = _("Page size to expect"),
-                                  elements = [
-                                      Integer(title = _("Minimum"), unit=_("Bytes")),
-                                      Integer(title = _("Maximum"), unit=_("Bytes")),
-                                  ])
+                                Tuple(
+                                    title = _("Page size to expect"),
+                                    elements = [
+                                        Integer(title = _("Minimum"), unit=_("Bytes")),
+                                        Integer(title = _("Maximum"), unit=_("Bytes")),
+                                    ]
+                                )
                             ),
                             ( "max_age",
-                              Age(
-                                  title = _("Maximum age"),
-                                  help = _("Warn, if the age of the page is older than this"),
-                                  default_value = 3600 * 24,
-                              )
+                                Age(
+                                    title = _("Maximum age"),
+                                    help = _("Warn, if the age of the page is older than this"),
+                                    default_value = 3600 * 24,
+                                )
                             ),
                             ( "urlize",
-                              FixedValue(
-                                  value = True,
-                                  title = _("Clickable URLs"),
-                                  totext = _("Format check output as hyperlink"),
-                                  help = _("With this option the check produces an output that is a valid hyperlink "
-                                           "to the checked URL and this clickable."),
-                              )
+                                FixedValue(
+                                    value = True,
+                                    title = _("Clickable URLs"),
+                                    totext = _("Format check output as hyperlink"),
+                                    help = _("With this option the check produces an output that is a valid hyperlink "
+                                             "to the checked URL and this clickable."),
+                                )
                             ),
                         ]
                     ),
@@ -800,36 +935,42 @@ register_rule(group,
                         title = _("Check SSL Certificate Age"),
                         elements = [
                             ( "cert_days",
-                               Integer(
-                                   title = _("Age"),
-                                   help = _("Minimum number of days a certificate has to be valid. "
-                                            "Port defaults to 443. When this option is used the URL "
-                                            "is not checked."),
-                                   unit = _("days"),
-                               )
+                                Transform(
+                                    Tuple(
+                                        title = _("Age"),
+                                        help = _("Minimum number of days a certificate has to be valid. "
+                                                 "Port defaults to 443. When this option is used the URL "
+                                                 "is not checked."),
+                                        elements = [
+                                            Integer(title = _("Warning at or below"), minvalue = 0, unit = _("days")),
+                                            Integer(title = _("Critical at or below"), minvalue = 0, unit = _("days")),
+                                        ],
+                                    ),
+                                    forth = transform_check_http_cert_days,
+                                ),
                             ),
                             ( "cert_host",
                                 TextAscii(
-                                    title = _("Check Cerficate on different IP / DNS Name"),
+                                    title = _("Check Cerficate of different IP / DNS Name"),
                                     help = _("For each SSL cerficate on a host, a different IP address is needed. "
                                              "Here, you can specify the address if it differs from the  "
                                              "address from the host primary address."),
-                                )
+                                ),
                             ),
-                            ("port",
+                            ( "port",
                                 Integer(
                                     title = _("TCP Port"),
                                     minvalue = 1,
                                     maxvalue = 65535,
                                     default_value = 443,
-                                )
+                                ),
                             ),
                             ( "sni",
-                              FixedValue(
-                                  value = True,
-                                  totext = _("enable SNI"),
-                                  title = _("Enable SSL/TLS hostname extension support (SNI)"),
-                              )
+                                FixedValue(
+                                    value = True,
+                                    totext = _("enable SNI"),
+                                    title = _("Enable SSL/TLS hostname extension support (SNI)"),
+                                ),
                             ),
                         ],
                         required_keys = [ "cert_days" ],
@@ -1072,11 +1213,11 @@ register_rule(group,
                          elements = [
                              Integer(
                                  title = _("Warning if above"),
-                                 unit = "sec"
+                                 unit = _("sec")
                              ),
                              Integer(
                                  title = _("Critical if above"),
-                                 unit = "sec"
+                                 unit = _("sec")
                              ),
                          ])
                     ),
@@ -1104,8 +1245,8 @@ register_rule(group,
             ( "share",
               TextUnicode(
                   title = _("SMB share to check"),
-                  help = _("Enter the plain name of the share only, e. g. <tt>iso</tt>, NOT "
-                           "the full UNC like \\\\servername\\iso"),
+                  help = _("Enter the plain name of the share only, e. g. <tt>iso</tt>, <b>not</b> "
+                           "the full UNC like <tt>\\\\servername\\iso</tt>"),
                   size = 32,
                   allow_empty = False,
             )),
@@ -1163,7 +1304,7 @@ def PluginCommandLine(addhelp = ""):
     return TextAscii(
           title = _("Command line"),
           help = _("Please enter the complete shell command including "
-                   "path name and arguments to execute. You can use Nagios "
+                   "path name and arguments to execute. You can use monitoring "
                    "macros here. The most important are:<ul>"
                    "<li><tt>$HOSTADDRESS$</tt>: The IP address of the host</li>"
                    "<li><tt>$HOSTNAME$</tt>: The name of the host</li>"
@@ -1181,12 +1322,12 @@ def PluginCommandLine(addhelp = ""):
 register_rule(group,
     "custom_checks",
     Dictionary(
-        title = _("Classical active and passive Nagios checks"),
-        help = _("With this ruleset you can configure &quot;classical Nagios checks&quot; "
+        title = _("Classical active and passive Monitoring checks"),
+        help = _("With this ruleset you can configure &quot;classical Monitoring checks&quot; "
                  "to be executed directly on your monitoring server. These checks "
                  "will not use Check_MK. It is also possible to configure passive "
-                 "checks that are fed with data from external sources via the Nagios "
-                 "command pipe."),
+                 "checks that are fed with data from external sources via the "
+                 "command pipe of the monitoring core."),
         elements = [
             ( "service_description",
               TextUnicode(
@@ -1275,7 +1416,7 @@ register_rule(group,
         elements = [
             TextAscii(
                 title = _("Base URL (OMD Site)"),
-                help = _("The base URL to the monitoring instance. For example <tt>http://<hostname>/<siteid></tt>. You can use "
+                help = _("The base URL to the monitoring instance. For example <tt>http://mycheckmk01/mysite</tt>. You can use "
                          "macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this URL to make them be replaced by "
                          "the hosts values."),
                 size = 60,
@@ -1283,7 +1424,9 @@ register_rule(group,
             ),
             TextAscii(
                 title = _("Aggregation Name"),
-                help = _("The name of the aggregation to fetch. It will be added to the service description."),
+                help = _("The name of the aggregation to fetch. It will be added to the service description. You can use "
+                         "macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this parameter to make them be replaced by "
+                         "the hosts values."),
                 allow_empty = False
             ),
             TextAscii(
@@ -1307,8 +1450,8 @@ register_rule(group,
                         default_value = 'cookie',
                         choices = [
                             ('cookie', _('Form (Cookie) based')),
-                            ('basic',  _('HTTP basic')),
-                            ('digest', _('HTTP digest')),
+                            ('basic',  _('HTTP Basic')),
+                            ('digest', _('HTTP Digest')),
                         ],
                     )),
                     ("timeout", Integer(
@@ -1493,7 +1636,7 @@ register_rule(group,
             ),
             ( "method",
               DropdownChoice(
-                  title = _("Method or probing"),
+                  title = _("Method of probing"),
                   choices = [
                       ( None,   _("UDP (default behaviour of tcpdump)") ),
                       ( "icmp", _("ICMP Echo Request") ),
@@ -1553,109 +1696,9 @@ register_rule(group,
                     ),
                 ],
             )),
-            ('fetch', CascadingDropdown(
-                title = _('Mail Receiving'),
-                choices = [
-                    ('IMAP', _('IMAP'), Dictionary(
-                        optional_keys = ['server'],
-                        elements = [
-                            ('server', TextAscii(
-                                title = _('IMAP Server'),
-                                allow_empty = False,
-                                help = _('You can specify a hostname or IP address different from the IP address '
-                                         'of the host this check will be assigned to.')
-                            )),
-                            ('ssl', CascadingDropdown(
-                                title = _('SSL Encryption'),
-                                default_value = (False, 143),
-                                choices = [
-                                    (False, _('Use no encryption'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 143,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP Port 143 is used.'),
-                                    )),
-                                    (True, _('Encrypt IMAP communication using SSL'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 993,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP/SSL Port 993 is used.'),
-                                    )),
-                                ],
-                            )),
-                            ('auth', Tuple(
-                                title = _('Authentication'),
-                                elements = [
-                                    TextAscii(
-                                        title = _('Username'),
-                                        allow_empty = False,
-                                        size = 24
-                                    ),
-                                    Password(
-                                        title = _('Password'),
-                                        allow_empty = False,
-                                        size = 12
-                                    ),
-                                ],
-                            )),
-                        ],
-                    )),
-                    ('POP3', _('POP3'), Dictionary(
-                        optional_keys = ['server'],
-                        elements = [
-                            ('server', TextAscii(
-                                title = _('POP3 Server'),
-                                allow_empty = False,
-                                help = _('You can specify a hostname or IP address different from the IP address '
-                                         'of the host this check will be assigned to.')
-                            )),
-                            ('ssl', CascadingDropdown(
-                                title = _('SSL Encryption'),
-                                default_value = (False, 110),
-                                choices = [
-                                    (True, _('Use no encryption'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 110,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP Port 110 is used.'),
-                                    )),
-                                    (False, _('Encrypt POP3 communication using SSL'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 995,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard POP3/SSL Port 995 is used.'),
-                                    )),
-                                ],
-                            )),
-                            ('auth', Tuple(
-                                title = _('Authentication'),
-                                elements = [
-                                    TextAscii(
-                                        title = _('Username'),
-                                        allow_empty = False,
-                                        size = 24
-                                    ),
-                                    Password(
-                                        title = _('Password'),
-                                        allow_empty = False,
-                                        size = 12
-                                    ),
-                                ],
-                            )),
-                        ],
-                    )),
-                ]
-            )),
+        ] + mail_receiving_params + [
             ('mail_from', EmailAddress(
-                title = _('Sender email address'),
+                title = _('From: email address'),
             )),
             ('mail_to', EmailAddress(
                 title = _('Destination email address'),
@@ -1669,8 +1712,8 @@ register_rule(group,
             ("duration", Tuple(
                 title = _("Loop duration"),
                 elements = [
-                    Age(title = _("Warning if above or equal")),
-                    Age(title = _("Critical if above or equal")),
+                    Age(title = _("Warning at")),
+                    Age(title = _("Critical at")),
                 ])
             ),
             ('delete_messages', FixedValue(True,
@@ -1702,108 +1745,8 @@ register_rule(group,
                            'and does not collide with other services.'),
                   allow_empty = False,
                   default_value = "Email")
-            ),
-            ('fetch', CascadingDropdown(
-                title = _('Mail Receiving'),
-                choices = [
-                    ('IMAP', _('IMAP'), Dictionary(
-                        optional_keys = ['server'],
-                        elements = [
-                            ('server', TextAscii(
-                                title = _('IMAP Server'),
-                                allow_empty = False,
-                                help = _('You can specify a hostname or IP address different from the IP address '
-                                         'of the host this check will be assigned to.')
-                            )),
-                            ('ssl', CascadingDropdown(
-                                title = _('SSL Encryption'),
-                                default_value = (False, 143),
-                                choices = [
-                                    (False, _('Use no encryption'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 143,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP Port 143 is used.'),
-                                    )),
-                                    (True, _('Encrypt IMAP communication using SSL'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 993,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP/SSL Port 993 is used.'),
-                                    )),
-                                ],
-                            )),
-                            ('auth', Tuple(
-                                title = _('Authentication'),
-                                elements = [
-                                    TextAscii(
-                                        title = _('Username'),
-                                        allow_empty = False,
-                                        size = 24
-                                    ),
-                                    Password(
-                                        title = _('Password'),
-                                        allow_empty = False,
-                                        size = 12
-                                    ),
-                                ],
-                            )),
-                        ],
-                    )),
-                    ('POP3', _('POP3'), Dictionary(
-                        optional_keys = ['server'],
-                        elements = [
-                            ('server', TextAscii(
-                                title = _('POP3 Server'),
-                                allow_empty = False,
-                                help = _('You can specify a hostname or IP address different from the IP address '
-                                         'of the host this check will be assigned to.')
-                            )),
-                            ('ssl', CascadingDropdown(
-                                title = _('SSL Encryption'),
-                                default_value = (False, 110),
-                                choices = [
-                                    (True, _('Use no encryption'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 110,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard IMAP Port 110 is used.'),
-                                    )),
-                                    (False, _('Encrypt POP3 communication using SSL'),
-                                        Optional(Integer(
-                                            allow_empty = False,
-                                            default_value = 995,
-                                        ),
-                                        title = _('TCP Port'),
-                                        help = _('By default the standard POP3/SSL Port 995 is used.'),
-                                    )),
-                                ],
-                            )),
-                            ('auth', Tuple(
-                                title = _('Authentication'),
-                                elements = [
-                                    TextAscii(
-                                        title = _('Username'),
-                                        allow_empty = False,
-                                        size = 24
-                                    ),
-                                    Password(
-                                        title = _('Password'),
-                                        allow_empty = False,
-                                        size = 12
-                                    ),
-                                ],
-                            )),
-                        ],
-                    )),
-                ]
-            )),
+            )
+        ] + mail_receiving_params + [
             ('connect_timeout', Integer(
                 title = _('Connect Timeout'),
                 minvalue = 1,
@@ -1873,7 +1816,7 @@ register_rule(group,
                     ('match_subject', RegExpUnicode(
                         title = _('Only process mails with matching subject'),
                         help = _('Use this option to not process all messages found in the inbox, '
-                                 'but only the whones whose subject matches the given regular expression. '),
+                                 'but only the those whose subject matches the given regular expression.'),
                     )),
                     ('facility', DropdownChoice(
                         title = _("Events: Syslog facility"),
@@ -1892,8 +1835,8 @@ register_rule(group,
                             TextUnicode(
                                 title = _("Specify the application"),
                                 help = _("Use this text as application. You can use macros like <tt>\\1</tt>, <tt>\\2</tt>, ... "
-                                         "here when you configured <i>subject matching</i> in this rule with a regex "
-                                         "which declares match groups (using braces)."),
+                                         "here when you configured <i>subject matching</i> in this rule with a regular expression "
+                                         "that declares match groups (using braces)."),
                                 allow_empty = False,
                             ),
                         ]

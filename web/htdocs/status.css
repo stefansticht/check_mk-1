@@ -310,6 +310,9 @@ table.data td.buttons {
     width: 1%;
 }
 
+table.data td.buttons.visuals {
+    width: 75px;
+}
 table.data td.count {
     text-align: right;
     font-weight: bold;
@@ -332,6 +335,11 @@ table.data td.center {
     text-align: center;
 }
 
+table.data td.unused {
+    color: #888;
+    text-shadow: 1px 1px 0.5px #fff;
+}
+
 td.narrow {
     width: 10px;
 }
@@ -345,6 +353,10 @@ td.icons {
 td.icons img {
     height: 20px;
     margin-right: 3px;
+}
+
+td.icon {
+    width: 20px;
 }
 
 img.tabicon {

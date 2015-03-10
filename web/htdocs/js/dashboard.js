@@ -326,7 +326,11 @@ function dashboard_scheduler(initial) {
         if ((initial && document.getElementById("dashlet_inner_" + nr).innerHTML == '')
                 || (refresh > 0 && timestamp % refresh == 0)) {
             if (typeof(url) === 'string') {
-                get_url(url + "&mtime=" + dashboard_mtime, dashboard_update_contents, "dashlet_inner_" + nr);
+                if (url.indexOf('\?') !== -1)
+                    url += "&mtime=" + dashboard_mtime;
+                else
+                    url += "?mtime=" + dashboard_mtime;
+                get_url(url, dashboard_update_contents, "dashlet_inner_" + nr);
             }
             else {
                 url(); // Execute "on_refresh" javascript function
@@ -434,7 +438,7 @@ function toggle_dashboard_edit() {
     // Only a solution for browsers with history.replaceState support. Sadly
     // we have no F5/reload fix for others...
     if (window.parent.history.replaceState) {
-        new_url = makeuri({'edit': g_editing ? '1' : '0'});
+        new_url = makeuri({'edit': g_editing ? '1' : '0'}, window.parent.location.href);
         window.parent.history.replaceState({}, document.title, new_url);
     }
 
@@ -543,7 +547,7 @@ function dashlet_toggle_edit(dashlet_obj, edit) {
                 else
                     render_sizer(controls, nr, i, anchor_id, dashlet.h);
             }
-            
+
             if (!is_dynamic(dashlet.w) && !is_dynamic(dashlet.h))
                 render_corner_resizers(controls, nr);
         }

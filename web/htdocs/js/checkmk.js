@@ -409,8 +409,10 @@ function getUrlParam(name, url) {
  * - Can add/overwrite parameters
  * - Removes _* parameters
  */
-function makeuri(addvars) {
-    var tmp = window.location.href.split('?');
+function makeuri(addvars, url) {
+    var url = (typeof(url) === 'undefined') ? window.location.href : url;
+
+    var tmp = url.split('?');
     var base = tmp[0];
     if(tmp.length > 1) {
         // Remove maybe existing anchors
@@ -573,7 +575,7 @@ function create_graph(data, params) {
 
         // Add the control for adding the graph to a dashboard
         var visualadd = document.createElement('a');
-        visualadd.title = 'Add this view to...';
+        visualadd.title = data['add_txt'];
         visualadd.className = 'visualadd';
         visualadd.onclick = function(host, service, view, source) {
             return function(event) {
@@ -603,14 +605,15 @@ function create_graph(data, params) {
     urlvars = null;
 }
 
-function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link, from_ts, to_ts) {
+function render_pnp_graphs(container, site, host, service, pnpview, base_url, pnp_url, with_link, add_txt, from_ts, to_ts) {
     from_ts = (typeof from_ts === 'undefined') ? null : from_ts;
     to_ts   = (typeof to_ts === 'undefined') ? null : to_ts;
 
     var data = { 'container': container, 'base_url': base_url,
                  'pnp_url':   pnp_url,   'site':     site,
                  'host':      host,      'service':  service,
-                 'with_link': with_link, 'view':     pnpview};
+                 'with_link': with_link, 'view':     pnpview,
+                 'add_txt':   add_txt};
 
     if (from_ts !== null && to_ts !== null) {
         data['start'] = from_ts;
@@ -2346,4 +2349,50 @@ function add_to_visual(visual_type, visual_name)
     // After adding a dashlet, go to the choosen dashboard
     if (response)
         window.location.href = response;
+}
+
+var g_sidebar_reload_timer = null;
+
+function reload_sidebar()
+{
+    if (parent && parent.frames[0]) {
+        // reload sidebar, but preserve eventual quicksearch field value and focus
+        var val = '';
+        var focused = false;
+        var field = parent.frames[0].document.getElementById('mk_side_search_field');
+        if (field) {
+            val = field.value;
+            focused = parent.frames[0].document.activeElement == field;
+        }
+
+        parent.frames[0].document.reloading = 1;
+        parent.frames[0].document.location.reload();
+
+        if (field) {
+            g_sidebar_reload_timer = setInterval(function (value, has_focus) {
+                return function() {
+                    if (!parent.frames[0].document.reloading
+                        && parent.frames[0].document.readyState === 'complete') {
+                        var field = parent.frames[0].document.getElementById('mk_side_search_field');
+                        if (field) {
+                            field.value = value;
+                            if (has_focus) {
+                                field.focus();
+
+                                // Move caret to end
+                                if (field.setSelectionRange !== undefined)
+                                    field.setSelectionRange(value.length, value.length);
+                            }
+                            field = null;
+                        }
+
+                        clearInterval(g_sidebar_reload_timer);
+                        g_sidebar_reload_timer = null;
+                    }
+                };
+            }(val, focused), 50);
+
+            field = null;
+        }
+    }
 }
