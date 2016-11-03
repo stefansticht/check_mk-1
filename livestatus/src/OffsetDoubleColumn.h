@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,23 +25,23 @@
 #ifndef OffsetDoubleColumn_h
 #define OffsetDoubleColumn_h
 
-#include "config.h"
-
-#include <stdlib.h>
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "DoubleColumn.h"
 
-class OffsetDoubleColumn : public DoubleColumn
-{
+class OffsetDoubleColumn : public DoubleColumn {
     int _offset;
+
 public:
-    OffsetDoubleColumn(string name, string description,
-                       int offset, int indirect_offset = -1)
-        : DoubleColumn(name, description, indirect_offset), _offset(offset) {}
-    double getValue(void *data);
+    OffsetDoubleColumn(const std::string& name, const std::string& description,
+                       int offset, int indirect_offset = -1,
+                       int extra_offset = -1)
+        : DoubleColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset) {}
+    double getValue(void* data);
+
 protected:
     int offset() { return _offset; }
 };
 
-
-#endif // OffsetDoubleColumn_h
-
+#endif  // OffsetDoubleColumn_h

@@ -17,82 +17,88 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <math.h>
 #include "DoubleAggregator.h"
-#include "StatsColumn.h"
+#include <cmath>
 #include "DoubleColumn.h"
-#include "Query.h"
+#include "Renderer.h"
 
 /* SORRY: This file is copy&pasted from IntAggregator.
    I hate copy & paste. But I also dislike complicating
    stuff by using C++ templates and the like.
  */
 
-void DoubleAggregator::consume(void *data, Query *)
-{
+void DoubleAggregator::consume(void* row, contact* /* auth_user */,
+                               int /* timezone_offset */) {
     _count++;
-    double value = _column->getValue(data);
-    switch (_operation) {
-        case STATS_OP_SUM:
-        case STATS_OP_AVG:
-            _aggr += value; break;
-
-        case STATS_OP_MIN:
-            if (_count == 1)
-                _aggr = value;
-            else if (value < _aggr)
-                _aggr = value;
+    double value = _column->getValue(row);
+    switch (getOperation()) {
+        case StatsOperation::sum:
+        case StatsOperation::avg:
+            _aggr += value;
             break;
 
-        case STATS_OP_MAX:
-            if (_count == 1)
+        case StatsOperation::min:
+            if (_count == 1) {
                 _aggr = value;
-            else if (value > _aggr)
+            } else if (value < _aggr) {
                 _aggr = value;
+            }
             break;
 
-        case STATS_OP_STD:
+        case StatsOperation::max:
+            if (_count == 1) {
+                _aggr = value;
+            } else if (value > _aggr) {
+                _aggr = value;
+            }
+            break;
+
+        case StatsOperation::std:
             _aggr += value;
             _sumq += value * value;
             break;
 
-        case STATS_OP_SUMINV:
-        case STATS_OP_AVGINV:
+        case StatsOperation::suminv:
+        case StatsOperation::avginv:
             _aggr += 1.0 / value;
             break;
-    }
-}
-
-
-void DoubleAggregator::output(Query *q)
-{
-    switch (_operation) {
-        case STATS_OP_SUM:
-        case STATS_OP_MIN:
-        case STATS_OP_MAX:
-        case STATS_OP_SUMINV:
-            q->outputDouble(_aggr);
-            break;
-
-        case STATS_OP_AVG:
-        case STATS_OP_AVGINV:
-            if (_count == 0)
-                q->outputDouble(0.0);
-            else
-                q->outputDouble(_aggr / _count);
-            break;
-
-        case STATS_OP_STD:
-            if (_count <= 1)
-                q->outputDouble(0.0);
-            else
-                q->outputDouble(sqrt((_sumq - (_aggr * _aggr) / _count)/(_count - 1)));
+        case StatsOperation::count:
             break;
     }
 }
 
+void DoubleAggregator::output(RowRenderer& r) {
+    switch (getOperation()) {
+        case StatsOperation::sum:
+        case StatsOperation::min:
+        case StatsOperation::max:
+        case StatsOperation::suminv:
+            r.output(_aggr);
+            break;
+
+        case StatsOperation::avg:
+        case StatsOperation::avginv:
+            if (_count == 0) {
+                r.output(0.0);
+            } else {
+                r.output(_aggr / _count);
+            }
+            break;
+
+        case StatsOperation::std:
+            if (_count <= 1) {
+                r.output(0.0);
+            } else {
+                r.output(
+                    sqrt((_sumq - (_aggr * _aggr) / _count) / (_count - 1)));
+            }
+            break;
+        case StatsOperation::count:
+            break;
+    }
+}

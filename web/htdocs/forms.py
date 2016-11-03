@@ -19,11 +19,12 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+from htmllib import HTML
 from lib import *
 
 # A input function with the same call syntax as htmllib.textinput()
@@ -82,11 +83,11 @@ def edit_dictionaries(dictionaries, value, focus=None, hover_help=True,
                         vp = keyname + "_" + varprefix
                     try:
                         v = vs.from_html_vars(vp + name)
-                        vs.validate_value(v, keyname + "_" + varprefix + name)
+                        vs.validate_value(v, vp + name)
                         new_value[keyname][name] = v
                     except MKUserError, e:
-                        messages.append("%s: %s" % (vs.title(), e.message))
-                        html.add_user_error(e.varname, e.message)
+                        messages.append("%s: %s" % (vs.title(), e))
+                        html.add_user_error(e.varname, e)
 
             else:
                 new_value[keyname] = {}
@@ -94,22 +95,26 @@ def edit_dictionaries(dictionaries, value, focus=None, hover_help=True,
                     edited_value = entries.from_html_vars(keyname)
                     entries.validate_value(edited_value, keyname)
                     new_value[keyname].update(edited_value)
+                except MKUserError, e:
+                    messages.append("%s: %s" % (entries.title() or _("Properties"), e))
+                    html.add_user_error(e.varname, e)
                 except Exception, e:
-                    messages.append("%s: %s" % (entries.title() or _("Properties"), e.message))
-                    html.add_user_error(e.varname, e.message)
+                    messages.append("%s: %s" % (entries.title() or _("Properties"), e))
+                    html.add_user_error(None, e)
 
             if validate and not html.has_user_errors():
                 try:
                     validate(new_value[keyname])
                 except MKUserError, e:
-                    messages.append(e.message)
-                    html.add_user_error(e.varname, e.message)
+                    messages.append(e)
+                    html.add_user_error(e.varname, e)
 
         if messages:
+            messages_joined = "".join(["%s<br>\n" % m for m in messages])
             if not preview:
-                html.show_error("".join(["%s<br>\n" % m for m in messages]))
+                html.show_error(messages_joined)
             else:
-                return None
+                raise MKUserError(None, messages_joined)
         else:
             return new_value
 
@@ -188,7 +193,10 @@ def edit_valuespec(vs, value, buttontext=None, method="GET", varprefix="",
     html.button("save", buttontext)
     html.del_var("filled_in") # Should be ignored be hidden_fields, but I do not dare to change it there
     html.hidden_fields()
-    vs.set_focus(varprefix)
+    if focus:
+        html.set_focus(focus)
+    else:
+        vs.set_focus(varprefix)
     html.end_form()
 
 # New functions for painting forms
@@ -211,6 +219,7 @@ def strip_bad_chars(x):
         return s.translate(twofivesix, "'&;<>\"")
 
 def header(title, isopen = True, table_id = "", narrow = False, css=None):
+    #html.guitest_record_output("forms", ("header", title))
     global g_header_open
     global g_section_open
     global g_section_isopen
@@ -220,15 +229,12 @@ def header(title, isopen = True, table_id = "", narrow = False, css=None):
     except:
         pass
 
-    if table_id:
-        table_id = ' id="%s"' % table_id
-    else:
-        table_id = ''
-    html.write('<table %s class="nform%s%s">' % (table_id, narrow and " narrow" or "", css and (" " + css) or ""))
+    html.open_table(id_=table_id if table_id else None,
+                    class_=["nform", "narrow" if narrow else None, css if css else None])
     fold_id = strip_bad_chars(title)
     g_section_isopen = html.begin_foldable_container(
             html.form_name and html.form_name or "nform", fold_id, isopen, title, indent="nform")
-    html.write('<tr class="top %s"><td colspan=2></td></tr>' % (g_section_isopen and "open" or "closed"))
+    html.tr(html.render_td('', colspan=2), class_=["top", "open" if g_section_isopen else "closed"])
     g_header_open = True
     g_section_open = False
 
@@ -236,48 +242,56 @@ def header(title, isopen = True, table_id = "", narrow = False, css=None):
 def container():
     global g_section_open
     if g_section_open:
-        html.write('</td></tr>')
-    html.write('<tr class="%s"><td colspan=2 class=container>' %
-         (g_section_isopen and "open" or "closed"))
+        html.close_td()
+        html.close_tr()
+    html.open_tr(class_="open" if g_section_isopen else "closed")
+    html.open_td(colspan=2, class_=container)
     g_section_open = True
 
-def space():
-    html.write('<tr><td colspan=2 style="height:15px;"></td></tr>')
 
-def section(title = None, checkbox = None, id = "", simple=False, hide = False, legend = True):
+def space():
+    html.tr(html.render_td('', colspan=2, style="height:15px;"))
+
+
+def section(title = None, checkbox = None, id = None, simple=False, hide = False, legend = True):
+
+    # TODO: Refactor
+    section_id = id
+
+    #html.guitest_record_output("forms", ("section", title))
     global g_section_open
     if g_section_open:
-        html.write('</td></tr>')
-    if id:
-        id = ' id="%s"' % id
-    html.write('<tr class="%s"%s%s>' %
-            (g_section_isopen and "open" or "closed", id,
-             hide and ' style="display:none;"' or ''))
+        html.close_td()
+        html.close_tr()
+    html.open_tr(id_=section_id, class_="open" if g_section_isopen else "closed",
+                 style="display:none;" if hide else None)
 
     if legend:
-        html.write('<td class="legend%s">' % (simple and " simple" or ""))
+        html.open_td(class_=["legend", "simple" if simple else None])
         if title:
-            html.write('<div class="title%s">%s<span class="dots">%s</span></div>' %
-                      (checkbox and " withcheckbox" or "", title, "."*100))
+            html.open_div(class_=["title", "withcheckbox" if checkbox else None])
+            html.write_text(title)
+            html.span('.'*100, class_="dots")
+            html.close_div()
         if checkbox:
-            html.write('<div class=checkbox>')
-            if type(checkbox) == str:
+            html.open_div(class_="checkbox")
+            if type(checkbox) in [str, unicode, HTML]:
                 html.write(checkbox)
             else:
                 name, active, attrname = checkbox
                 html.checkbox(name, active, onclick = 'wato_toggle_attribute(this, \'%s\')' % attrname)
-            html.write('</div>')
-        html.write('</td>')
-    html.write('<td class="content%s">' % (simple and " simple" or ""))
+            html.close_div()
+        html.close_td()
+    html.open_td(class_=["content", "simple" if simple else None])
     g_section_open = True
 
 def end():
     global g_header_open
     g_header_open = False
     if g_section_open:
-        html.write('</td></tr>')
+        html.close_td()
+        html.close_tr()
     html.end_foldable_container()
-    html.write('<tr class="bottom %s"><td colspan=2></td></tr>'
-            % (g_section_isopen and "open" or "closed"))
-    html.write('</table>')
+    html.tr(html.render_td('', colspan=2), class_=["bottom", "open" if g_section_isopen else "closed"])
+    html.close_table()
 

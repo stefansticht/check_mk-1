@@ -17,7 +17,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -34,7 +34,8 @@ BuildRoot: %{_topdir}/buildroot
 AutoReq:   off
 AutoProv:  off
 BuildArch: noarch
-Obsoletes: check_mk-agent
+Obsoletes: check_mk-agent check_mk_agent
+Provides:  check_mk-agent check_mk_agent
 
 %description
 The Check_MK Agent uses xinetd to provide information about the system
@@ -51,11 +52,11 @@ rm -rf $R
 # install agent
 # xinitd
 mkdir -p $R/etc/xinetd.d
-install -m 644 xinetd.conf $R/etc/xinetd.d/check_mk
+install -m 644 cfg_examples/xinetd.conf $R/etc/xinetd.d/check_mk
 # Systemd
 mkdir -p $R/etc/systemd/system
-install -m 644 systemd/check_mk\@.service $R/etc/systemd/system
-install -m 644 systemd/check_mk.socket $R/etc/systemd/system
+install -m 644 cfg_examples/systemd/check_mk\@.service $R/etc/systemd/system
+install -m 644 cfg_examples/systemd/check_mk.socket $R/etc/systemd/system
 mkdir -p $R/etc/check_mk
 mkdir -p $R/usr/bin
 install -m 755 check_mk_agent.linux $R/usr/bin/check_mk_agent
@@ -66,6 +67,7 @@ mkdir -p $R/usr/lib/check_mk_agent/plugins
 mkdir -p $R/usr/lib/check_mk_agent/local
 mkdir -p $R/var/lib/check_mk_agent
 mkdir -p $R/var/lib/check_mk_agent/job
+mkdir -p $R/var/lib/check_mk_agent/spool
 
 %clean
 rm -rf $RPM_BUILD_ROOT

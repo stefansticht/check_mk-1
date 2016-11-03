@@ -17,67 +17,58 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <time.h>
-
 #include "TimeperiodsCache.h"
-#include "nagios.h"
-#include "logger.h"
-#ifdef NAGIOS4
-#include <pthread.h>
-#endif // NAGIOS4
+#include <cstring>
+#include <ctime>
+#include <ostream>
+#include <string>
+#include <utility>
+#include "Logger.h"
+
+using std::lock_guard;
+using std::mutex;
+using std::string;
 
 extern timeperiod *timeperiod_list;
 
-TimeperiodsCache::TimeperiodsCache()
-{
-    pthread_mutex_init(&_cache_lock, 0);
-    _cache_time = 0;
-}
+TimeperiodsCache::TimeperiodsCache(Logger *logger)
+    : _logger(logger), _cache_time(0) {}
 
+TimeperiodsCache::~TimeperiodsCache() = default;
 
-TimeperiodsCache::~TimeperiodsCache()
-{
-    pthread_mutex_destroy(&_cache_lock);
-}
-
-void TimeperiodsCache::logCurrentTimeperiods(){
-    pthread_mutex_lock(&_cache_lock);
-    time_t now = time(0);
+void TimeperiodsCache::logCurrentTimeperiods() {
+    lock_guard<mutex> lg(_cache_lock);
+    time_t now = time(nullptr);
     // Loop over all timeperiods and compute if we are
     // currently in. Detect the case where no time periods
     // are known (yet!). This might be the case when a timed
     // event broker message arrives *before* the start of the
     // event loop.
-    timeperiod *tp = timeperiod_list;
-    while (tp) {
+    for (timeperiod *tp = timeperiod_list; tp != nullptr; tp = tp->next) {
         bool is_in = 0 == check_time_against_period(now, tp);
         // check previous state and log transition if state has changed
-        _cache_t::iterator it = _cache.find(tp);
-        if (it == _cache.end()) { // first entry
+        auto it = _cache.find(tp);
+        if (it == _cache.end()) {  // first entry
             logTransition(tp->name, -1, is_in ? 1 : 0);
-            _cache.insert(std::make_pair(tp, is_in));
+            _cache.emplace(tp, is_in);
         }
         logTransition(tp->name, it->second ? 1 : 0, is_in ? 1 : 0);
-        tp = tp->next;
     }
-    pthread_mutex_unlock(&_cache_lock);
 }
 
-void TimeperiodsCache::update(time_t now)
-{
-    pthread_mutex_lock(&_cache_lock);
+void TimeperiodsCache::update(time_t now) {
+    lock_guard<mutex> lg(_cache_lock);
 
     // update cache only once a minute. The timeperiod
     // definitions have 1 minute as granularity, so a
     // 1sec resultion is not needed.
     int minutes = now / 60;
     if (minutes == _cache_time) {
-        pthread_mutex_unlock(&_cache_lock);
         return;
     }
 
@@ -86,54 +77,48 @@ void TimeperiodsCache::update(time_t now)
     // are known (yet!). This might be the case when a timed
     // event broker message arrives *before* the start of the
     // event loop.
-    timeperiod *tp = timeperiod_list;
     int num_periods = 0;
-    while (tp) {
+    for (timeperiod *tp = timeperiod_list; tp != nullptr; tp = tp->next) {
         bool is_in = 0 == check_time_against_period(now, tp);
 
         // check previous state and log transition if state has changed
-        _cache_t::iterator it = _cache.find(tp);
-        if (it == _cache.end()) { // first entry
+        auto it = _cache.find(tp);
+        if (it == _cache.end()) {  // first entry
             logTransition(tp->name, -1, is_in ? 1 : 0);
-            _cache.insert(std::make_pair(tp, is_in));
-        }
-        else if (it->second != is_in) {
+            _cache.emplace(tp, is_in);
+        } else if (it->second != is_in) {
             logTransition(tp->name, it->second ? 1 : 0, is_in ? 1 : 0);
             it->second = is_in;
         }
 
-        tp = tp->next;
         num_periods++;
     }
-    if (num_periods > 0)
+    if (num_periods > 0) {
         _cache_time = minutes;
-    else
-        logger(LG_INFO, "Timeperiod cache not updated, there are no timeperiods (yet)");
-
-    pthread_mutex_unlock(&_cache_lock);
-}
-
-bool TimeperiodsCache::inTimeperiod(const char *tpname)
-{
-    timeperiod *tp = timeperiod_list;
-    while (tp) {
-        if (!strcmp(tpname, tp->name))
-            return inTimeperiod(tp);
-        tp = tp->next;
+    } else {
+        Informational(_logger)
+            << "Timeperiod cache not updated, there are no timeperiods (yet)";
     }
-    return 1; // unknown timeperiod is assumed to be 7X24
 }
 
+bool TimeperiodsCache::inTimeperiod(const char *tpname) {
+    for (timeperiod *tp = timeperiod_list; tp != nullptr; tp = tp->next) {
+        if (strcmp(tpname, tp->name) == 0) {
+            return inTimeperiod(tp);
+        }
+    }
+    return true;  // unknown timeperiod is assumed to be 7X24
+}
 
-bool TimeperiodsCache::inTimeperiod(timeperiod *tp)
-{
+bool TimeperiodsCache::inTimeperiod(timeperiod *tp) {
+    lock_guard<mutex> lg(_cache_lock);
+    auto it = _cache.find(tp);
     bool is_in;
-    pthread_mutex_lock(&_cache_lock);
-    _cache_t::iterator it = _cache.find(tp);
-    if (it != _cache.end())
+    if (it != _cache.end()) {
         is_in = it->second;
-    else {
-        logger(LG_INFO, "No timeperiod information available for %s. Assuming out of period.", tp->name);
+    } else {
+        Informational(_logger) << "No timeperiod information available for "
+                               << tp->name << ". Assuming out of period.";
         is_in = false;
         // Problem: The method check_time_against_period is to a high
         // degree not thread safe. In the current situation Icinga is
@@ -141,14 +126,10 @@ bool TimeperiodsCache::inTimeperiod(timeperiod *tp)
         // time_t now = time(0);
         // is_in = 0 == check_time_against_period(now, tp);
     }
-    pthread_mutex_unlock(&_cache_lock);
     return is_in;
 }
 
-
-void TimeperiodsCache::logTransition(char *name, int from, int to)
-{
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer), "TIMEPERIOD TRANSITION: %s;%d;%d", name, from, to);
-    write_to_all_logs(buffer, LOG_INFO);
+void TimeperiodsCache::logTransition(char *name, int from, int to) {
+    Informational(_logger) << "TIMEPERIOD TRANSITION: " << name << ";" << from
+                           << ";" << to;
 }

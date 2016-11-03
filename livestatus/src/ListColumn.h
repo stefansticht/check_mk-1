@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,30 @@
 #ifndef ListColumn_h
 #define ListColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
 #include "Column.h"
+#include "opids.h"
+class Filter;
 
-class ListColumn : public Column
-{
+class ListColumn : public Column {
 public:
-    ListColumn(string name, string description, int indirect_offset) :
-        Column(name, description, indirect_offset) {}
-    int type() { return COLTYPE_LIST; }
-    virtual void *getNagiosObject(char *name) = 0;
-    virtual bool isNagiosMember(void *data, void *member) = 0;
+    /// Given a row, does a given list-valued column contain a given element?
+    class Contains {
+    public:
+        virtual ~Contains();
+        virtual bool operator()(void *row) = 0;
+    };
+
+    ListColumn(const std::string &name, const std::string &description,
+               int indirect_offset, int extra_offset)
+        : Column(name, description, indirect_offset, extra_offset) {}
+    ColumnType type() override { return ColumnType::list; }
+    virtual std::unique_ptr<Contains> makeContains(const std::string &name) = 0;
     virtual bool isEmpty(void *data) = 0;
-    Filter *createFilter(int opid, char *value);
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
 };
 
-#endif // ListColumn_h
+#endif  // ListColumn_h

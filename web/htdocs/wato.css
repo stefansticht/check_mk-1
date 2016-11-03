@@ -52,8 +52,16 @@ Boston, MA 02110-1301 USA.
 
 .wato table.data th {
     border-radius: 0px;
-    background-color: #508aa1;
     background-color: #73a1b4;
+}
+
+/* Tables renderes in forms. */
+.wato table.nform table.data {
+    box-shadow: 1px 1px 2px #444;
+}
+
+.wato table.nform table.data th {
+    background-color: #527280;
 }
 
 
@@ -285,11 +293,11 @@ table.validationerror img {
 
 .wato div.folderpath li select {
     padding: 2px 0px 2px 4px;
-    background-color: #7399ba;
+    background-color: #6da1b8;
     margin: 0;
     color: #fff;
     font-weight: normal;
-    font-size: 8pt;
+    font-size: 9pt;
     border-style: none;
     position: relative;
     right: -6px;
@@ -360,6 +368,10 @@ table.validationerror img {
     height: 140px;
 }
 
+.wato div.floatfolder.open {
+    background-image: url('images/folder_open.png');
+}
+
 .wato div.floatfolder .autherr {
     position: absolute;
     top: 28px;
@@ -380,7 +392,7 @@ table.validationerror img {
     right: 47px;
 }
 
-.wato div.floatfolder .move {
+.wato div.floatfolder div.popup_trigger {
     position: absolute;
     top: 20px;
     right: 25px;
@@ -396,11 +408,26 @@ table.validationerror img {
     position: absolute;
     bottom: 23px;
     left: 20px;
-    width: 140px;
+    right: 20px;
+    overflow: hidden;
+}
+
+.wato div.floatfolder .infos .infos_content {
     color: #bde;
-    overflow:hidden;
+    overflow: hidden;
     white-space: nowrap;
+    left: 0;
+    right: 0;
     text-overflow: ellipsis;
+}
+
+.wato div.floatfolder.open .infos {
+    height: 50px;
+}
+
+.wato div.floatfolder.open .infos .infos_content {
+    position: absolute;
+    bottom: 0;
 }
 
 .wato div.floatfolder .title {
@@ -432,15 +459,12 @@ table.validationerror img {
     vertical-align: middle;
 }
 
-.wato div.popup.move_dialog {
-    position: relative;
-    left:105px;
-    top:35px;
-    height: 190px;
+.wato div.popup_menu {
+    min-width: 137px;
 }
 
-.wato div.popup.move_dialog select[multiple] {
-    height: 170px;
+.wato div.popup_menu select {
+    height: auto;
 }
 
 .wato div.hoverarea {
@@ -485,8 +509,7 @@ table.validationerror img {
     width: 500px;
     height: 140px;
     border: 1px solid white;
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.3);
     margin-top: 10px;
     border-radius: 4px;
     position: relative;
@@ -902,8 +925,7 @@ div.varname {
 '-------------------------------------------------------------------------*/
 
 .wato table.progress {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.3);
     width: 50%;
     border: 1px solid #000;
     color: black;
@@ -916,8 +938,7 @@ div.varname {
 
 /* Log window */
 .wato table.progress td.log > div {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.3);
     border: 1px solid #fff;
     padding: 5px;
     height: 250px;
@@ -1010,8 +1031,7 @@ div.varname {
 }
 
 .wato table.progress td.stats td {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.3);
     text-align: right;
     width: 4em;
     padding-right: 6px;
@@ -1115,7 +1135,8 @@ table.data td.bi_rule_tree > li {
     margin-bottom:15px;
 }
 
-.wato .diag_host .log {
+.wato .diag_host .log,
+.backup_job .log {
     height: 113px;
     width: 700px;
     font-family: monospace, sans-serif;
@@ -1126,6 +1147,9 @@ table.data td.bi_rule_tree > li {
     background-color: #fff;
     /* below resize option is css3 */
     resize:both;
+}
+.backup_job .log pre {
+    margin: 2px;
 }
 .wato .diag_host .log.diag_success {
     background-color: #efe;
@@ -1247,21 +1271,3 @@ table.nform.rulesettings td.legend div.title {
     width: 200px;
 }
 
-.wato table.data.manpage th {
-    text-align: left;
-    padding: 4px 5px;
-}
-.wato table.data.manpage td {
-    padding: 4px 5px;
-}
-
-.wato table.data.manpage > tbody > tr:nth-child(even) > th {
-    background-color: #7fadc0;
-}
-
-.wato table.data.manpage > tbody > tr:nth-child(odd) > td {
-    background-color: #ddd;
-}
-.wato table.data.manpage > tbody > tr:nth-child(even) > td {
-    background-color: #eee;
-}

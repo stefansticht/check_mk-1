@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -30,21 +30,39 @@
 # 119 232292187 LCK_M_U 75
 # 76 221526672 LCK_M_U 115
 
+# TODO: Make this check aware of multiple instances! Don't handle the blocked
+# sessions independent of instances anymore. Use same service description
+# schema as "mssql_instance".
 
 def inventory_mssql_blocked_sessions(info):
     return [(None, None)]
 
-def check_mssql_blocked_sessions(item, params, info):
-    if len(info) > 1:
-        for session_id, wait_duration_ms, wait_type, blocking_session_id in  info[1:]:
-            yield 2, "Session %s blocked by %s (Wait %s ms, Type: %s)" % \
-                    ( session_id, blocking_session_id, wait_duration_ms, wait_type )
-    else:
+def check_mssql_blocked_sessions(_no_item, params, info):
+    if not info:
         yield 0, "No blocked sessions"
+        return
+
+    state = 2
+    for session_id, wait_duration_ms, wait_type, blocking_session_id in info[1:]:
+        if params:
+            state               = params.get("state", 2)
+            warn, crit          = params.get("waittime", (0, 0))
+            wait_duration_sec   = float(wait_duration_ms) / 1000
+            if wait_duration_sec >= crit and not crit == 0:
+                state = 2
+            elif wait_duration_sec >= warn and not warn == 0:
+                state = 1
+            elif warn > 0 or crit > 0:
+                state = 0
+
+        yield state, \
+              "Session %s blocked by %s (Wait %s ms, Type: %s)" % \
+              ( session_id, blocking_session_id, wait_duration_ms, wait_type )
 
 
 check_info['mssql_blocked_sessions'] = {
-    'check_function'            : check_mssql_blocked_sessions,
     'inventory_function'        : inventory_mssql_blocked_sessions,
+    'check_function'            : check_mssql_blocked_sessions,
     'service_description'       : "MSSQL Blocked Sessions",
+    'group'                     : "mssql_blocked_sessions",
 }

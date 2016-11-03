@@ -1,11 +1,8 @@
 ﻿# 
-# Get Windows tasks for check_mk
-# 
-# Changelog: 	v0.02	German servers will now write their output in English
-#				v0.03	Fixed a bug with German language output
+# Monitor Windows Tasks
 #
 
-Write-Host "<<<windows_tasks:sep(58)>>>"
+Write-Host "<<<windows_tasks:sep(58):encoding(cp437)>>>"
 $lang = Get-UICulture | select -expand LCID
 if ($lang -eq 1031){
 	$tasks = schtasks /query /fo csv -v | ConvertFrom-Csv

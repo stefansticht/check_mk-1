@@ -17,13 +17,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 SHELL           = /bin/bash
-VERSION         = 1.2.7i3
+VERSION         = 1.4.0i2
 RPM_VERSION     = $(subst -,_,$(VERSION))
 NAME            = check-mk-agent
 DISTNAME       	= $(NAME)-$(VERSION)
@@ -40,8 +40,8 @@ usage:
 
 waitmax: waitmax.c
 	@if type diet >/dev/null ; then \
-	    echo "Compiling with diet (please ignore diet-warnings)..." ; \
-	    diet gcc -s -o waitmax waitmax.c ; \
+	    echo "Compiling with diet..." ; \
+	    diet gcc -s -Wall -Wextra -O3 -o waitmax waitmax.c ; \
 	else \
 	    echo "WARNING: your binary is not portable. Please compile " ; \
 	    echo "with dietlibc on 32-Bit to get portable statically " ; \
@@ -56,7 +56,7 @@ setversion:
 	if [ -d ../.git ]; then \
 	    git rm -f *.rpm *.deb || true ; \
 	fi
-	sed -ri 's/^(VERSION[[:space:]]*= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
+	sed -ri 's/^(VERSION[[:space:]]*:?= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
 	sed -i 's/say "Version: .*"/say "Version: $(NEW_VERSION)"/' check_mk_agent.openvms ; \
 	for agent in check_mk_agent.*; do \
 	    if [ "$$agent" != windows -a "$$agent" != plugins -a "$$agent" != hpux ] ; then \

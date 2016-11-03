@@ -17,28 +17,31 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "DoubleColumn.h"
-#include "DoubleColumnFilter.h"
-#include "Query.h"
+#include <cstdio>
+#include "DoubleFilter.h"
+#include "Renderer.h"
+#include "opids.h"
 
-void DoubleColumn::output(void *data, Query *query)
-{
-    query->outputDouble(getValue(data));
+using std::string;
+
+void DoubleColumn::output(void *row, RowRenderer &r,
+                          contact * /* auth_user */) {
+    r.output(getValue(row));
 }
 
-Filter *DoubleColumn::createFilter(int operator_id, char *value)
-{
-    return new DoubleColumnFilter(this, operator_id, value);
+Filter *DoubleColumn::createFilter(RelationalOperator relOp,
+                                   const string &value) {
+    return new DoubleFilter(this, relOp, value);
 }
 
-string DoubleColumn::valueAsString(void *data, Query *query)
-{
+string DoubleColumn::valueAsString(void *row, contact * /* auth_user */) {
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.10e", getValue(data));
+    snprintf(buf, sizeof(buf), "%.10e", getValue(row));
     return buf;
 }

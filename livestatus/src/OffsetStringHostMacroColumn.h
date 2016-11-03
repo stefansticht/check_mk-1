@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,17 +25,20 @@
 #ifndef OffsetStringHostMacroColumn_h
 #define OffsetStringHostMacroColumn_h
 
-#include "nagios.h"
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "OffsetStringMacroColumn.h"
+#include "nagios.h"  // IWYU pragma: keep
 
-class OffsetStringHostMacroColumn : public OffsetStringMacroColumn
-{
+class OffsetStringHostMacroColumn : public OffsetStringMacroColumn {
 public:
-    OffsetStringHostMacroColumn(string name, string description, int offset, int indirect_offset = -1) :
-        OffsetStringMacroColumn(name, description, offset, indirect_offset) {}
-    host *getHost(void *data);
-    service *getService(void *data);
+    OffsetStringHostMacroColumn(const std::string &name,
+                                const std::string &description, int offset,
+                                int indirect_offset = -1, int extra_offset = -1)
+        : OffsetStringMacroColumn(name, description, offset, indirect_offset,
+                                  extra_offset) {}
+    host *getHost(void *data) override;
+    service *getService(void *data) override;
 };
 
-#endif // OffsetStringHostMacroColumn_h
-
+#endif  // OffsetStringHostMacroColumn_h

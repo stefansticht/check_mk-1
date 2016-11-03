@@ -17,49 +17,46 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include "nagios.h"
-#include "Query.h"
-#include "OffsetStringColumn.h"
 #include "TableContactgroups.h"
 #include "ContactgroupsMemberColumn.h"
+#include "OffsetStringColumn.h"
+#include "Query.h"
+#include "nagios.h"
+
+using std::string;
 
 extern contactgroup *contactgroup_list;
 
-TableContactgroups::TableContactgroups()
-{
-    addColumns(this, "", -1);
-}
-
-
-void TableContactgroups::addColumns(Table *table, string prefix, int indirect_offset)
-{
+TableContactgroups::TableContactgroups(Logger *logger) : Table(logger) {
     contactgroup cg;
-    char *ref = (char *)&cg;
-    table->addColumn(new OffsetStringColumn(prefix + "name",
-                "The name of the contactgroup", (char *)(&cg.group_name) - ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "alias",
-                "The alias of the contactgroup", (char *)(&cg.alias) - ref, indirect_offset));
-    table->addColumn(new ContactgroupsMemberColumn(prefix + "members",
-                "A list of all members of this contactgroup", indirect_offset));
+    char *ref = reinterpret_cast<char *>(&cg);
+    addColumn(
+        new OffsetStringColumn("name", "The name of the contactgroup",
+                               reinterpret_cast<char *>(&cg.group_name) - ref));
+    addColumn(
+        new OffsetStringColumn("alias", "The alias of the contactgroup",
+                               reinterpret_cast<char *>(&cg.alias) - ref));
+    addColumn(new ContactgroupsMemberColumn(
+        "members", "A list of all members of this contactgroup", -1));
 }
 
+string TableContactgroups::name() const { return "contactgroups"; }
 
-void TableContactgroups::answerQuery(Query *query)
-{
-    contactgroup *cg = contactgroup_list;
-    while (cg) {
-        if (!query->processDataset(cg)) break;
-        cg = cg->next;
+string TableContactgroups::namePrefix() const { return "contactgroup_"; }
+
+void TableContactgroups::answerQuery(Query *query) {
+    for (contactgroup *cg = contactgroup_list; cg != nullptr; cg = cg->next) {
+        if (!query->processDataset(cg)) {
+            break;
+        }
     }
 }
 
-void *TableContactgroups::findObject(char *objectspec)
-{
-    return find_contactgroup(objectspec);
+void *TableContactgroups::findObject(const string &objectspec) {
+    return find_contactgroup(const_cast<char *>(objectspec.c_str()));
 }
-

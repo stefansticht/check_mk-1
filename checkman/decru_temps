@@ -15,16 +15,8 @@ description:
 item:
  The name of the temperature sensor as defined in the SNMP data.
 
-perfdata:
- The current temperature of the sensor in celsius (converted from
- fahrenheit)
-
 inventory:
  All senors are automatically detected. The current temperature
  during the inventory plus 4 or 8 degrees is used as warning
  or critical level resp.
-
-[parameters]
-warning (int): temperature (celsius) above which a warning level is reached
-critical (int): temperature (celsius) above which a critical level is reached
 

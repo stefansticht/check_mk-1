@@ -17,24 +17,29 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-
 #ifndef FixedIntColumn_h
 #define FixedIntColumn_h
 
+#include "config.h"  // IWYU pragma: keep
 #include "IntColumn.h"
 
-class FixedIntColumn : public IntColumn
-{
-    int32_t _value;
+class FixedIntColumn : public IntColumn {
 public:
-    FixedIntColumn(string name, string description, int value) :
-        IntColumn(name, description, -1), _value(value) {}
-    int32_t getValue(void *data, Query *) { return _value; }
+    FixedIntColumn(const std::string& name, const std::string& description,
+                   int value, int indirect_offset = -1, int extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset)
+        , _value(value) {}
+    int32_t getValue(void* /* row */, contact* /* auth_user */) override {
+        return _value;
+    }
+
+private:
+    const int32_t _value;
 };
 
-#endif // FixedIntColumn_h
+#endif  // FixedIntColumn_h

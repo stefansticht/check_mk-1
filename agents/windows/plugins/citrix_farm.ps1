@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- encoding: utf-8; py-indent-offset: 4 -*-
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -19,7 +17,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -91,12 +89,16 @@ foreach ($Controller in $Controllers) {
 	if (!$totalinactive_sessions) {$totalinactive_sessions = 0}
 	$totalinactive_sessions = $totalinactive_sessions | Measure-Object -Sum | %{ $_.Sum }
 	"TotalFarmInactiveSessions $totalinactive_sessions"
+	"<<<<>>>>"
 }
 
 	foreach ($XAmachine in $XAmachines) {
 
 		# Column Name of Machine / Gets machines with the specific machine name known to the hypervisor.
 		$HostedMachineName = $XAmachine | %{ $_.HostedMachineName }
+		if([string]::IsNullOrEmpty($HostedMachineName)) {
+			continue;
+		}
 		"<<<<$HostedMachineName>>>>"
 		"<<<citrix_state>>>"
 		# Column CatalogNameName / Gets machines from the catalog with the specific name.
@@ -141,8 +143,10 @@ foreach ($Controller in $Controllers) {
 
 		# Column Serverload / Gets machines by their current load index.
 		$Serverload = $XAmachine  | %{ $_.LoadIndex }
-		"<<<citrix_serverload>>>"
-		"$Serverload"
+		if(-NOT ([string]::IsNullOrEmpty($Serverload))) {
+		    "<<<citrix_serverload>>>"
+		    "$Serverload"
+		}
 
 		# Column SessionCount / Count of number of active / inactive sessions on the machine.
 		$Sessions = $XAmachine | %{ $_.SessionCount }
@@ -163,15 +167,18 @@ foreach ($Controller in $Controllers) {
 		"inactive_sessions 0"
 
 		}
+		 "<<<<>>>>"
 		if ($HostingServerName) {
+            $HostingServerName = $HostingServerName.Replace($DNSdomain,$null)
 
-		$HostingServerName = $HostingServerName.Replace($DNSdomain,$null)
-		"<<<<$HostingServerName>>>>"
-                "<<<citrix_hostsystem>>>"
-		"VMName $HostedMachineName"
+		    "<<<<$HostingServerName>>>>"
+            "<<<citrix_hostsystem>>>"
+		    "VMName $HostedMachineName"
 
-		# Column HypervisorConnectionName / Gets machines with a specific Citrix Virtual Delivery Agent version.
-		$HypervisorConnectionName  = $XAmachine | %{ $_.HypervisorConnectionName }
-		"CitrixPoolName $HypervisorConnectionName"
-		}
+		    # Column HypervisorConnectionName / Gets machines with a specific Citrix Virtual Delivery Agent version.
+		    $HypervisorConnectionName  = $XAmachine | %{ $_.HypervisorConnectionName }
+		    "CitrixPoolName $HypervisorConnectionName"
+		    "<<<<>>>>"
+        }
 	}
+"<<<<>>>>"

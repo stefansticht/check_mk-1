@@ -18,13 +18,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 
-VERSION=1.2.7i3
+VERSION=1.4.0i2
 NAME=check_mk
 LANG=
 LC_ALL=
@@ -164,17 +164,9 @@ ask_title ()
     echo
 }
 
-if [ -z "$YES" ] ; then cat <<EOF
-
-
-
-
-
-
-
-
-
-
+if [ -z "$YES" ] ; then
+    cat <<EOF
+[H[2J
 [1;44;37m               ____ _               _        __  __ _  __               [0m
 [1;44;37m              / ___| |__   ___  ___| | __   |  \/  | |/ /               [0m
 [1;44;37m             | |   | '_ \ / _ \/ __| |/ /   | |\/| | ' /                [0m
@@ -182,20 +174,33 @@ if [ -z "$YES" ] ; then cat <<EOF
 [1;44;37m              \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\               [0m
 [1;44;37m                                       |_____|                          [0m
 [1;44;37m                                                                        [0m
-[1;45;37m   Check_MK setup                  $(printf "%32s" Version:' '$VERSION)     [0m
-
-
-Welcome to Check_MK. This setup will install Check_MK into user defined
-directories. If you run this script as root, installation paths below
-/usr will be suggested. If you run this script as non-root user paths
-in your home directory will be suggested. You may override the default
-values or just hit enter to accept them.
-
-Your answers will be saved to $SETUPCONF and will be
-reused when you run the setup of this or a later version again. Please
-delete that file if you want to delete your previous answers.
+[1;45;37m   Check_MK manual setup           $(printf "%32s" Version:' '$VERSION)     [0m
+[1;41;33m                                                                        [0m
+[1;41;37m  The manual setup of Check_MK via ./setup.sh is not possible           [0m
+[1;41;37m  anymore. Check_MK is only supported to be used with the               [0m
+[1;41;37m  Check_MK Raw or Enterprise Edition packages.                          [0m
+[1;41;37m                                                                        [0m
+[1;41;37m  These have many advantages:                                           [0m
+[1;41;37m                                                                        [0m
+[1;41;37m   - Very easy installation via a single RPM/DEB package                [0m
+[1;41;37m   - Contains fully integrated complete monitoring environment          [0m
+[1;41;37m   - Does not need installation of Nagios, PNP4Nagios or plugins        [0m
+[1;41;37m   - Supports multiple versions of Check_MK at the same time            [0m
+[1;41;37m   - Supports multiple monitoring instances on one server               [0m
+[1;41;37m   - Actively maintainained by the Check_MK project                     [0m
+[1;41;37m                                                                        [0m
+[1;44;37m                                                                        [0m
+[1;44;37m  You can download the Check_MK Raw Edition for free here:              [0m
+[1;44;33m                                                                        [0m
+[1;44;36m  http://mathias-kettner.com/download                                   [0m
+[1;44;37m                                                                        [0m
+[1;44;37m  Installation instructions are here:                                   [0m
+[1;44;37m                                                                        [0m
+[1;44;36m  http://mathias-kettner.com/cms_introduction_packages.html             [0m
+[1;44;37m                                                                        [0m
 
 EOF
+    exit 1
 fi
 
 if [ -z "$DESTDIR" ]
@@ -255,6 +260,16 @@ ask_dir vardir /var/lib/$NAME $HOMEBASEDIR/var $OMD_ROOT/var/check_mk "working d
   "Check_MK will create log files, automatically created checks and
 other files into this directory. The setup will create several subdirectories
 and makes them writable by the Nagios process"
+
+PYTHON_PATH=$(python -c "import sys; print([ p for p in sys.path if p.startswith(\"/usr/lib/\") and p.count(\"/\") == 3 ][0])" 2>/dev/null)
+if [ -z "$PYTHON_PATH" ]; then
+    PYTHON_PATH=/usr/lib/python2.7
+fi
+
+ask_dir python_lib_dir $PYTHON_PATH $HOMEBASEDIR/python $OMD_ROOT/lib/python "Check_MK python modules" \
+  "Check_MKs different components share common code in Python modules. These
+have to be installed in a directory where the used Python interpreter is
+searching for modules."
 
 ask_title "Configuration of Linux/UNIX Agents"
 
@@ -464,83 +479,6 @@ web_dir=$sharedir/web
 localedir=$sharedir/locale
 agentsdir=$sharedir/agents
 
-create_defaults ()
-{
-
-cat <<EOF
-# This file has been created during setup of check_mk at $(date).
-# Do not edit this file. Also do not try to override these settings
-# in main.mk since some of them are hardcoded into several files
-# during setup.
-#
-# If you need to change these settings, you have to re-run setup.sh
-# and enter new values when asked, or edit ~/.check_mk_setup.conf and
-# run ./setup.sh --yes.
-
-check_mk_version            = '$VERSION'
-default_config_dir          = '$confdir'
-check_mk_configdir          = '$confdir/conf.d'
-share_dir                   = '$sharedir'
-checks_dir                  = '$checksdir'
-notifications_dir           = '$notificationsdir'
-inventory_dir               = '$inventorydir'
-check_manpages_dir          = '$checkmandir'
-modules_dir                 = '$modulesdir'
-locale_dir                  = '$localedir'
-agents_dir                  = '$agentsdir'
-lib_dir                     = '$libdir'
-var_dir                     = '$vardir'
-log_dir                     = '$vardir/log'
-snmpwalks_dir               = '$vardir/snmpwalks'
-autochecksdir               = '$vardir/autochecks'
-precompiled_hostchecks_dir  = '$vardir/precompiled'
-counters_directory          = '$vardir/counters'
-tcp_cache_dir		    = '$vardir/cache'
-tmp_dir		            = '$vardir/tmp'
-logwatch_dir                = '$vardir/logwatch'
-nagios_objects_file         = '$nagconfdir/check_mk_objects.cfg'
-rrd_path                    = '$rrd_path'
-rrddcached_socket           = '$rrdcached_socket'
-nagios_command_pipe_path    = '$nagpipe'
-check_result_path           = '$check_result_path'
-nagios_status_file          = '$nagios_status_file'
-nagios_conf_dir             = '$nagconfdir'
-nagios_user                 = '$nagiosuser'
-logwatch_notes_url          = '${url_prefix}check_mk/logwatch.py?host=%s&file=%s'
-www_group                   = '$wwwgroup'
-nagios_config_file          = '$nagios_config_file'
-nagios_startscript          = '$nagios_startscript'
-nagios_binary               = '$nagios_binary'
-apache_config_dir           = '$apache_config_dir'
-htpasswd_file               = '$htpasswd_file'
-nagios_auth_name            = '$nagios_auth_name'
-web_dir                     = '$web_dir'
-livestatus_unix_socket      = '$livesock'
-livebackendsdir             = '$livebackendsdir'
-url_prefix                  = '$url_prefix'
-pnp_url                     = '${url_prefix}pnp4nagios/'
-pnp_templates_dir           = '$pnptemplates'
-doc_dir                     = '$docdir'
-EOF
-
-    if [ -n "$OMD_ROOT" ] ; then
-cat <<EOF
-
-# Special for OMD
-check_mk_automation         = None
-omd_site                    = '$OMD_SITE'
-omd_root                    = '$OMD_ROOT'
-tcp_cache_dir		    = '$OMD_ROOT/tmp/check_mk/cache'
-counters_directory          = '$OMD_ROOT/tmp/check_mk/counters'
-EOF
-   else
-cat <<EOF
-check_mk_automation         = 'sudo -u $(id -un) $bindir/check_mk --automation'
-EOF
-   fi
-}
-
-
 if [ -z "$YES" ]
 then
     echo
@@ -594,11 +532,11 @@ EOF
 
 compile_mkeventd ()
 {
-   local D=$SRCDIR/mkeventd.src
+   local D=$SRCDIR/bin
    rm -rf $D
    mkdir -p $D
-   tar xvzf $SRCDIR/mkeventd.tar.gz -C $D
-   pushd $D/src &&
+   tar xzf $SRCDIR/bin.tar.gz -C $D
+   pushd $D &&
    make &&
    popd
 }
@@ -802,8 +740,12 @@ do
 	   fi &&
            mkdir -p $DESTDIR$sharedir &&
            tar xzf $SRCDIR/share.tar.gz -C $DESTDIR$sharedir &&
+           mkdir -p $DESTDIR$python_lib_dir &&
+           tar xzf $SRCDIR/lib.tar.gz -C $DESTDIR$python_lib_dir &&
+           tar xzf $SRCDIR/base.tar.gz -C $DESTDIR$python_lib_dir &&
+           mkdir -p $DESTDIR$sharedir/werks &&
+           tar xzf $SRCDIR/werks.tar.gz -C $DESTDIR$sharedir/werks &&
 	   mkdir -p $DESTDIR$modulesdir &&
-	   create_defaults > $DESTDIR$modulesdir/defaults &&
            mkdir -p $DESTDIR$localedir &&
 	   mkdir -p $DESTDIR$checksdir &&
 	   tar xzf $SRCDIR/checks.tar.gz -C $DESTDIR$checksdir &&
@@ -813,7 +755,6 @@ do
 	   tar xzf $SRCDIR/inventory.tar.gz -C $DESTDIR$inventorydir &&
 	   mkdir -p $DESTDIR$web_dir &&
 	   tar xzf $SRCDIR/web.tar.gz -C $DESTDIR$web_dir &&
-	   cp $DESTDIR$modulesdir/defaults $DESTDIR$web_dir/htdocs/defaults.py &&
 	   mkdir -p $DESTDIR$pnptemplates &&
 	   tar xzf $SRCDIR/pnp-templates.tar.gz -C $DESTDIR$pnptemplates &&
 	   mkdir -p $DESTDIR$modulesdir &&
@@ -836,6 +777,8 @@ do
            fi &&
 	   mkdir -p $DESTDIR$confdir/conf.d &&
 	   if [ -z "$DESTDIR" ] ; then
+	     chgrp -R $wwwgroup $DESTDIR$vardir &&
+	     chmod -R g+w $DESTDIR$vardir &&
 	     chgrp -R $wwwgroup $DESTDIR$vardir/web &&
 	     chmod -R g+w $DESTDIR$vardir/web &&
 	     chgrp -R $wwwgroup $DESTDIR$vardir/log &&
@@ -1053,13 +996,9 @@ EOF
 	       compile_mkeventd 2>&1 | propeller > $SRCDIR/mkeventd.log
 	       if [ "${PIPESTATUS[0]}" = 0 ]
 	       then
-                   pushd $SRCDIR/mkeventd.src > /dev/null &&
-                   install -m 755 src/mkevent $DESTDIR$bindir &&
-                   install -m 4754 src/mkeventd_open514 -g $wwwgroup $DESTDIR$bindir &&
-                   install -m 644 checks/* $DESTDIR$checksdir &&
-                   install -m 755 bin/* $DESTDIR$bindir &&
-                   install -m 755 lib/* $DESTDIR${check_icmp_path%/*} &&
-                   cp -r web/* $DESTDIR$web_dir &&
+                   pushd $SRCDIR > /dev/null &&
+                   install -m 755 bin/mkevent bin/mkeventd $DESTDIR$bindir &&
+                   install -m 4754 bin/mkeventd_open514 -g $wwwgroup $DESTDIR$bindir &&
                    mkdir -p $DESTDIR$confdir/mkeventd.d/wato &&
                    chown $wwwuser.$wwwgroup $DESTDIR$confdir/mkeventd.d/wato &&
                    if [ ! -e "$DESTDIR$confdir/multisite.d/mkeventd.mk" ] ; then

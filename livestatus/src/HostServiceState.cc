@@ -17,22 +17,22 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <stdlib.h>
 #include "HostServiceState.h"
+#include <cstdlib>
 
-HostServiceState::~HostServiceState()
-{
-    if (_log_output != 0)
+HostServiceState::~HostServiceState() {
+    if (_log_output != nullptr) {
         free(_log_output);
+    }
 }
 
-void HostServiceState::computePerStateDurations()
-{
+#ifdef CMC
+void HostServiceState::computePerStateDurations() {
     _duration_state_UNMONITORED = 0;
     _duration_part_UNMONITORED = 0;
     _duration_state_OK = 0;
@@ -67,3 +67,4 @@ void HostServiceState::computePerStateDurations()
             break;
     }
 }
+#endif

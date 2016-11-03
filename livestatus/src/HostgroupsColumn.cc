@@ -17,68 +17,73 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "HostgroupsColumn.h"
-#include "nagios.h"
-#include "Query.h"
+#include "Renderer.h"
 
-objectlist *HostgroupsColumn::getData(void *data)
-{
-    if (data) {
+using std::make_unique;
+using std::string;
+using std::unique_ptr;
+
+objectlist *HostgroupsColumn::getData(void *data) {
+    if (data != nullptr) {
         data = shiftPointer(data);
-        if (data)
-            return *(objectlist **)((char *)data + _offset);
-    }
-    return 0;
-}
-
-void HostgroupsColumn::output(void *data, Query *query)
-{
-    query->outputBeginList();
-    objectlist *list = getData(data);
-    if (list) {
-        bool first = true;
-        while (list) {
-            hostgroup *sg = (hostgroup *)list->object_ptr;
-            if (!first)
-                query->outputListSeparator();
-            else
-                first = false;
-            query->outputString(sg->group_name);
-            list = list->next;
+        if (data != nullptr) {
+            return *reinterpret_cast<objectlist **>(
+                reinterpret_cast<char *>(data) + _offset);
         }
     }
-    query->outputEndList();
+    return nullptr;
 }
 
-void *HostgroupsColumn::getNagiosObject(char *name)
-{
-    return find_hostgroup(name);
-}
-
-bool HostgroupsColumn::isNagiosMember(void *data, void *nagobject)
-{
-    if (!nagobject || !data)
-        return false;
-
-    // data is already shifted (_indirect_offset is taken into account)
-    // But _offset needs still to be accounted for
-    objectlist *list = *(objectlist **)((char *)data + _offset);
-
-    while (list) {
-        if (list->object_ptr == nagobject)
-            return true;
-        list = list->next;
+void HostgroupsColumn::output(void *row, RowRenderer &r,
+                              contact * /* auth_user */) {
+    ListRenderer l(r);
+    for (objectlist *list = getData(row); list != nullptr; list = list->next) {
+        hostgroup *sg = reinterpret_cast<hostgroup *>(list->object_ptr);
+        l.output(string(sg->group_name));
     }
-    return false;
 }
 
-bool HostgroupsColumn::isEmpty(void *data)
-{
-    objectlist *list = *(objectlist **)((char *)data + _offset);
-    return list == 0;
+unique_ptr<ListColumn::Contains> HostgroupsColumn::makeContains(
+    const string &name) {
+    class ContainsHostGroup : public Contains {
+    public:
+        ContainsHostGroup(hostgroup *element, int offset)
+            : _element(element), _offset(offset) {}
+
+        bool operator()(void *row) override {
+            if (_element == nullptr || row == nullptr) {
+                return false;
+            }
+
+            // row is already shifted (_indirect_offset is taken into account),
+            // but _offset needs still to be accounted for
+            for (objectlist *list = *reinterpret_cast<objectlist **>(
+                     reinterpret_cast<char *>(row) + _offset);
+                 list != nullptr; list = list->next) {
+                if (list->object_ptr == _element) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+    private:
+        hostgroup *const _element;
+        const int _offset;
+    };
+
+    return make_unique<ContainsHostGroup>(
+        find_hostgroup(const_cast<char *>(name.c_str())), _offset);
+}
+
+bool HostgroupsColumn::isEmpty(void *data) {
+    objectlist *list = *reinterpret_cast<objectlist **>(
+        reinterpret_cast<char *>(data) + _offset);
+    return list == nullptr;
 }

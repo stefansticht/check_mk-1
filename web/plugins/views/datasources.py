@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -71,6 +71,12 @@
 #
 # ignore_limit: Ignore the soft/hard query limits in view.py/query_data(). This
 #               fixes stats queries on e.g. the log table.
+#
+# auth_domain: Querying a table might require to use another auth domain than
+#              the default one (read). When this is set, the given auth domain
+#              will be used while fetching the data for this datasource from
+#              livestatus.
+#
 
 multisite_datasources["hosts"] = {
     "title"   : _("All hosts"),
@@ -182,7 +188,7 @@ multisite_datasources["comments"] = {
     "title"    : _("Host- and Servicecomments"),
     "table"    : "comments",
     "infos"    : [ "comment", "host", "service" ],
-    "keys"     : [ "comment_id", "comment_type" ],
+    "keys"     : [ "comment_id", "comment_type", "host_name", "service_description" ],
     "idkeys"   : [ "comment_id" ],
 }
 
@@ -206,7 +212,7 @@ multisite_datasources["log"] = {
 multisite_datasources["log_events"] = {
     "title"       : _("Host and Service Events"),
     "table"       : "log",
-    "add_headers" : "Filter: class = 1\nFilter: class = 3\nOr: 2\n",
+    "add_headers" : "Filter: class = 1\nFilter: class = 3\nFilter: class = 8\nOr: 3\n",
     "infos"       : [ "log", "host", "service" ],
     "keys"        : [],
     "idkeys"      : [ "log_lineno" ],
@@ -216,7 +222,7 @@ multisite_datasources["log_events"] = {
 multisite_datasources["log_host_events"] = {
     "title"       : _("Host Events"),
     "table"       : "log",
-    "add_headers" : "Filter: class = 1\nFilter: class = 3\nOr: 2\nFilter: service_description = \n",
+    "add_headers" : "Filter: class = 1\nFilter: class = 3\nFilter: class = 8\nOr: 3\nFilter: service_description = \n",
     "infos"       : [ "log", "host" ],
     "keys"        : [],
     "idkeys"      : [ "log_lineno" ],
@@ -233,4 +239,52 @@ multisite_datasources["alert_stats"] = {
     "idkeys"       : [ 'host_name', 'service_description' ],
     "ignore_limit" : True,
     "time_filters" : [ "logtime" ],
+}
+
+# The livestatus query constructed by the filters of the view may
+# contain filters that are related to the discovery info and should only be
+# handled here. We need to extract them from the query, hand over the regular
+# filters to the host livestatus query and apply the others during the discovery
+# service query.
+def query_service_discovery(columns, query, only_sites, limit, all_active_filters):
+    # Hard code the discovery service filter
+    query += "Filter: check_command = check-mk-inventory\n"
+
+    if "long_plugin_output" not in columns:
+        columns.append("long_plugin_output")
+
+    service_rows = do_query_data("GET services\n", columns, [], [], query, only_sites, limit, "read")
+
+    rows = []
+    for row in service_rows:
+        for service_line in row["long_plugin_output"].split("\n"):
+            if not service_line:
+                continue
+
+            parts = map(lambda s: s.strip(), service_line.split(":", 2))
+            if len(parts) != 3:
+                continue
+
+            state, check, service_description = parts
+            if state not in ["ignored", "vanished", "unmonitored"]:
+                continue
+
+            this_row = row.copy()
+            this_row.update({
+                "discovery_state"   : state,
+                "discovery_check"   : check,
+                "discovery_service" : service_description
+            })
+            rows.append(this_row)
+
+    return rows
+
+
+multisite_datasources["service_discovery"] = {
+    "title"       : _("Service discovery"),
+    "table"       : query_service_discovery,
+    "add_columns" : [ "discovery_state", "discovery_check", "discovery_service" ],
+    "infos"       : [ "host", "discovery" ],
+    "keys"        : [],
+    "idkeys"      : [ "host_name" ]
 }

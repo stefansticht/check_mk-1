@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,57 +25,75 @@
 #ifndef TableStateHistory_h
 #define TableStateHistory_h
 
+#include "config.h"  // IWYU pragma: keep
 #include <map>
-#include <time.h>
-#include "config.h"
-#include "string.h"
-#include "logger.h"
-#include "nagios.h"
-#include "Logfile.h"
+#include <string>
 #include "LogCache.h"
-#include "Query.h"
+#include "Logfile.h"
+#include "Table.h"
+#include "nagios.h"  // IWYU pragma: keep
+class Column;
+#ifdef CMC
+#include <mutex>
+#include "Notes.h"
+class Core;
+#else
+class DowntimesOrComments;
+class Logger;
+#endif
+class Query;
+class HostServiceState;
+class LogEntry;
 
 #define CLASSMASK_STATEHIST 0xC6
 
-class HostServiceState;
+class TableStateHistory : public Table {
+#ifdef CMC
+    Core *_core;
+#endif
+    LogCache *_log_cache;
 
-class TableStateHistory : public Table
-{
-    int      _query_timeframe;
-    Query   *_query;
-    int      _since;
-    int      _until;
+    int _query_timeframe;
+    Query *_query;
+    int _since;
+    int _until;
 
     // Notification periods information, name: active(1)/inactive(0)
-    typedef map<string, int> _notification_periods_t;
-    _notification_periods_t  _notification_periods;
+    std::map<std::string, int> _notification_periods;
 
     // Helper functions to traverse through logfiles
-    _logfiles_t::iterator         _it_logs;
-    logfile_entries_t            *_entries;
-    logfile_entries_t::iterator   _it_entries;
-    LogEntry                     *_current_entry;
+    _logfiles_t::iterator _it_logs;
+    logfile_entries_t *_entries;
+    logfile_entries_t::iterator _it_entries;
 
 protected:
-    bool     _abort_query;
+    bool _abort_query;
 
 public:
-    TableStateHistory();
-    const char *name() { return "statehist"; }
-    const char *prefixname() { return "statehist_"; }
-    bool isAuthorized(contact *ctc, void *data);
-    void handleNewMessage(Logfile *logfile, time_t since, time_t until, unsigned logclasses);
-    void answerQuery(Query *query);
-    Column *column(const char *colname); // override in order to handle current_
-    int updateHostServiceState(Query *query, const LogEntry *entry, HostServiceState *state, const bool only_update);
-    static void addColumns(Table *);
+#ifdef CMC
+    TableStateHistory(LogCache *log_cache, const Downtimes &downtimes_holder,
+                      const Comments &comments_holder,
+                      std::recursive_mutex &holder_lock, Core *core);
+#else
+    TableStateHistory(LogCache *log_cache,
+                      const DowntimesOrComments &downtimes_holder,
+                      const DowntimesOrComments &comments_holder,
+                      Logger *logger);
+#endif
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+    bool isAuthorized(contact *ctc, void *data) override;
+    Column *column(std::string colname) override;
 
 private:
-    LogEntry* getPreviousLogentry();
-    LogEntry* getNextLogentry();
-    void      process(Query *query, HostServiceState *hs_state);
-    bool      objectFilteredOut(Query *, void *entry);
+    LogEntry *getPreviousLogentry();
+    LogEntry *getNextLogentry();
+    void process(Query *query, HostServiceState *hs_state);
+    int updateHostServiceState(Query *query, const LogEntry *entry,
+                               HostServiceState *hs_state,
+                               const bool only_update);
 };
 
-
-#endif // TableStateHistory_h
+#endif  // TableStateHistory_h

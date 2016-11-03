@@ -10,20 +10,6 @@ description:
 item:
  None
 
-perfdata:
- Temperature
- External Tempreature
- Humidty
-
 inventory:
  One service will be created
 
-[parameters]
-parameters (dict): One Tuple for each sensor
-
- warning (int): The lower limit which triggers a WARNING state
-
- critical (int): The lower limit which triggers a CRITICAL state
-
-[configuration]
-ups_eaton_enviroment_default (dict): Default warning and critical level for each sensor

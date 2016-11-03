@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -27,15 +27,18 @@
 import wato
 
 pagehandlers.update({
-    "wato"                    : wato.page_handler,
-    "wato_ajax_replication"   : wato.ajax_replication,
-    "wato_ajax_activation"    : wato.ajax_activation,
-    "automation_login"        : wato.page_automation_login,
-    "noauth:automation"       : wato.page_automation,
-    "user_profile"            : wato.page_user_profile,
-    "user_change_pw"          : lambda: wato.page_user_profile(change_pw=True),
-    "ajax_set_foldertree"     : wato.ajax_set_foldertree,
-    "wato_ajax_diag_host"     : wato.ajax_diag_host,
-    "wato_ajax_profile_repl"  : wato.ajax_profile_repl,
-    "wato_ajax_execute_check" : wato.ajax_execute_check,
+    "wato"                      : wato.page_handler,
+    "wato_ajax_replication"     : wato.ajax_replication,
+    "wato_ajax_activation"      : wato.ajax_activation,
+    "automation_login"          : wato.page_automation_login,
+    "noauth:automation"         : wato.page_automation,
+    "user_profile"              : wato.page_user_profile,
+    "user_change_pw"            : lambda: wato.page_user_profile(change_pw=True),
+    "ajax_set_foldertree"       : wato.ajax_set_foldertree,
+    "wato_ajax_diag_host"       : wato.ajax_diag_host,
+    "wato_ajax_profile_repl"    : wato.ajax_profile_repl,
+    "wato_ajax_execute_check"   : wato.ajax_execute_check,
+    "download_agent_output"     : wato.page_download_agent_output,
+    "ajax_popup_move_to_folder" : wato.ajax_popup_move_to_folder,
+    "ajax_backup_job_state"     : lambda: wato.ModeAjaxBackupJobState().page(),
 })

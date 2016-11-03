@@ -20,21 +20,6 @@ description:
 item:
  The MSSQL instance name and the tablespace name separated by a space.
 
-examples:
- # Set global default values. Raise critical if last successful
- # backup is older than 1 hour (3600 seconds) and warning if it
- # is older than 30 minutes.
- mssql_backup_default_levels = (1800, 3600)
-
-perfdata:
- One value: the number of seconds since the last backup.
-
 inventory:
  One separate check for each tablespace will be created.
 
-[parameters]
-warn_seconds(int): Check will raise a warning state if last backup is older than this value.
-crit_seconds(int): Check will raise a critical state if last backup is older than this value.
-
-[configuration]
-mssql_backup_default_levels(int, int): Global default level. This is preset to {None}, which dsiables the thresholds.

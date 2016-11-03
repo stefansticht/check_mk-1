@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -28,6 +28,11 @@ def inventory_jolokia_info(info):
     return [ (line[0], None) for line in info if line[1] != 'ERROR' ]
 
 def check_jolokia_info(item, _no_params, info):
+
+    # Inform user of non-working agent plugin, eg. missing json library
+    if info[0][0] == "Error:":
+        return 3, " ".join(info[0])
+
     for line in info:
         if line[0] == item:
             if line[1] == 'ERROR' or len(line) < 4:
@@ -43,6 +48,5 @@ check_info["jolokia_info"] = {
     "service_description" : "JVM %s",
     "check_function"      : check_jolokia_info,
     "inventory_function"  : inventory_jolokia_info,
-    "has_perfdata"        : False,
 }
 

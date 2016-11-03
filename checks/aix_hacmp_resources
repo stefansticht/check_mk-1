@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -61,12 +61,10 @@ def check_aix_hacmp_resources(item, params, parsed):
             resource_stats.append(resource_status)
             infotext += "%s on node %s, " % (resource_status, node_name)
 
-        if 'online' in resource_stats:
-            state = 0
-        else:
-            state = 1
-
-        if 'error' in resource_stats:
+        # The first node is always online in an OK scenario
+        # Something is wrong if an other node is online
+        state = 0
+        if resource_stats[0] != "online":
             state = 2
 
         return state, infotext[:-2]

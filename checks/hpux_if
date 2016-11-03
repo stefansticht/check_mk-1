@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -67,8 +67,8 @@ def hpux_convert_to_if64(info):
             nics.append(nic)
             nic[2] = '6' # fake port type Ethernet
         elif '=' in line:
-            x = " ".join(line)
-            left, right = x.split("=")
+            line_txt = " ".join(line)
+            left, right = line_txt.split("=")
             left = left.strip()
             right = right.strip()
             if left == "PPA Number":

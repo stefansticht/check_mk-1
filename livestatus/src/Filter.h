@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,42 +25,30 @@
 #ifndef Filter_h
 #define Filter_h
 
-#include "config.h"
-
-#include <vector>
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
 #include <string>
-#include <stdint.h>
+class FilterVisitor;
 
-using namespace std;
-class Query;
-class Column;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
 
-class Filter
-{
-    string _error_message; // Error in constructor
-    unsigned _error_code;
-    Column *_column;
-
-protected:
-    Query *_query; // needed by TimeOffsetFilter (currently)
-    void setError(unsigned code, const char *format, ...);
-
+class Filter {
 public:
-    Filter() : _query(0), _column(0) {}
-    virtual ~Filter() {}
-    virtual bool isAndingFilter() { return false; }
-    virtual bool isNegatingFilter() { return false; }
-    string errorMessage() { return _error_message; }
-    unsigned errorCode() { return _error_code; }
-    bool hasError() { return _error_message != ""; }
-    void setQuery(Query *q) { _query = q; }
-    void setColumn(Column *c) { _column = c; }
-    Column *column() { return _column; }
-    virtual bool accepts(void *data) = 0;
-    virtual void *indexFilter(const char *columnname __attribute__ ((__unused__))) { return 0; }
-    virtual void findIntLimits(const char *columnname __attribute__ ((__unused__)), int *lower __attribute__ ((__unused__)), int *upper __attribute__ ((__unused__))) {}
-    virtual bool optimizeBitmask(const char *columnname __attribute__ ((__unused__)), uint32_t *mask __attribute__ ((__unused__))) { return false; }
+    virtual ~Filter();
+    virtual void accept(FilterVisitor &) = 0;
+
+    virtual bool accepts(void *row, contact *auth_user,
+                         int timezone_offset) = 0;
+    virtual const std::string *valueForIndexing(
+        const std::string &column_name) const;
+    virtual void findIntLimits(const std::string &column_name, int *lower,
+                               int *upper, int timezone_offset) const;
+    virtual bool optimizeBitmask(const std::string &column_name, uint32_t *mask,
+                                 int timezone_offset) const;
 };
 
-#endif // Filter_h
-
+#endif  // Filter_h

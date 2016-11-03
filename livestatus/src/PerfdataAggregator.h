@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,32 +25,37 @@
 #ifndef PerfdataAggregator_h
 #define PerfdataAggregator_h
 
+#include "config.h"  // IWYU pragma: keep
 #include <map>
 #include <string>
 #include "Aggregator.h"
-
+class RowRenderer;
 class StringColumn;
 
-struct perf_aggr {
-    double _aggr;
-    double _count;
-    double _sumq;
-};
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
 
-class PerfdataAggregator : public Aggregator
-{
-    StringColumn *_column;
-    typedef std::map<std::string, perf_aggr> _aggr_t;
-    _aggr_t _aggr;
-
+class PerfdataAggregator : public Aggregator {
 public:
-    PerfdataAggregator(StringColumn *c, int o) : Aggregator(o), _column(c) {}
-    void consume(void *data, Query *);
-    void output(Query *);
+    PerfdataAggregator(StatsOperation operation, StringColumn *column)
+        : Aggregator(operation), _column(column) {}
+    void consume(void *row, contact *auth_user, int timezone_offset) override;
+    void output(RowRenderer &r) override;
 
 private:
-    void consumeVariable(const char *varname, double value);
+    struct perf_aggr {
+        double _aggr;
+        double _count;
+        double _sumq;
+    };
+
+    StringColumn *const _column;
+    std::map<std::string, perf_aggr> _aggr;
+
+    void consumeVariable(const std::string &varname, double value);
 };
 
-#endif // PerfdataAggregator_h
-
+#endif  // PerfdataAggregator_h

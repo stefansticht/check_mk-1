@@ -17,42 +17,64 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-SHELL           = /bin/bash
-VERSION        	= 1.2.7i3
-NAME           	= check_mk
-PREFIX         	= /usr
-BINDIR         	= $(PREFIX)/bin
-CONFDIR	       	= /etc/$(NAME)
-LIBDIR	       	= $(PREFIX)/lib/$(NAME)
-DISTNAME       	= $(NAME)-$(VERSION)
-TAROPTS        	= --owner=root --group=root --exclude=.svn --exclude=*~ \
-		  --exclude=.gitignore --exclude=*.swp --exclude=.f12
+SHELL              := /bin/bash
+VERSION            := 1.4.0i2
+NAME               := check_mk
+PREFIX             := /usr
+BINDIR             := $(PREFIX)/bin
+CONFDIR            := /etc/$(NAME)
+LIBDIR             := $(PREFIX)/lib/$(NAME)
+DISTNAME           := $(NAME)-$(VERSION)
+TAROPTS            := --owner=root --group=root --exclude=.svn --exclude=*~ \
+                      --exclude=.gitignore --exclude=*.swp --exclude=.f12
+CXX_FLAGS          := -g -O3 -Wall -Wextra
+
+CLANG_VERSION      := 3.9
+CLANG_FORMAT       := clang-format-$(CLANG_VERSION)
+CLANG_TIDY         := clang-tidy-$(CLANG_VERSION)
+SCAN_BUILD         := scan-build-$(CLANG_VERSION)
+CPPCHECK           := cppcheck
+DOXYGEN            := doxygen
+IWYU_TOOL          := iwyu_tool.py
+BEAR               := bear
 
 # File to pack into livestatus-$(VERSION).tar.gz
-LIVESTATUS_SOURCES = configure aclocal.m4 config.guess config.h.in config.sub \
-		     configure.ac ltmain.sh Makefile.am Makefile.in missing \
-		     nagios/README nagios/*.h nagios4/README nagios4/*.h \
-		     src/*.{h,c,cc} src/Makefile.{in,am} \
-		     depcomp install-sh api/python/{*.py,README} api/perl/*
+LIVESTATUS_AUTO    := aclocal.m4 ar-lib compile config.h.in configure depcomp \
+                      install-sh Makefile.in missing src/Makefile.in
+LIVESTATUS_SOURCES := $(LIVESTATUS_AUTO) config.guess config.sub configure.ac \
+                      ltmain.sh Makefile.am nagios/README nagios/*.h \
+                      nagios4/README m4/* nagios4/*.h src/*.{h,cc} \
+                      src/Makefile.am api/python/{*.py,README} api/perl/*
 
 # Files that are checked for trailing spaces
-HEAL_SPACES_IN = checkman/* modules/* checks/* notifications/* inventory/* \
-               $$(find -name Makefile) livestatus/src/*{cc,c,h} agents/windows/*.cc \
-	       web/htdocs/*.{py,css} web/htdocs/js/*.js web/plugins/*/*.py \
-               doc/helpers/* scripts/setup.sh scripts/autodetect.py \
-	       $$(find pnp-templates -type f -name "*.php") \
-               mkeventd/bin/mkeventd mkeventd/web/htdocs/*.py mkeventd/web/plugins/*/*.py \
-	       mkeventd/src/*.c mkeventd/checks/* check_mk_templates.cfg \
-	       agents/check_mk_*agent* agents/*.c agents/cfg_examples/* \
-	       agents/special/* $$(find agents/plugins -type f)
+HEAL_SPACES_IN     := checkman/* modules/* checks/* notifications/* inventory/* \
+                      $$(find -name Makefile) livestatus/src/*.{cc,h} \
+                      agents/windows/*.cc \
+                      web/htdocs/*.{py,css} web/htdocs/js/*.js web/plugins/*/*.py \
+                      doc/helpers/* scripts/setup.sh scripts/autodetect.py \
+                      $$(find pnp-templates -type f -name "*.php") \
+                      bin/mkeventd bin/*.c doc/treasures/active_checks/* \
+                      check_mk_templates.cfg \
+                      agents/check_mk_*agent* agents/*.c \
+                      $$(find agents/cfg_examples -type f) \
+                      agents/special/* \
+                      $$(find agents/plugins -type f)
 
+FILES_TO_FORMAT    := $(wildcard $(addprefix agents/,*.cc *.c *.h)) \
+                      $(wildcard $(addprefix agents/windows/,*.cc *.c *.h)) \
+                      $(wildcard $(addprefix livestatus/api/c++/,*.cc *.h)) \
+                      $(wildcard $(addprefix livestatus/src/,*.cc *.h)) \
+                      $(wildcard $(addprefix bin/,*.cc *.c *.h))
 
-.PHONY: help install clean
+.PHONY: all analyze check check-binaries check-permissions check-spaces \
+        check-version clean cppcheck dist documentation format git-clean \
+        GTAGS headers healspaces help iwyu minify-js mk-livestatus mrproper \
+        optimize-images packages setup setversion tidy version
 
 all: dist packages
 
@@ -76,19 +98,30 @@ check-binaries:
 
 check: check-spaces check-permissions check-binaries check-version
 
-dist: mk-livestatus mk-eventd
+dist: mk-livestatus
 	@echo "Making $(DISTNAME)"
 	rm -rf $(DISTNAME)
 	mkdir -p $(DISTNAME)
+	tar czf $(DISTNAME)/bin.tar.gz $(TAROPTS) -C bin $$(cd bin ; ls)
+	pycompile lib ; \
+	  tar czf $(DISTNAME)/lib.tar.gz $(TAROPTS) -C lib \
+	    --transform 's|^|cmk/|g' $$(cd lib ; ls) ; \
+	  rm lib/*.pyc
+	pycompile cmk_base ; \
+	  tar czf $(DISTNAME)/base.tar.gz $(TAROPTS) cmk_base/*.py* ; \
+	  rm cmk_base/*.pyc
 	tar czf $(DISTNAME)/share.tar.gz $(TAROPTS) check_mk_templates.cfg
+	tar czf $(DISTNAME)/werks.tar.gz $(TAROPTS) -C .werks $$(cd .werks ; ls [0-9]*)
 	tar czf $(DISTNAME)/checks.tar.gz $(TAROPTS) -C checks $$(cd checks ; ls)
 	tar czf $(DISTNAME)/notifications.tar.gz $(TAROPTS) -C notifications $$(cd notifications ; ls)
 	tar czf $(DISTNAME)/inventory.tar.gz $(TAROPTS) -C inventory $$(cd inventory ; ls)
 	tar czf $(DISTNAME)/checkman.tar.gz $(TAROPTS) -C checkman $$(cd checkman ; ls)
 	$(MAKE) minify-js
 	tar czf $(DISTNAME)/web.tar.gz $(TAROPTS) -C web htdocs plugins
-	tar czf $(DISTNAME)/livestatus.tar.gz $(TAROPTS) -C livestatus  $$(cd livestatus ; echo $(LIVESTATUS_SOURCES) )
-	tar czf $(DISTNAME)/mkeventd.tar.gz $(TAROPTS) -C mkeventd  $$(cd mkeventd ; echo * )
+
+	tar cf $(DISTNAME)/livestatus.tar $(TAROPTS) -C livestatus  $$(cd livestatus ; echo $(LIVESTATUS_SOURCES) )
+	gzip $(DISTNAME)/livestatus.tar
+
 	tar czf $(DISTNAME)/pnp-templates.tar.gz $(TAROPTS) -C pnp-templates $$(cd pnp-templates ; ls *.php)
 	tar cf $(DISTNAME)/doc.tar $(TAROPTS) -C doc $$(cd doc ; ls)
 	tar rf $(DISTNAME)/doc.tar $(TAROPTS) COPYING AUTHORS ChangeLog
@@ -115,6 +148,7 @@ dist: mk-livestatus mk-eventd
 		--exclude "*~" \
 		--exclude "Makefile" \
 		--exclude "crash.exe" \
+		--exclude "openhardwaremonitor" \
 		--exclude .f12 $$(cd agents ; ls)
 	cd $(DISTNAME) ; ../make_package_info $(VERSION) > package_info
 	install -m 755 scripts/*.{sh,py} $(DISTNAME)
@@ -129,15 +163,7 @@ dist: mk-livestatus mk-eventd
 packages:
 	$(MAKE) -C agents packages
 
-mk-eventd:
-	tar -c $(TAROPTS) --exclude=.f12 \
-	    --transform 's,^mkeventd,mkeventd-$(VERSION),' \
-	    -zf mkeventd-$(VERSION).tar.gz mkeventd
-
-mk-livestatus:
-	if [ ! -e livestatus/configure ] ; then \
-		cd livestatus && aclocal && autoheader && automake -a && autoconf ; \
-	fi
+mk-livestatus: $(addprefix livestatus/,$(LIVESTATUS_AUTO))
 	rm -rf mk-livestatus-$(VERSION)
 	mkdir -p mk-livestatus-$(VERSION)
 	cd livestatus ; tar cf - $(LIVESTATUS_SOURCES) | tar xf - -C ../mk-livestatus-$(VERSION)
@@ -163,15 +189,19 @@ version:
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 13.04" \
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 13.10" \
           -o "$$(head -c 12 /etc/issue)" = "Ubuntu 14.04" \
+          -o "$$(head -c 12 /etc/issue)" = "Ubuntu 15.04" \
+          -o "$$(head -c 12 /etc/issue)" = "Ubuntu 15.10" \
+          -o "$$(head -c 12 /etc/issue)" = "Ubuntu 16.04" \
           -o "$$(head -c 20 /etc/issue)" = "Debian GNU/Linux 6.0" ] \
           || { echo 'You are not on the reference system!' ; exit 1; }
 	@newversion=$$(dialog --stdout --inputbox "New Version:" 0 0 "$(VERSION)") ; \
 	if [ -n "$$newversion" ] ; then $(MAKE) NEW_VERSION=$$newversion setversion ; fi
 
 setversion:
-	sed -ri 's/^(VERSION[[:space:]]*= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
+	sed -ri 's/^(VERSION[[:space:]]*:?= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
 	sed -i 's/^AC_INIT.*/AC_INIT([MK Livestatus], ['"$(NEW_VERSION)"'], [mk@mathias-kettner.de])/' livestatus/configure.ac ; \
-	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' mkeventd/bin/mkeventd ; \
+	sed -i 's/^VERSION=".*/VERSION="$(NEW_VERSION)"/' bin/mkeventd bin/mkbackup ; \
+	sed -i 's/^__version__ = ".*"$$/__version__ = "$(NEW_VERSION)"/' lib/__init__.py ; \
 	sed -i 's/^VERSION=.*/VERSION='"$(NEW_VERSION)"'/' scripts/setup.sh ; \
 	echo 'check-mk_$(NEW_VERSION)-1_all.deb net optional' > debian/files
 	$(MAKE) -C agents NEW_VERSION=$(NEW_VERSION) setversion
@@ -222,15 +252,79 @@ minify-js:
 	    echo "Missing slimit, not minifying javascript files! (run \"make setup\" to fix this)" ; \
 	fi
 
+# TODO(sp) The target below is not correct, we should not e.g. remove any stuff
+# which is needed to run configure, this should live in a separate target. In
+# fact, we should really clean up all this cleaning-chaos and finally follow the
+# GNU standards here (see "Standard Targets for Users",
+# https://www.gnu.org/prep/standards/html_node/Standard-Targets.html).
 clean:
-	rm -rf dist.tmp rpm.topdir *.rpm *.deb *.exe \
-	       mkeventd-*.tar.gz mk-livestatus-*.tar.gz \
+	rm -rf api clang-analyzer compile_commands.json dist.tmp rpm.topdir *.rpm *.deb *.exe \
+	       mk-livestatus-*.tar.gz \
 	       $(NAME)-*.tar.gz *~ counters autochecks \
-	       precompiled cache web/htdocs/js/*_min.js
+	       precompiled cache web/htdocs/js/*_min.js \
+               $(addprefix livestatus/,$(LIVESTATUS_AUTO))
 	find -name "*~" | xargs rm -f
 
 mrproper:
-	git clean -xfd -e .bugs 2>/dev/null || git clean -xfd
+	git clean -d --force -x \
+            --exclude='\.bugs/.last' \
+            --exclude='\.bugs/.my_ids' \
+            --exclude='\.werks/.last' \
+            --exclude='\.werks/.my_ids'
 
 setup:
-	sudo apt-get install figlet pngcrush slimit
+	sudo apt-get install figlet pngcrush slimit bear dietlibc-dev
+
+$(addprefix %/,$(LIVESTATUS_AUTO)): $(addprefix %/,configure.ac m4/* Makefile.am src/Makefile.am)
+	@echo "making $@: $? is newer"
+	cd livestatus && autoreconf --install --include=m4
+
+livestatus/config.h: livestatus/configure livestatus/config.h.in
+	@echo "making $@: $? is newer"
+	cd livestatus && ./configure CXXFLAGS="$(CXX_FLAGS)"
+
+GTAGS: livestatus/config.h
+	$(MAKE) -C livestatus distclean-tags
+	$(MAKE) -C livestatus GTAGS
+
+compile_commands.json: livestatus/config.h $(FILES_TO_FORMAT)
+	@echo "making $@: $? is newer"
+	$(MAKE) -C livestatus clean
+	$(BEAR) $(MAKE) -C livestatus -j8
+
+tidy: compile_commands.json
+	@./compiled_sources | xargs $(CLANG_TIDY) --extra-arg=-D__clang_analyzer__
+
+# Not really perfect rules, but better than nothing
+iwyu: compile_commands.json
+	@$(IWYU_TOOL) -p .
+
+# Not really perfect rules, but better than nothing
+analyze: livestatus/config.h
+	$(MAKE) -C livestatus clean
+	cd livestatus && $(SCAN_BUILD) -o ../clang-analyzer $(MAKE) CXXFLAGS="-std=c++14"
+
+# TODO: Repeating the include paths in the cppcheck targets below is ugly and
+# fragile.
+
+# GCC-like output on stderr intended for human consumption.
+cppcheck: compile_commands.json
+	@./compiled_sources | \
+	sed 's/^"\(.*\)"$$/\1/' | \
+	$(CPPCHECK) --max-configs=16 -UCMC --enable=all --suppress=missingIncludeSystem --inline-suppr -I livestatus/src -I livestatus --file-list=- --quiet --template=gcc
+
+# XML output into file intended for machine processing.
+cppcheck-xml: compile_commands.json
+	@./compiled_sources | \
+	sed 's/^"\(.*\)"$$/\1/' | \
+	$(CPPCHECK) --max-configs=16 -UCMC --enable=all --suppress=missingIncludeSystem --inline-suppr -I livestatus/src -I livestatus --file-list=- --quiet --template=gcc --xml --xml-version=2 2> cppcheck-result.xml
+
+# TODO: We should probably handle this rule via AM_EXTRA_RECURSIVE_TARGETS in
+# src/configure.ac, but this needs at least automake-1.13, which in turn is only
+# available from e.g. Ubuntu Saucy (13) onwards, so some magic is needed.
+format:
+	$(CLANG_FORMAT) -style=file -i $(FILES_TO_FORMAT)
+
+# Note: You need the doxygen and graphviz packages.
+documentation: livestatus/config.h
+	$(DOXYGEN) doc/Doxyfile

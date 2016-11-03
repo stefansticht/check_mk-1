@@ -17,23 +17,26 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "TimePointerColumn.h"
-#include "TimeColumnFilter.h"
-#include "Query.h"
+#include <chrono>
+#include "Renderer.h"
+#include "TimeFilter.h"
+#include "opids.h"
 
-void TimePointerColumn::output(void *data, Query *query)
-{
-    query->outputTime(getValue(data, query));
+using std::chrono::system_clock;
+using std::string;
+
+void TimePointerColumn::output(void *row, RowRenderer &r, contact *auth_user) {
+    r.output(system_clock::from_time_t(getValue(row, auth_user)));
 }
 
-Filter *TimePointerColumn::createFilter(int operator_id, char *value)
-{
-    // The TimeColumnFilter applies the timezone offset
-    // from the Localtime: header
-    return new TimeColumnFilter(this, operator_id, value);
+Filter *TimePointerColumn::createFilter(RelationalOperator relOp,
+                                        const string &value) {
+    // The TimeFilter applies the timezone offset from the Localtime: header
+    return new TimeFilter(this, relOp, value);
 }

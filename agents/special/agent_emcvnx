@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # -*- encoding: utf-8; py-indent-offset: 4 -*-
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -39,7 +39,7 @@
 # <-mirrorview><-snapviews><-sancopy><-reserved> <-cloneview><-metalun>
 # <-migration><-ioportconfig> <-fastcache><-backendbus>
 
-import sys, os, getopt, re
+import sys, os, getopt, re, subprocess
 
 import inspect, pprint # FOR DEBUGGING
 
@@ -103,11 +103,14 @@ mortypes       = [ 'all' ]
 fetch_agent_info = False
 
 naviseccli_options = {
-    "disks"      : {"cmd_option" : "-disk",  "active" : False},
-    "hba"        : {"cmd_option" : "-hba",   "active" : False},
-    "hwstatus"   : {"cmd_option" : "-array", "active" : False},
-    "raidgroups" : {"cmd_option" : "-rg",    "active" : False},
-#   "agent-info" : {"cmd_option" : "-sp",    "active" : False},
+    "disks"       : {"cmd_option" : "getall -disk",     "active" : False, "sep" : None},
+    "hba"         : {"cmd_option" : "getall -hba",      "active" : False, "sep" : None},
+    "hwstatus"    : {"cmd_option" : "getall -array",    "active" : False, "sep" : None},
+    "raidgroups"  : {"cmd_option" : "getall -rg",       "active" : False, "sep" : None},
+#   "agent-info"  : {"cmd_option" : "-sp",              "active" : False, "sep" : None},
+    "sp_util"     : {"cmd_option" : "getcontrol -cbt",  "active" : False, "sep" : 58},
+    "writecache"  : {"cmd_option" : "getcache -wst",    "active" : False, "sep" : None},
+    "mirrorview"  : {"cmd_option" : "mirrorview -list", "active" : False, "sep" : 58},
 }
 
 for o,a in opts:
@@ -165,27 +168,39 @@ except ValueError:
 
 if (user == None or user == '') and (password == None or password == ''):
     # try using security files
-    basecmd="naviseccli -h %s " % host_address
+    basecmd = "naviseccli -h %s " % host_address
 else:
-    basecmd="naviseccli -h %s -User %s -Password '%s' -Scope 0 " % (host_address, user, password)
+    basecmd = "naviseccli -h %s -User %s -Password '%s' -Scope 0 " % (host_address, user, password)
 
 #
 # check_mk section of agent output
 #
 
-print "<<<check_mk>>>"
-cmd=basecmd + "getall -sp"
+cmd = basecmd + "getall -sp"
 if opt_debug:
     sys.stderr.write("executing external command: %s\n" % cmd)
 
-cmdout = []
-for line in os.popen(cmd).readlines():
-    line = line.strip()
-    cmdout.append(line)
+# Now read the whole output of the command
+cmdout = [ l.strip() for l in os.popen(cmd + " 2>&1").readlines() ]
+
+if cmdout:
+    if "naviseccli: not found" in cmdout[0]:
+        sys.stderr.write("The command \"naviseccli\" could not be found. Terminating.\n")
+        sys.exit(1)
+
+    elif cmdout[0].startswith("Security file not found"):
+        sys.stderr.write("Could not find security file. Please provide valid user "
+                         "credentials if you don't have a security file.\n")
+        sys.exit(1)
+
+# Try to gather the version of the agent
+emcvnx_version = None
+for line in cmdout:
     tokens = re.split("\s+", line)
     if tokens[0] == "Agent" and tokens[1] == "Rev:":
         emcvnx_version = "_".join(tokens[2:])
 
+print "<<<check_mk>>>"
 print "Version: %s" % emcvnx_version
 
 # maybe we could fill AgentOS: by reading "Model:" line of naviseccli output
@@ -212,8 +227,12 @@ if fetch_agent_info:
 #
 for module in naviseccli_options.keys():
     if naviseccli_options[module]["active"] == True:
-        print "<<<emcvnx_%s>>>" % module
-        cmd=basecmd + "getall " + naviseccli_options[module]["cmd_option"]
+        separator = naviseccli_options[module]["sep"]
+        if separator:
+            print "<<<emcvnx_%s:sep(%s)>>>" % (module, separator)
+        else:
+            print "<<<emcvnx_%s>>>" % module
+        cmd=basecmd + naviseccli_options[module]["cmd_option"]
         if opt_debug:
             sys.stderr.write("executing external command: %s\n" % cmd)
         for line in os.popen(cmd).readlines():

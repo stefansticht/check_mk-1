@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -27,7 +27,7 @@
 # TODO Graphingsystem:
 # - Default-Template: Wenn im Graph kein "range" angegeben ist, aber
 # in der Unit eine "range"-Angabe ist, dann soll diese genommen werden.
-# "%" und "ratio". Und dann sämtliche Schablonen, die nur wegen Range
+# Und dann sämtliche Schablonen, die nur wegen Range
 # 0..100 da sind, wieder durch generic ersetzen.
 
 # Metric definitions for Check_MK's checks
@@ -42,39 +42,50 @@
 #   +----------------------------------------------------------------------+
 #   |  Definition of units of measurement.                                 |
 #   '----------------------------------------------------------------------'
+# Optional attributes of units:
+#
+#   stepping: FIXME: Describe this
+#
+#   graph_unit: Compute a common unit for the whole graph. This is an optional
+#               feature to solve the problem that some unit names are too long
+#               to be shown on the left of the screen together with the values.
+#               For fixing this the "graph unit" is available which is displayed
+#               on the top left of the graph and is used for the whole graph. So
+#               once a "graph unit" is computed, it does not need to be shown
+#               beside each label.
+#               This has to be set to a function which recevies a list of values,
+#               then computes the optimal unit for the given values and then
+#               returns a two element tuple. The first element is the "graph unit"
+#               and the second is a list containing all of the values rendered with
+#               the graph unit.
 
 # TODO: Move fundamental units like "" to main file.
 
 unit_info[""] = {
     "title"  : "",
+    "description" : _("Floating point number"),
     "symbol" : "",
-    "render" : lambda v: "%.1f" % v,
+    "render" : lambda v: render_scientific(v, 2),
 }
 
 unit_info["count"] = {
     "title"    : _("Count"),
     "symbol"   : "",
-    "render"   : lambda v: "%d" % v,
+    "render"   : lambda v: metric_number_with_precision(v, drop_zeroes=True),
     "stepping" : "integer", # for vertical graph labels
 }
 
 # value ranges from 0.0 ... 100.0
 unit_info["%"] = {
     "title"  : _("%"),
+    "description" : _("Percentage (0...100)"),
     "symbol" : _("%"),
-    "render" : lambda v: percent_human_redable(v, 3),
-}
-
-# Similar as %, but value ranges from 0.0 ... 1.0
-unit_info["ratio"] = {
-    "title"  : _("%"),
-    "symbol" : _("%"),
-    "render_scale" : 100.0, # Scale by this before rendering if "render" not being used
     "render" : lambda v: percent_human_redable(v, 3),
 }
 
 unit_info["s"] = {
     "title"    : _("sec"),
+    "description" : _("Timespan or Duration in seconds"),
     "symbol"   : _("s"),
     "render"   : age_human_readable,
     "stepping" : "time", # for vertical graph labels
@@ -82,6 +93,7 @@ unit_info["s"] = {
 
 unit_info["1/s"] = {
     "title" : _("per second"),
+    "description" : _("Frequency (displayed in events/s)"),
     "symbol" : _("/s"),
     "render" : lambda v: "%s%s" % (drop_dotzero(v), _("/s")),
 }
@@ -89,6 +101,7 @@ unit_info["1/s"] = {
 unit_info["hz"] = {
     "title"  : _("Hz"),
     "symbol" : _("Hz"),
+    "description" : _("Frequency (displayed in Hz)"),
     "render" : lambda v : physical_precision(v, 3, _("Hz")),
 }
 
@@ -108,17 +121,20 @@ unit_info["bytes/s"] = {
 }
 
 unit_info["bits/s"] = {
-    "title"    : _("Bits per second"),
-    "symbol"   : _("bits/s"),
-    "render"   : lambda v: physical_precision(v, 3, _("bit/s")),
+    "title"      : _("Bits per second"),
+    "symbol"     : _("bits/s"),
+    "render"     : lambda v: physical_precision(v, 3, _("bit/s")),
+    "graph_unit" : lambda v: physical_precision_list(v, 3, _("bit/s")),
 }
 
 # Output in bytes/days, value is in bytes/s
 unit_info["bytes/d"] = {
-    "title"    : _("Bytes per day"),
-    "symbol"   : _("B/d"),
-    "render"   : lambda v: bytes_human_readable(v * 86400.0) + _("/d"),
-    "stepping" : "binary", # for vertical graph labels
+    "title"      : _("Bytes per day"),
+    "symbol"     : _("B/d"),
+    "render"     : lambda v: bytes_human_readable(v * 86400.0, unit="B/d"),
+    "graph_unit" : lambda values: bytes_human_readable_list(
+                            [ v * 86400.0 for v in values ], unit=_("B/d")),
+    "stepping"   : "binary", # for vertical graph labels
 }
 
 unit_info["c"] = {
@@ -158,9 +174,15 @@ unit_info["wh"] = {
 }
 
 unit_info["dbm"] = {
-    "title" : _("Decibel-milliwatts"),
+    "title"  : _("Decibel-milliwatts"),
     "symbol" : _("dBm"),
     "render" : lambda v: "%s %s" % (drop_dotzero(v), _("dBm")),
+}
+
+unit_info["dbmv"] = {
+    "title"  : _("Decibel-millivolt"),
+    "symbol" : _("dBmV"),
+    "render" : lambda v: "%s %s" % (drop_dotzero(v), _("dBmV")),
 }
 
 unit_info["db"] = {
@@ -179,7 +201,25 @@ unit_info["%/m"] = {
 unit_info["bar"] = {
     "title"     : _("Bar"),
     "symbol"    : _("bar"),
-    "render"    : lambda v: physical_precision(v, 6, _("bar")),
+    "render"    : lambda v: physical_precision(v, 4, _("bar")),
+}
+
+unit_info["pa"] = {
+    "title"     : _("Pascal"),
+    "symbol"    : _("Pa"),
+    "render"    : lambda v: physical_precision(v, 3, _("Pa")),
+}
+
+unit_info["l/s"] = {
+    "title"     : _("Liters per second"),
+    "symbol"    : _("l/s"),
+    "render"    : lambda v: physical_precision(v, 3, _("l/s")),
+}
+
+unit_info["rpm"] = {
+    "title"  : _("Rounds Per Minute"),
+    "symbol" : _("rpm"),
+    "render" : lambda v: physical_precision(v, 4, _("rpm")),
 }
 
 #.
@@ -224,39 +264,101 @@ unit_info["bar"] = {
 # Example:
 # "color" : "23/a" (basic color yellow)
 # "color" : "23/b" (nuance of color yellow)
+#
+# As an alternative you can call indexed_color with a color index and the maximum
+# number of colors you will need to generate a color. This function tries to return
+# high contrast colors for "close" indices, so the colors of idx 1 and idx 2 may
+# have stronger contrast than the colors at idx 3 and idx 10.
 
-metric_info["rta"] = {
-    "title" : _("Round trip average"),
-    "unit"  : "s",
-    "color" : "#40a0b0",
-}
+# retrieve an indexed color.
+# param idx: the color index
+# param total: the total number of colors needed in one graph.
+COLOR_WHEEL_SIZE = 48
+def indexed_color(idx, total):
+    if idx < COLOR_WHEEL_SIZE:
+        # use colors from the color wheel if possible
+        base_col = (idx % 4) + 1
+        tone = ((idx / 4) % 6) + 1
+        if idx % 8 < 4:
+            shade = "a"
+        else:
+            shade = "b"
+        return "%d%d/%s" % (base_col, tone, shade)
+    else:
+        # generate distinct rgb values. these may be ugly ; also, they
+        # may overlap with the colors from the wheel
+        idx        = idx - COLOR_WHEEL_SIZE
+        base_color = idx % 7  # red, green, blue, red+green, red+blue,
+                              # green+blue, red+green+blue
+        delta      = 255 / ((total - COLOR_WHEEL_SIZE) / 7)
+        offset     = 255 - (delta * ((idx / 7) + 1))
 
-metric_info["rtmin"] = {
-    "title" : _("Round trip minimum"),
-    "unit"  : "s",
-    "color" : "42/a",
-}
+        red   = int(base_color in [0, 3, 4, 6])
+        green = int(base_color in [1, 3, 5, 6])
+        blue  = int(base_color in [2, 4, 5, 6])
+        return "#%02x%02x%02x" % (red * offset, green * offset, blue * offset)
 
-metric_info["rtmax"] = {
-    "title" : _("Round trip maximum"),
-    "unit"  : "s",
-    "color" : "42/b",
-}
 
-metric_info["pl"] = {
-    "title" : _("Packet loss"),
-    "unit"  : "%",
-    "color" : "#ffc030",
-}
 
-metric_info["response_time"] = {
-    "title" : _("Response time"),
-    "unit"  : "s",
-    "color" : "#40a0b0",
+MAX_NUMBER_HOPS = 45 # the amount of hop metrics, graphs and perfometers to create
+for idx in range(0, MAX_NUMBER_HOPS):
+    if idx:
+        prefix_perf = "hop_%d_" % idx
+        prefix_text = "Hop %d " % idx
+    else:
+        prefix_perf = ""
+        prefix_text = ""
+
+    metric_info["%srta" % prefix_perf] = {
+        "title" : _("%sRound trip average") % prefix_text,
+        "unit"  : "s",
+        "color" : "33/a"
+    }
+
+    metric_info["%srtmin" % prefix_perf] = {
+        "title" : _("%sRound trip minimum") % prefix_text,
+        "unit"  : "s",
+        "color" : "42/a",
+    }
+
+    metric_info["%srtmax" % prefix_perf] = {
+        "title" : _("%sRound trip maximum") % prefix_text,
+        "unit"  : "s",
+        "color" : "42/b",
+    }
+
+    metric_info["%srtstddev" % prefix_perf] = {
+        "title" : _("%sRound trip standard devation") % prefix_text,
+        "unit"  : "s",
+        "color" : "16/a",
+    }
+
+    metric_info["%spl" % prefix_perf] = {
+        "title" : _("%sPacket loss") % prefix_text,
+        "unit"  : "%",
+        "color" : "#ffc030",
+    }
+
+    metric_info["%sresponse_time" % prefix_perf] = {
+        "title" : _("%sResponse time") % prefix_text,
+        "unit"  : "s",
+        "color" : "23/a"
+    }
+
+metric_info["hops"] = {
+    "title" : _("Number of hops"),
+    "unit"  : "count",
+    "color" : "51/a",
 }
 
 metric_info["uptime"] = {
     "title" : _("Uptime"),
+    "unit"  : "s",
+    "color" : "#80f000",
+}
+
+metric_info["age"] = {
+    "title" : _("Age"),
     "unit"  : "s",
     "color" : "#80f000",
 }
@@ -362,6 +464,12 @@ metric_info["unused_size"] = {
     "color" : "46/a",
 }
 
+metric_info["allocated_size"] = {
+    "title" : _("Allocated space"),
+    "unit"  : "bytes",
+    "color" : "42/a"
+}
+
 metric_info["tablespace_size"] = {
     "title" : _("Tablespace size"),
     "unit"  : "bytes",
@@ -410,9 +518,27 @@ metric_info["mem_used"] = {
     "unit" : "bytes",
 }
 
+metric_info["mem_available"] = {
+    "color" : "21/a",
+    "title" : _("RAM available"),
+    "unit"  : "bytes",
+}
+
+metric_info["pagefile_used"] = {
+    "color": "#408f20",
+    "title" : _("Commit Charge"),
+    "unit" : "bytes",
+}
+
+metric_info["mem_used_percent"] = {
+    "color": "#80ff40",
+    "title" : _("RAM used"),
+    "unit" : "%",
+}
+
 metric_info["mem_perm_used"] = {
     "color": "#80ff40",
-    "title" : _("Perm used"),
+    "title" : _("Permanent Generation Memory"),
     "unit" : "bytes",
 }
 
@@ -434,6 +560,12 @@ metric_info["swap_used"] = {
     "unit" : "bytes",
 }
 
+metric_info["swap_used_percent"] = {
+    "color": "#408f20",
+    "title" : _("Swap used"),
+    "unit" : "%",
+}
+
 metric_info["swap_cached"] = {
     "title" : _("Swap cached"),
     "color": "#5bebc9",
@@ -444,6 +576,18 @@ metric_info["caches"] = {
     "title" : _("Memory used by caches"),
     "unit"  : "bytes",
     "color" : "51/a",
+}
+
+metric_info["mem_pages_rate"] = {
+    "title" : _("Memory Pages"),
+    "unit" : "1/s",
+    "color": "34/a",
+}
+
+metric_info["mem_lnx_total_used"] = {
+    "title" : _("Total used memory"),
+    "color": "#70f038",
+    "unit" : "bytes",
 }
 
 metric_info["mem_lnx_cached"] = {
@@ -464,6 +608,43 @@ metric_info["mem_lnx_slab"] = {
     "unit" : "bytes",
 }
 
+metric_info["mem_lnx_sreclaimable"] = {
+    "title" : _("Reclaimable memory"),
+    "color": "23/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_sunreclaim"] = {
+    "title" : _("Unreclaimable memory"),
+    "color": "24/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_pending"] = {
+    "title" : _("Pending memory"),
+    "color": "25/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_unevictable"] = {
+    "title" : _("Unevictable memory"),
+    "color": "26/a",
+    "unit" : "bytes",
+}
+
+
+metric_info["mem_lnx_active"] = {
+    "title" : _("Active"),
+    "color": "#dd2020",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_anon_pages"] = {
+    "title" : _("Anonymous pages"),
+    "color": "#cc4040",
+    "unit" : "bytes",
+}
+
 metric_info["mem_lnx_active_anon"] = {
     "title" : _("Active (anonymous)"),
     "color": "#ff4040",
@@ -473,6 +654,12 @@ metric_info["mem_lnx_active_anon"] = {
 metric_info["mem_lnx_active_file"] = {
     "title" : _("Active (files)"),
     "color": "#ff8080",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_inactive"] = {
+    "title" : _("Inactive"),
+    "color": "#275c6b",
     "unit" : "bytes",
 }
 
@@ -578,26 +765,32 @@ metric_info["mem_lnx_mapped"] = {
     "unit" : "bytes",
 }
 
+metric_info["mem_lnx_anon_huge_pages"] = {
+    "title" : _("Anonymous huge pages"),
+    "color": "#f0f0f0",
+    "unit" : "bytes",
+}
+
 metric_info["mem_lnx_huge_pages_total"] = {
-    "title" : _("Total"),
+    "title" : _("Huge pages total"),
     "color": "#f0f0f0",
     "unit" : "bytes",
 }
 
 metric_info["mem_lnx_huge_pages_free"] = {
-    "title" : _("Free"),
+    "title" : _("Huge pages free"),
     "color": "#f0a0f0",
     "unit" : "bytes",
 }
 
 metric_info["mem_lnx_huge_pages_rsvd"] = {
-    "title" : _("Reserved part of Free"),
+    "title" : _("Huge pages reserved part of free"),
     "color": "#40f0f0",
     "unit" : "bytes",
 }
 
 metric_info["mem_lnx_huge_pages_surp"] = {
-    "title" : _("Surplus"),
+    "title" : _("Huge pages surplus"),
     "color": "#90f0b0",
     "unit" : "bytes",
 }
@@ -617,6 +810,50 @@ metric_info["mem_lnx_vmalloc_used"] = {
 metric_info["mem_lnx_vmalloc_chunk"] = {
     "title" : _("Largest free chunk"),
     "color": "#c6f7e9",
+    "unit" : "bytes",
+}
+
+metric_info["mem_lnx_hardware_corrupted"] = {
+    "title" : _("Hardware corrupted memory"),
+    "color": "13/a",
+    "unit" : "bytes",
+}
+
+# Consumed Host Memory usage is defined as the amount of host memory that is allocated to the virtual machine
+metric_info["mem_esx_host"] = {
+    "title" : _("Consumed host memory"),
+    "color": "#70f038",
+    "unit" : "bytes",
+}
+
+# Active Guest Memory is defined as the amount of guest memory that is currently being used by the guest operating system and its applications
+metric_info["mem_esx_guest"] = {
+    "title" : _("Active guest memory"),
+    "color": "15/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_esx_ballooned"] = {
+    "title" : _("Ballooned memory"),
+    "color": "21/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_esx_shared"] = {
+    "title" : _("Shared memory"),
+    "color": "34/a",
+    "unit" : "bytes",
+}
+
+metric_info["mem_esx_private"] = {
+    "title" : _("Private memory"),
+    "color": "25/a",
+    "unit" : "bytes",
+}
+
+metric_info["pagefile_total"] = {
+    "title" : _("Pagefile installed"),
+    "color": "#e0e0e0",
     "unit" : "bytes",
 }
 
@@ -666,6 +903,18 @@ metric_info["process_resident_size"] = {
     "title" : _("Resident size"),
     "unit"  : "bytes",
     "color" : "14/a",
+}
+
+metric_info["process_mapped_size"] = {
+    "title" : _("Mapped size"),
+    "unit"  : "bytes",
+    "color" : "12/a",
+}
+
+metric_info["process_handles"] = {
+    "title" : _("Process handles"),
+    "unit"  : "count",
+    "color" : "32/a",
 }
 
 metric_info["mem_heap"] = {
@@ -740,6 +989,14 @@ metric_info["threads_busy"] = {
     "unit"  : "count",
     "color" : "34/a",
 }
+
+for what, color in [ ("msg", "12"), ("rollovers", "13"), ("regular", "14"),
+                     ("warning", "15"), ("user", "16") ]:
+    metric_info["assert_%s" % what] = {
+        "title" : _("%s Asserts") % what.title(),
+        "unit"  : "count",
+        "color" : "%s/a" % color,
+    }
 
 metric_info["vol_context_switches"] = {
     "title" : _("Voluntary context switches"),
@@ -836,6 +1093,18 @@ metric_info["smoke_perc"] = {
     "color" : "#60f088",
 }
 
+metric_info["airflow"] = {
+    "title" : _("Air flow"),
+    "unit"  : "l/s",
+    "color" : "#ff6234",
+}
+
+metric_info["fluidflow"] = {
+    "title" : _("Fluid flow"),
+    "unit"  : "l/s",
+    "color" : "#ff6234",
+}
+
 metric_info["deviation_calibration_point"] = {
     "title" : _("Deviation from calibration point"),
     "unit"  : "%",
@@ -846,6 +1115,12 @@ metric_info["deviation_airflow"] = {
     "title" : _("Airflow deviation"),
     "unit"  : "%",
     "color" : "#60f020",
+}
+
+metric_info["health_perc"] = {
+    "title" : _("Health"),
+    "unit"  : "%",
+    "color" : "#ff6234",
 }
 
 # TODO: user -> cpu_util_user
@@ -917,6 +1192,12 @@ metric_info["fpga_util"] = {
     "color" : "#60f020",
 }
 
+metric_info["generic_util"] = {
+    "title" : _("Utilization"),
+    "unit"  : "%",
+    "color" : "26/a",
+}
+
 metric_info["util"] = {
     "title" : _("CPU utilization"),
     "unit"  : "%",
@@ -959,6 +1240,19 @@ metric_info["util15"] = {
     "color" : "#9a52bf",
 }
 
+MAX_CORES = 128
+
+for i in range(MAX_CORES):
+    # generate different colors for each core.
+    # unfortunately there are only 24 colors on our
+    # color wheel, times two for two shades each, we
+    # can only draw 48 differently colored graphs
+    metric_info["cpu_core_util_%d" % i] = {
+        "title" : _("Utilization Core %d") % (i + 1),
+        "unit"  : "%",
+        "color" : indexed_color(i, MAX_CORES),
+    }
+
 metric_info["time_offset"] = {
     "title" : _("Time offset"),
     "unit"  : "s",
@@ -966,7 +1260,7 @@ metric_info["time_offset"] = {
 }
 
 metric_info["jitter"] = {
-    "title" : _("Time dispersion"),
+    "title" : _("Time dispersion (jitter)"),
     "unit"  : "s",
     "color" : "43/b",
 }
@@ -975,6 +1269,24 @@ metric_info["connection_time"] = {
     "title" : _("Connection time"),
     "unit"  : "s",
     "color" : "#94b65a",
+}
+
+metric_info["infections_rate"] = {
+    "title" : _("Infections"),
+    "unit"  : "1/s",
+    "color" : "15/a",
+}
+
+metric_info["connections_blocked_rate"] = {
+    "title" : _("Blocked connections"),
+    "unit"  : "1/s",
+    "color" : "14/a",
+}
+
+metric_info["open_network_sockets"] = {
+    "title" : _("Open network sockets"),
+    "unit"  : "count",
+    "color" : "21/a",
 }
 
 metric_info["connections"] = {
@@ -1007,6 +1319,30 @@ metric_info["connections_rate"] = {
     "color" : "#a080b0",
 }
 
+metric_info["connections_duration_min"] = {
+    "title" : _("Connections duration min"),
+    "unit"  : "s",
+    "color" : "24/a"
+}
+
+metric_info["connections_duration_max"] = {
+    "title" : _("Connections duration max"),
+    "unit"  : "s",
+    "color" : "25/a"
+}
+
+metric_info["connections_duration_mean"] = {
+    "title" : _("Connections duration max"),
+    "unit"  : "s",
+    "color" : "25/a"
+}
+
+metric_info["packet_velocity_asic"] = {
+    "title" : _("Packet velocity asic"),
+    "unit"  : "1/s",
+    "color" : "26/a"
+}
+
 metric_info["requests_per_second"] = {
     "title" : _("Requests per second"),
     "unit"  : "1/s",
@@ -1025,8 +1361,26 @@ metric_info["output_signal_power_dbm"] = {
     "color" : "#2080c0",
 }
 
+metric_info["downstream_power"] = {
+    "title" : _("Downstream power"),
+    "unit"  : "dbmv",
+    "color" : "14/a",
+}
+
 metric_info["current"] = {
     "title" : _("Electrical current"),
+    "unit"  : "a",
+    "color" : "#ffb030",
+}
+
+metric_info["differential_current_ac"] = {
+    "title" : _("Differential current AC"),
+    "unit"  : "a",
+    "color" : "#ffb030",
+}
+
+metric_info["differential_current_dc"] = {
+    "title" : _("Differential current DC"),
     "unit"  : "a",
     "color" : "#ffb030",
 }
@@ -1034,19 +1388,19 @@ metric_info["current"] = {
 metric_info["voltage"] = {
     "title" : _("Electrical voltage"),
     "unit"  : "v",
-    "color" : "#ffc060",
+    "color" : "14/a",
 }
 
 metric_info["power"] = {
     "title" : _("Electrical power"),
     "unit"  : "w",
-    "color" : "#8848c0",
+    "color" : "22/a",
 }
 
 metric_info["appower"] = {
     "title" : _("Electrical apparent power"),
     "unit"  : "va",
-    "color" : "#aa68d80",
+    "color" : "22/b",
 }
 
 metric_info["energy"] = {
@@ -1123,13 +1477,13 @@ metric_info["noise_floor"] = {
 
 metric_info["codewords_corrected"] = {
     "title" : _("Corrected codewords"),
-    "unit"  : "ratio",
+    "unit"  : "%",
     "color" : "#ff8040",
 }
 
 metric_info["codewords_uncorrectable"] = {
     "title" : _("Uncorrectable codewords"),
-    "unit"  : "ratio",
+    "unit"  : "%",
     "color" : "#ff4020",
 }
 
@@ -1266,12 +1620,24 @@ metric_info["write_latency"] = {
 metric_info["disk_queue_length"] = {
     "title" : _("Average disk I/O-queue length"),
     "unit"  : "",
+    "color" : "35/a",
+}
+
+metric_info["disk_read_ql"] = {
+    "title" : _("Average disk read queue length"),
+    "unit"  : "",
+    "color" : "45/a",
+}
+
+metric_info["disk_write_ql"] = {
+    "title" : _("Average disk write queue length"),
+    "unit"  : "",
     "color" : "#7060b0",
 }
 
 metric_info["disk_utilization"] = {
     "title" : _("Disk utilization"),
-    "unit"  : "ratio",
+    "unit"  : "%",
     "color" : "#a05830",
 }
 
@@ -1354,7 +1720,7 @@ metric_info["hours_since_service"] = {
 }
 
 metric_info["execution_time"] = {
-    "title" : _("Execution time"),
+    "title" : _("Total execution time"),
     "unit"  : "s",
     "color" : "#d080af",
 }
@@ -1389,6 +1755,12 @@ metric_info["sync_latency"] = {
     "color" : "#ffb080",
 }
 
+metric_info["mail_latency"] = {
+    "title" : _("Mail latency"),
+    "unit"  : "s",
+    "color" : "#ffb080",
+}
+
 metric_info["printer_queue"] = {
     "title" : _("Printer queue length"),
     "unit"  : "count",
@@ -1401,11 +1773,30 @@ metric_info["if_in_octets"] = {
     "color" : "#00e060",
 }
 
+metric_info["if_in_bps"] = {
+    "title" : _("Input bandwidth"),
+    "unit"  : "bits/s",
+    "color" : "#00e060",
+}
+
 metric_info["if_in_pkts"] = {
     "title" : _("Input Packets"),
     "unit"  : "1/s",
     "color" : "#00e060",
 }
+
+metric_info["if_out_pkts"] = {
+    "title" : _("Output Packets"),
+    "unit"  : "1/s",
+    "color" : "#0080e0",
+}
+
+metric_info["if_out_bps"] = {
+    "title" : _("Output bandwidth"),
+    "unit"  : "bits/s",
+    "color" : "#0080e0",
+}
+
 
 metric_info["if_out_octets"] = {
     "title" : _("Output Octets"),
@@ -1542,13 +1933,25 @@ metric_info["fc_tx_frames"] = {
 metric_info["fc_crc_errors"] = {
     "title" : _("Receive CRC errors"),
     "unit"  : "1/s",
-    "color" : "12/a",
+    "color" : "21/a",
 }
 
 metric_info["fc_encouts"] = {
     "title" : _("Enc-Outs"),
     "unit"  : "1/s",
-    "color" : "13/a",
+    "color" : "12/a",
+}
+
+metric_info["fc_encins"] = {
+    "title" : _("Enc-Ins"),
+    "unit"  : "1/s",
+    "color" : "13/b",
+}
+
+metric_info["fc_bbcredit_zero"] = {
+    "title" : _("BBcredit zero"),
+    "unit"  : "1/s",
+    "color" : "46/a",
 }
 
 metric_info["fc_c3discards"] = {
@@ -1594,7 +1997,7 @@ metric_info["fc_invalid_tx_words"] = {
 }
 
 metric_info["fc_invalid_crcs"] = {
-    "title" : _("Invalid crcs"),
+    "title" : _("Invalid CRCs"),
     "unit"  : "1/s",
     "color" : "15/a",
 }
@@ -1678,6 +2081,12 @@ metric_info["rmon_packets_1518"] = {
     "color" : "44/a",
 }
 
+metric_info["tcp_listen"] = {
+    "title" : _("State %s") % "LISTEN",
+    "unit"  : "count",
+    "color" : "44/a",
+}
+
 metric_info["tcp_established"] = {
     "title" : _("State %s") % "ESTABLISHED",
     "unit"  : "count",
@@ -1744,6 +2153,12 @@ metric_info["tcp_bound"] = {
     "color" : "#4060a0",
 }
 
+metric_info["tcp_idle"] = {
+    "title" : _("State %s") % "IDLE",
+    "unit"  : "count",
+    "color" : "41/a",
+}
+
 metric_info["fw_connections_active"] = {
     "title" : _("Active connections"),
     "unit"  : "count",
@@ -1782,8 +2197,8 @@ metric_info["host_check_rate"] = {
 
 metric_info["monitored_hosts"] = {
     "title" : _("Monitored hosts"),
-    "unit"  : "1/s",
-    "color" : "52/a",
+    "unit"  : "count",
+    "color" : "52/b",
 }
 
 metric_info["hosts_active"] = {
@@ -1824,8 +2239,8 @@ metric_info["service_check_rate"] = {
 
 metric_info["monitored_services"] = {
     "title" : _("Monitored services"),
-    "unit"  : "1/s",
-    "color" : "21/a",
+    "unit"  : "count",
+    "color" : "21/b",
 }
 
 metric_info["livestatus_connect_rate"] = {
@@ -1838,6 +2253,121 @@ metric_info["livestatus_request_rate"] = {
     "title" : _("Livestatus requests"),
     "unit"  : "1/s",
     "color" : "#bbccdd",
+}
+
+metric_info["helper_usage_cmk"] = {
+    "title" : _("Check_MK helper usage"),
+    "unit"  : "%",
+    "color" : "15/a",
+}
+
+metric_info["helper_usage_generic"] = {
+    "title" : _("Generic helper usage"),
+    "unit"  : "%",
+    "color" : "41/a",
+}
+
+metric_info["average_latency_cmk"] = {
+    "title" : _("Check_MK check latency"),
+    "unit"  : "s",
+    "color" : "15/a",
+}
+
+metric_info["average_latency_generic"] = {
+    "title" : _("Check latency"),
+    "unit"  : "s",
+    "color" : "41/a",
+}
+
+metric_info["livestatus_usage"] = {
+    "title" : _("Livestatus usage"),
+    "unit"  : "%",
+    "color" : "12/a",
+}
+
+metric_info["livestatus_overflows_rate"] = {
+    "title" : _("Livestatus overflows"),
+    "unit"  : "1/s",
+    "color" : "16/a",
+}
+
+metric_info["cmk_time_agent"] = {
+    "title" : _("Time spent waiting for Check_MK agent"),
+    "unit" : "s",
+    "color" : "35/a",
+}
+
+metric_info["cmk_time_snmp"] = {
+    "title" : _("Time spent waiting for SNMP responses"),
+    "unit" : "s",
+    "color" : "36/a",
+}
+
+metric_info["cmk_time_ds"] = {
+    "title" : _("Time spent waiting for special agent"),
+    "unit" : "s",
+    "color" : "34/a",
+}
+
+
+metric_info["num_open_events"] = {
+    "title" : _("Open events"),
+    "unit"  : "count",
+    "color" : "12/a",
+}
+
+metric_info["average_message_rate"] = {
+    "title" : _("Incoming messages"),
+    "unit"  : "1/s",
+    "color" : "11/a",
+}
+
+metric_info["average_rule_trie_rate"] = {
+    "title" : _("Rule tries"),
+    "unit"  : "1/s",
+    "color" : "13/a",
+}
+
+metric_info["average_rule_hit_rate"] = {
+    "title" : _("Rule hits"),
+    "unit"  : "1/s",
+    "color" : "21/a",
+}
+
+metric_info["average_drop_rate"] = {
+    "title" : _("Message drops"),
+    "unit"  : "1/s",
+    "color" : "24/a",
+}
+
+metric_info["average_event_rate"] = {
+    "title" : _("Event creations"),
+    "unit"  : "1/s",
+    "color" : "31/a",
+}
+
+metric_info["average_connect_rate"] = {
+    "title" : _("Status: Client connects"),
+    "unit"  : "1/s",
+    "color" : "34/a",
+}
+
+metric_info["average_request_time"] = {
+    "title" : _("Status: Request time"),
+    "unit"  : "s",
+    "color" : "41/a",
+}
+
+metric_info["average_processing_time"] = {
+    "title" : _("Event processing time"),
+    "unit"  : "s",
+    "color" : "31/a",
+}
+
+metric_info["average_rule_hit_ratio"] = {
+    "title" : _("Rule hit ratio"),
+    "unit"  : "%",
+    "color" : "31/a",
 }
 
 metric_info["log_message_rate"] = {
@@ -1894,28 +2424,46 @@ metric_info["call_legs"] = {
     "color" : "#60bbbb",
 }
 
-metric_info["mail_queue_deferred_length"] = {
-    "title" : _("Length of deferred mail queue"),
-    "unit"  : "count",
-    "color" : "#40a0b0",
-}
-
 metric_info["mails_received_time"] = {
     "title" : _("Received mails"),
     "unit"  : "s",
     "color" : "31/a",
 }
 
-metric_info["mail_queue_deferred_size"] = {
-    "title" : _("Size of deferred mail queue"),
-    "unit"  : "bytes",
-    "color" : "#402010",
+metric_info["mail_queue_deferred_length"] = {
+    "title" : _("Length of deferred mail queue"),
+    "unit"  : "count",
+    "color" : "#40a0b0",
 }
 
 metric_info["mail_queue_active_length"] = {
     "title" : _("Length of active mail queue"),
     "unit"  : "count",
     "color" : "#ff6000",
+}
+
+metric_info["mail_queue_deferred_size"] = {
+    "title" : _("Size of deferred mail queue"),
+    "unit"  : "bytes",
+    "color" : "43/a",
+}
+
+metric_info["mail_queue_active_size"] = {
+    "title" : _("Size of active mail queue"),
+    "unit"  : "bytes",
+    "color" : "31/a",
+}
+
+metric_info["messages_inbound"] = {
+    "title" : _("Inbound messages"),
+    "unit"  : "1/s",
+    "color" : "31/a",
+}
+
+metric_info["messages_outbound"] = {
+    "title" : _("Outbound messages"),
+    "unit"  : "1/s",
+    "color" : "36/a",
 }
 
 metric_info["pages_total"] = {
@@ -2008,6 +2556,12 @@ metric_info["pressure"] = {
     "color" : "#ff6234",
 }
 
+metric_info["pressure_pa"] = {
+    "title" : _("Pressure"),
+    "unit"  : "pa",
+    "color" : "#ff6234",
+}
+
 metric_info["licenses"] = {
     "title" : _("Used licenses"),
     "unit"  : "count",
@@ -2068,6 +2622,55 @@ metric_info["job_duration"] = {
     "color" : "33/a",
 }
 
+metric_info["backup_age_database"] = {
+    "title" : _("Age of last database backup"),
+    "unit"  : "s",
+    "color" : "11/a",
+}
+
+metric_info["backup_age_database_diff"] = {
+    "title" : _("Age of last differential database backup"),
+    "unit"  : "s",
+    "color" : "14/a",
+}
+
+metric_info["backup_age_log"] = {
+    "title" : _("Age of last log backup"),
+    "unit"  : "s",
+    "color" : "21/a",
+}
+
+metric_info["backup_age_file_or_filegroup"] = {
+    "title" : _("Age of last file or filegroup backup"),
+    "unit"  : "s",
+    "color" : "24/a",
+}
+
+metric_info["backup_age_file_diff"] = {
+    "title" : _("Age of last differential file backup"),
+    "unit"  : "s",
+    "color" : "31/a",
+}
+
+metric_info["backup_age_partial"] = {
+    "title" : _("Age of last partial backup"),
+    "unit"  : "s",
+    "color" : "34/a",
+}
+
+metric_info["backup_age_differential_partial"] = {
+    "title" : _("Age of last differential partial backup"),
+    "unit"  : "s",
+    "color" : "41/a",
+}
+
+metric_info["backup_age"] = {
+    "title" : _("Time since last backup"),
+    "unit"  : "s",
+    "color" : "34/a",
+}
+
+
 metric_info["checkpoint_age"] = {
     "title" : _("Time since last checkpoint"),
     "unit"  : "s",
@@ -2107,7 +2710,6 @@ metric_info["buffered_io"] = {
 
 metric_info["write_cache_usage"] = {
     "title" : _("Write cache usage"),
-    "help"  : _("A write cache is a cache that uses an allocate on write miss, write-back, no allocate on read miss strategy"),
     "unit"  : "%",
     "color" : "#030303",
 }
@@ -2288,101 +2890,135 @@ metric_info["connector_outlets"] = {
 }
 
 metric_info["qos_dropped_bytes_rate"] = {
-    "title" : _("Qos dropped bytes"),
-    "unit"  : "bytes/s",
+    "title" : _("QoS dropped bits"),
+    "unit"  : "bits/s",
     "color" : "41/a",
 }
 
 metric_info["qos_outbound_bytes_rate"] = {
-    "title" : _("Qos outbound bytes"),
-    "unit"  : "bytes/s",
+    "title" : _("QoS outbound bits"),
+    "unit"  : "bits/s",
     "color" : "26/a",
 }
 
 metric_info["apache_state_startingup"] = {
-    "title" : _("Apache starting up"),
+    "title" : _("Starting up"),
     "unit"  : "count",
     "color" : "11/a",
 }
 
 metric_info["apache_state_waiting"] = {
-    "title" : _("Apache writing"),
+    "title" : _("Waiting"),
     "unit"  : "count",
     "color" : "14/a",
 }
 
 metric_info["apache_state_logging"] = {
-    "title" : _("Apache logging"),
+    "title" : _("Logging"),
     "unit"  : "count",
     "color" : "21/a",
 }
 
 metric_info["apache_state_dns"] = {
-    "title" : _("Apache DNS"),
+    "title" : _("DNS lookup"),
     "unit"  : "count",
     "color" : "24/a",
 }
 
 metric_info["apache_state_sending_reply"] = {
-    "title" : _("Apache sending reply"),
+    "title" : _("Sending reply"),
     "unit"  : "count",
     "color" : "31/a",
 }
 
 metric_info["apache_state_reading_request"] = {
-    "title" : _("Apache reading request"),
+    "title" : _("Reading request"),
     "unit"  : "count",
     "color" : "34/a",
 }
 
 metric_info["apache_state_closing"] = {
-    "title" : _("Apache closing"),
+    "title" : _("Closing connection"),
     "unit"  : "count",
     "color" : "41/a",
 }
 
 metric_info["apache_state_idle_cleanup"] = {
-    "title" : _("Apache idle clean up"),
+    "title" : _("Idle clean up of worker"),
     "unit"  : "count",
     "color" : "44/a",
 }
 
 metric_info["apache_state_finishing"] = {
-    "title" : _("Apache finishing"),
+    "title" : _("Gracefully finishing"),
     "unit"  : "count",
     "color" : "46/b",
 }
 
 metric_info["apache_state_keep_alive"] = {
-    "title" : _("Apache keep alive"),
+    "title" : _("Keepalive"),
     "unit"  : "count",
     "color" : "53/b",
 }
 
 metric_info["http_bandwidth"] = {
-    "title" : _("Http bandwidth"),
+    "title" : _("HTTP bandwidth"),
     "unit"  : "bytes/s",
     "color" : "53/b",
 }
 
-# netapp api volumes
+metric_info["time_connect"] = {
+    "title" : _("Time to connect"),
+    "unit"  : "s",
+    "color" : "11/a",
+}
 
-for volume_info in [ "NFS", "CIFS", "SAN", "FCP", "ISCSI" ]:
-    for what, unit in [ ("data", "bytes"), ("latency", "s") ]:
+metric_info["time_ssl"] = {
+    "title" : _("Time to negotiate SSL"),
+    "unit"  : "s",
+    "color" : "13/a",
+}
+
+metric_info["time_headers"] = {
+    "title" : _("Time to send request"),
+    "unit"  : "s",
+    "color" : "15/a",
+}
+
+metric_info["time_firstbyte"] = {
+    "title" : _("Time to receive start of response"),
+    "unit"  : "s",
+    "color" : "26/a",
+}
+
+metric_info["time_transfer"] = {
+    "title" : _("Time to receive full response"),
+    "unit"  : "s",
+    "color" : "41/a",
+}
+
+for volume_info in [ "NFS", "NFSv4", "CIFS", "SAN", "FCP", "ISCSI" ]:
+    for what, unit in [ ("data", "bytes"), ("latency", "s"), ("ios", "1/s") ]:
 
         volume = volume_info.lower()
 
-        metric_info[ "%s_read_%s" % (volume, what) ] = {
-            "title" : _( "%s read %s" % (volume_info, what) ),
+        metric_info["%s_read_%s" % (volume, what)] = {
+            "title" : _( "%s read %s") % (volume_info, what),
             "unit"  : unit,
             "color" : "31/a",
         }
 
-        metric_info[ "%s_write_%s" % (volume, what) ] = {
-            "title" : _( "%s write %s" % (volume_info, what) ),
+        metric_info["%s_write_%s" % (volume, what)] = {
+            "title" : _( "%s write %s") % (volume_info, what),
             "unit"  : unit,
             "color" : "44/a",
         }
+
+metric_info["nfsv4_1_ios"] = {
+    "title" : _( "NFSv4.1 operations"),
+    "unit"  : "1/s",
+    "color" : "31/a",
+}
 
 metric_info["harddrive_power_cycles"] = {
     "title" : _("Harddrive power cycles"),
@@ -2433,7 +3069,7 @@ metric_info["harddrive_uncorrectable_erros"] = {
 }
 
 metric_info["harddrive_udma_crc_errors"] = {
-    "title" : _("Harddrive udma crc errors"),
+    "title" : _("Harddrive UDMA CRC errors"),
     "unit"  : "count",
     "color" : "46/a",
 }
@@ -2471,7 +3107,654 @@ metric_info["error_rate"] = {
 metric_info["citrix_load"] = {
     "title" : _("Citrix Load"),
     "unit"  : "%",
-    "color" : "34/c",
+    "color" : "34/a",
+}
+
+metric_info["storage_processor_util"] = {
+    "title" : _("Storage Processor Utilization"),
+    "unit"  : "%",
+    "color" : "34/a",
+}
+
+metric_info["storage_used"] = {
+    "title" : _("Storage space used"),
+    "unit"  : "bytes",
+    "color" : "36/a",
+}
+
+metric_info["managed_object_count"] = {
+    "title" : _("Managed Objects"),
+    "unit"  : "count",
+    "color" : "45/a"
+}
+
+metric_info["active_vpn_tunnels"] = {
+    "title" : _("Active VPN Tunnels"),
+    "unit"  : "count",
+    "color" : "43/a"
+}
+
+metric_info["active_vpn_users"] = {
+    "title" : _("Active VPN Users"),
+    "unit"  : "count",
+    "color" : "23/a"
+}
+
+metric_info["active_vpn_websessions"] = {
+    "title" : _("Active VPN Web Sessions"),
+    "unit"  : "count",
+    "color" : "33/a"
+}
+
+metric_info["o2_percentage"] = {
+    "title" : _("Current O2 percentage"),
+    "unit"  : "%",
+    "color" : "42/a"
+}
+
+metric_info["current_users"] = {
+    "title" : _("Current Users"),
+    "unit"  : "count",
+    "color" : "23/a"
+}
+
+metric_info["average_latency"] = {
+    "title" : _("Average Latency"),
+    "unit"  : "s",
+    "color" : "35/a"
+}
+
+metric_info["time_in_GC"] = {
+    "title" : _("Time spent in GC"),
+    "unit"  : "%",
+    "color" : "16/a"
+}
+
+metric_info["db_read_latency"] = {
+    "title" : _("Read latency"),
+    "unit"  : "s",
+    "color" : "35/a",
+}
+
+metric_info["db_read_recovery_latency"] = {
+    "title" : _("Read recovery latency"),
+    "unit"  : "s",
+    "color" : "31/a",
+}
+
+metric_info["db_write_latency"] = {
+    "title" : _("Write latency"),
+    "unit"  : "s",
+    "color" : "45/a",
+}
+
+
+metric_info["db_log_latency"] = {
+    "title" : _("Log latency"),
+    "unit"  : "s",
+    "color" : "25/a",
+}
+
+metric_info["total_active_sessions"] = {
+    "title" : _("Total Active Sessions"),
+    "unit"  : "count",
+    "color" : "#888888",
+}
+
+metric_info["tcp_active_sessions"] = {
+    "title" : _("Active TCP Sessions"),
+    "unit"  : "count",
+    "color" : "#888800",
+}
+
+metric_info["udp_active_sessions"] = {
+    "title" : _("Active UDP sessions"),
+    "unit"  : "count",
+    "color" : "#880088",
+}
+
+metric_info["icmp_active_sessions"] = {
+    "title" : _("Active ICMP Sessions"),
+    "unit"  : "count",
+    "color" : "#008888"
+}
+
+metric_info["sslproxy_active_sessions"] = {
+    "title" : _("Active SSL Proxy sessions"),
+    "unit"  : "count",
+    "color" : "#11FF11",
+}
+
+for what, descr, color in [
+        ("busy",      "too many",      "11/a"),
+        ("unhealthy", "not attempted", "13/a"),
+        ("req",       "requests",      "15/a"),
+        ("recycle",   "recycles",      "21/a"),
+        ("retry",     "retry",         "23/a"),
+        ("fail",      "failures",      "25/a"),
+        ("toolate",   "was closed",    "31/a"),
+        ("conn",      "success",       "33/a"),
+        ("reuse",     "reuses",        "35/a")
+    ]:
+    metric_info_key = "varnish_backend_%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : _("Backend Conn. %s") % descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+for what, descr, color in [
+        ("hit",     "hits",          "11/a"),
+        ("miss",    "misses",        "13/a"),
+        ("hitpass", "hits for pass", "21/a")
+    ]:
+    metric_info_key = "varnish_cache_%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : _("Cache %s") % descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+for what, descr, color in [
+        ("drop",      _("Connections dropped"),         "12/a"),
+        ("req",       _("Client requests received"),    "22/a"),
+        ("conn",      _("Client connections accepted"), "32/a"),
+        ("drop_late", _("Connection dropped late"),     "42/a"),
+    ]:
+    metric_info_key = "varnish_client_%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+for what, descr, color in [
+        ("oldhttp", _("Fetch pre HTTP/1.1 closed"), "11/a"),
+        ("head",    _("Fetch head"),                "13/a"),
+        ("eof",     _("Fetch EOF"),                 "15/a"),
+        ("zero",    _("Fetch zero length"),         "21/a"),
+        ("304",     _("Fetch no body (304)"),       "23/a"),
+        ("1xx",     _("Fetch no body (1xx)"),       "25/a"),
+        ("204",     _("Fetch no body (204)"),       "31/a"),
+        ("length",  _("Fetch with length"),         "33/a"),
+        ("failed",  _("Fetch failed"),              "35/a"),
+        ("bad",     _("Fetch had bad headers"),     "41/a"),
+        ("close",   _("Fetch wanted close"),        "43/a"),
+        ("chunked", _("Fetch chunked"),             "45/a"),
+    ]:
+    metric_info_key = "varnish_fetch_%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+for what, descr, color in [
+        ("expired",   _("Expired objects"),   "21/a"),
+        ("lru_nuked", _("LRU nuked objects"), "31/a"),
+        ("lru_moved", _("LRU moved objects"), "41/a"),
+    ]:
+    metric_info_key = "varnish_objects_%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+for what, descr, color in [
+        ("",        _("Worker threads"),             "11/a"),
+        ("_lqueue", _("Work request queue length"),  "13/a"),
+        ("_create", _("Worker threads created"),     "15/a"),
+        ("_drop",   _("Dropped work requests"),      "21/a"),
+        ("_failed", _("Worker threads not created"), "23/a"),
+        ("_queued", _("Queued work requests"),       "25/a"),
+        ("_max",    _("Worker threads limited"),     "31/a"),
+    ]:
+    metric_info_key = "varnish_worker%s_rate" % what
+    metric_info[metric_info_key] = {
+        "title" : descr,
+        "unit"  : "1/s",
+        "color" : color,
+    }
+
+# ESI = Edge Side Includes
+metric_info["varnish_esi_errors_rate"] = {
+    "title" : _("ESI Errors"),
+    "unit"  : "1/s",
+    "color" : "13/a",
+}
+
+metric_info["varnish_esi_warnings_rate"] = {
+    "title" : _("ESI Warnings"),
+    "unit"  : "1/s",
+    "color" : "21/a",
+}
+
+metric_info["varnish_backend_success_ratio"] = {
+    "title" : _("Varnish Backend success ratio"),
+    "unit"  : "%",
+    "color" : "#60c0c0",
+}
+
+metric_info["varnish_worker_thread_ratio"] = {
+    "title" : _("Varnish Worker thread ratio"),
+    "unit"  : "%",
+    "color" : "#60c0c0",
+}
+
+metric_info["rx_light"] = {
+    "title" : _("RX Signal Power"),
+    "unit"  : "dbm",
+    "color" : "35/a"
+}
+
+metric_info["tx_light"] = {
+    "title" : _("TX Signal Power"),
+    "unit"  : "dbm",
+    "color" : "15/a"
+}
+
+for i in range(10):
+    metric_info["rx_light_%d" % i] = {
+        "title" : _("RX Signal Power Lane %d") % (i + 1),
+        "unit"  : "dbm",
+        "color" : "35/b",
+    }
+    metric_info["tx_light_%d" % i] = {
+        "title" : _("TX Signal Power Lane %d") % (i + 1),
+        "unit"  : "dbm",
+        "color" : "15/b",
+    }
+    metric_info["port_temp_%d" % i] = {
+        "title" : _("Temperature Lane %d") % (i + 1),
+        "unit"  : "dbm",
+        "color" : indexed_color(i * 3 + 2, 30),
+    }
+
+metric_info["locks_per_batch"] = {
+    "title" : _("Locks/Batch"),
+    "unit"  : "",
+    "color" : "21/a"
+}
+
+metric_info["page_reads_sec"] = {
+    "title" : _("Page Reads"),
+    "unit"  : "1/s",
+    "color" : "33/b"
+}
+
+metric_info["page_writes_sec"] = {
+    "title" : _("Page Writes"),
+    "unit"  : "1/s",
+    "color" : "14/a"
+}
+
+metric_info["page_lookups_sec"] = {
+    "title" : _("Page Lookups"),
+    "unit"  : "1/s",
+    "color" : "42/a"
+}
+
+metric_info["failed_search"] = {
+    "title" : _("Failed search requests"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["failed_location"] = {
+    "title" : _("Failed Get Locations Requests"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["failed_ad"] = {
+    "title" : _("Timed out Active Directory Requests"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["http_5xx"] = {
+    "title" : _("HTTP 5xx Responses"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["message_processing_time"] = {
+    "title" : _("Average Incoming Message Processing Time"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["asp_requests_rejected"] = {
+    "title" : _("ASP Requests Rejected"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["failed_file_requests"] = {
+    "title" : _("Failed File Requests"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["join_failures"] = {
+    "title" : _("Join Launcher Service Failures"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["failed_validate_cert"] = {
+    "title" : _("Failed validate cert calls"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["incoming_responses_dropped"] = {
+    "title" : _("Incoming Responses Dropped"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["incoming_requests_dropped"] = {
+    "title" : _("Incoming Requests Dropped"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["queue_latency"] = {
+    "title" : _("Queue Latency"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["sproc_latency"] = {
+    "title" : _("Sproc Latency"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["throttled_requests"] = {
+    "title" : _("Throttled requests"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["503_responses"] = {
+    "title" : _("Local 503 Responses"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["incoming_messages_timed_out"] = {
+    "title" : _("Incoming Messages Timed out"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["incomplete_calls"] = {
+    "title" : _("Incomplete Calls"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["create_conference_latency"] = {
+    "title" : _("Create Conference Latency"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["allocation_latency"] = {
+    "title" : _("Allocation Latency"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["avg_holding_time_incoming_messages"] = {
+    "title" : _("Average Holding Time For Incoming Messages"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["flow_controlled_connections"] = {
+    "title" : _("Flow-controlled Connections"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["avg_outgoing_queue_delay"] = {
+    "title" : _("Average Outgoing Queue Delay"),
+    "unit": "s",
+    "color": "42/a"
+}
+
+metric_info["sends_timed_out"] = {
+    "title" : _("Sends Timed-Out"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["authentication_errors"] = {
+    "title" : _("Authentication Errors"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["load_call_failure_index"] = {
+    "title" : _("Load Call Failure Index"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["failed_calls_because_of_proxy"] = {
+    "title" : _("Failed calls caused by unexpected interaction from proxy"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["failed_calls_because_of_gateway"] = {
+    "title" : _("Failed calls caused by unexpected interaction from gateway"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["media_connectivity_failure"] = {
+    "title" : _("Media Connectivity Check Failure"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["failed_requests"] = {
+    "title" : _("Bad Requests Received"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["udp_failed_auth"] = {
+    "title" : _("UDP Authentication Failures"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["tcp_failed_auth"] = {
+    "title" : _("TCP Authentication Failures"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["udp_allocate_requests_exceeding_port_limit"] = {
+    "title" : _("UDP Allocate Requests Exceeding Port Limit"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["tcp_allocate_requests_exceeding_port_limit"] = {
+    "title" : _("TCP Allocate Requests Exceeding Port Limit"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["udp_packets_dropped"] = {
+    "title" : _("UDP Packets Dropped"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["tcp_packets_dropped"] = {
+    "title" : _("TCP Packets Dropped"),
+    "unit": "1/s",
+    "color": "42/a"
+}
+
+metric_info["connections_throttled"] = {
+    "title": _("Throttled Server Connections"),
+    "unit": "count",
+    "color": "42/a"
+}
+
+metric_info["failed_outbound_streams"] = {
+    "title": _("Failed outbound stream establishes"),
+    "unit": "1/s",
+    "color" : "26/a",
+}
+
+metric_info["failed_inbound_streams"] = {
+    "title": _("Failed inbound stream establishes"),
+    "unit": "1/s",
+    "color" : "31/a",
+}
+
+skype_mobile_devices = [("android", "Android", "33/a"),
+                        ("iphone", "iPhone", "42/a"),
+                        ("ipad", "iPad", "45/a"),
+                        ("mac", "Mac", "23/a")]
+
+for device, name, color in skype_mobile_devices:
+    metric_info["active_sessions_%s" % device] = {
+        "title" : _("Active Sessions (%s)") % name,
+        "unit": "count",
+        "color": color
+    }
+
+metric_info["requests_processing"] = {
+    "title" : _("Requests in Processing"),
+    "unit": "count",
+    "color": "12/a"
+}
+
+for what, descr, unit, color in [
+    ("db_cpu",                  "DB CPU time",       "1/s", "11/a"),
+    ("db_time",                 "DB time",           "1/s", "15/a"),
+    ("buffer_hit_ratio",        "buffer hit ratio",  "%",   "21/a"),
+    ("physical_reads",          "physical reads",    "1/s", "43/b"),
+    ("physical_writes",         "physical writes",   "1/s", "26/a"),
+    ("db_block_gets",           "block gets",        "1/s", "13/a"),
+    ("db_block_change",         "block change",      "1/s", "15/a"),
+    ("consistent_gets",         "consistent gets",   "1/s", "23/a"),
+    ("free_buffer_wait",        "free buffer wait",  "1/s", "25/a"),
+    ("buffer_busy_wait",        "buffer busy wait",  "1/s", "41/a"),
+    ("library_cache_hit_ratio", "library cache hit ratio", "%",   "21/b"),
+    ("pins_sum",                "pins sum",          "1/s", "41/a"),
+    ("pin_hits_sum",            "pin hits sum",      "1/s", "46/a")]:
+    metric_info["oracle_%s" % what] = {
+        "title" : _("ORACLE %s") % descr,
+        "unit"  : unit,
+        "color" : color,
+    }
+
+metric_info["dhcp_requests"] = {
+    "title" : _("DHCP received requests"),
+    "unit"  : "count",
+    "color" : "14/a",
+}
+
+metric_info["dhcp_releases"] = {
+    "title" : _("DHCP received releases"),
+    "unit"  : "count",
+    "color" : "21/a",
+}
+
+metric_info["dhcp_declines"] = {
+    "title" : _("DHCP received declines"),
+    "unit"  : "count",
+    "color" : "24/a",
+}
+
+metric_info["dhcp_informs"] = {
+    "title" : _("DHCP received informs"),
+    "unit"  : "count",
+    "color" : "31/a",
+}
+
+metric_info["dhcp_others"] = {
+    "title" : _("DHCP received other messages"),
+    "unit"  : "count",
+    "color" : "34/a",
+}
+
+metric_info["dhcp_offers"] = {
+    "title" : _("DHCP sent offers"),
+    "unit"  : "count",
+    "color" : "12/a",
+}
+
+metric_info["dhcp_acks"] = {
+    "title" : _("DHCP sent acks"),
+    "unit"  : "count",
+    "color" : "15/a",
+}
+
+metric_info["dhcp_nacks"] = {
+    "title" : _("DHCP sent nacks"),
+    "unit"  : "count",
+    "color" : "22/b",
+}
+
+metric_info["dns_successes"] = {
+    "title" : _("DNS successful responses"),
+    "unit"  : "count",
+    "color" : "11/a",
+}
+
+metric_info["dns_referrals"] = {
+    "title" : _("DNS referrals"),
+    "unit"  : "count",
+    "color" : "14/a",
+}
+
+metric_info["dns_recursion"] = {
+    "title" : _("DNS queries received using recursion"),
+    "unit"  : "count",
+    "color" : "21/a",
+}
+
+metric_info["dns_failures"] = {
+    "title" : _("DNS failed queries"),
+    "unit"  : "count",
+    "color" : "24/a",
+}
+
+metric_info["dns_nxrrset"] = {
+    "title" : _("DNS queries received for non-existent record"),
+    "unit"  : "count",
+    "color" : "31/a",
+}
+
+metric_info["dns_nxdomain"] = {
+    "title" : _("DNS queries received for non-existent domain"),
+    "unit"  : "count",
+    "color" : "34/a",
+}
+
+metric_info["filehandler_perc"] = {
+    "title" : _("Used file handles"),
+    "unit"  : "%",
+    "color" : "#4800ff",
+}
+
+metric_info["fan"] = {
+    "title" : _("Fan speed"),
+    "unit"  : "rpm",
+    "color" : "16/b"
 }
 
 #.
@@ -2487,8 +3770,30 @@ metric_info["citrix_load"] = {
 #   |  metrics                                                             |
 #   '----------------------------------------------------------------------'
 
+check_metrics["check_mk_active-icmp"] = {
+    "rta"   : { "scale" : m },
+    "rtmax" : { "scale" : m },
+    "rtmin" : { "scale" : m },
+}
+
+
+check_metrics["check-mk-host-ping"] = {
+    "rta"   : { "scale" : m },
+    "rtmax" : { "scale" : m },
+    "rtmin" : { "scale" : m },
+}
+
 check_metrics["check-mk-ping"] = {
-    "rta" : { "scale" : m }
+    "rta"   : { "scale" : m },
+    "rtmax" : { "scale" : m },
+    "rtmin" : { "scale" : m },
+}
+
+check_metrics["check-mk-host-ping-cluster"] = {
+    "~.*rta"   : { "name" : "rta",   "scale": m },
+    "~.*pl"    : { "name" : "pl",    "scale": m },
+    "~.*rtmax" : { "name" : "rtmax", "scale": m },
+    "~.*rtmin" : { "name" : "rtmin", "scale": m },
 }
 
 check_metrics["check_mk_active-mail_loop"] = {
@@ -2496,7 +3801,7 @@ check_metrics["check_mk_active-mail_loop"] = {
 }
 
 check_metrics["check_mk_active-http"] = {
-    "time" : { "name": "responese_time" },
+    "time" : { "name": "response_time" },
     "size" : { "name": "http_bandwidth" },
 }
 
@@ -2527,6 +3832,13 @@ check_metrics["check_mk_active-tcp"] = {
 
 check_metrics["check_mk-citrix_serverload"] = {
     "perf" : { "name" : "citrix_load", "scale" : 0.01 }
+}
+
+check_metrics["check_mk-postfix_mailq"] = {
+    "length"                : { "name" : "mail_queue_deferred_length" },
+    "size"                  : { "name" : "mail_queue_deferred_size" },
+    "~mail_queue_.*_size"   : { "name" : "mail_queue_active_size" },
+    "~mail_queue_.*_length" : { "name" : "mail_queue_active_length" },
 }
 
 check_metrics["check-mk-host-tcp"] = {
@@ -2585,7 +3897,7 @@ check_metrics["check_mk-netscaler_mem"] = {
 ram_used_swap_translation = {
     "ramused"  : { "name" : "mem_used",  "scale" : MB },
     "swapused" : { "name" : "swap_used", "scale" : MB },
-    "memused"  : { "name" : "mem_total", "scale" : MB },
+    "memused"  : { "name" : "total_used", "auto_graph" : False, "scale" : MB },
 }
 
 check_metrics["check_mk-statgrab_mem"] = ram_used_swap_translation
@@ -2599,6 +3911,14 @@ check_metrics["check_mk-mem.used"] = {
     "pagetable"     : { "name" : "mem_lnx_page_tables", "scale" : MB },
     "mapped"        : { "name" : "mem_lnx_mapped", "scale" : MB },
     "committed_as"  : { "name" : "mem_lnx_committed_as", "scale" : MB },
+}
+
+check_metrics["check_mk-esx_vsphere_vm.mem_usage"] = {
+    "host"      : { "name" : "mem_esx_host" },
+    "guest"     : { "name" : "mem_esx_guest" },
+    "ballooned" : { "name" : "mem_esx_ballooned" },
+    "shared"    : { "name" : "mem_esx_shared" },
+    "private"   : { "name" : "mem_esx_private" },
 }
 
 check_metrics["check_mk-ibm_svc_nodestats.disk_latency"] = {
@@ -2650,8 +3970,10 @@ check_metrics["check_mk-aix_memory"] = {
 }
 
 check_metrics["check_mk-mem.win"] = {
-    "memory" : { "name" : "mem_used", "scale" : MB },
-    "pagefile" : { "name" : "pagefile_used", "scale" : MB }
+    "memory"         : { "name" : "mem_used", "scale" : MB },
+    "pagefile"       : { "name" : "pagefile_used", "scale" : MB },
+    "mem_total"      : { "auto_graph" : False, "scale" : MB },
+    "pagefile_total" : { "auto_graph" : False, "scale" : MB},
 }
 
 check_metrics["check_mk-brocade_mlx.module_mem"] = {
@@ -2700,6 +4022,27 @@ check_metrics["check_mk-mem.linux"] = {
     "vmalloc_total"    : { "name" : "mem_lnx_vmalloc_total", },
     "vmalloc_used"     : { "name" : "mem_lnx_vmalloc_used", },
     "vmalloc_chunk"    : { "name" : "mem_lnx_vmalloc_chunk", },
+    "hardware_corrupted" : { "name" : "mem_lnx_hardware_corrupted", },
+
+    # Several computed values should not be graphed because they
+    # are already contained in the other graphs. Or because they
+    # are bizarre
+    "caches"           : { "name" : "caches",          "auto_graph" : False },
+    "swap_free"        : { "name" : "swap_free",       "auto_graph" : False },
+    "mem_free"         : { "name" : "mem_free",        "auto_graph" : False },
+
+    "sreclaimable"     : { "name" : "mem_lnx_sreclaimable",    "auto_graph" : False },
+    "pending"          : { "name" : "mem_lnx_pending",         "auto_graph" : False },
+    "sunreclaim"       : { "name" : "mem_lnx_sunreclaim",      "auto_graph" : False },
+    "anon_huge_pages"  : { "name" : "mem_lnx_anon_huge_pages", "auto_graph" : False },
+    "anon_pages"       : { "name" : "mem_lnx_anon_pages",      "auto_graph" : False },
+    "mapped"           : { "name" : "mem_lnx_mapped",          "auto_graph" : False },
+    "active"           : { "name" : "mem_lnx_active",          "auto_graph" : False },
+    "inactive"         : { "name" : "mem_lnx_inactive",        "auto_graph" : False },
+    "total_used"       : { "name" : "mem_lnx_total_used",      "auto_graph" : False },
+    "unevictable"      : { "name" : "mem_lnx_unevictable",     "auto_graph" : False },
+    "cma_free"         : { "auto_graph" : False },
+    "cma_total"        : { "auto_graph" : False },
 }
 
 check_metrics["check_mk-mem.vmalloc"] = {
@@ -2707,10 +4050,11 @@ check_metrics["check_mk-mem.vmalloc"] = {
     "chunk" : { "name" : "mem_lnx_vmalloc_chunk" }
 }
 
-check_metrics["check_mk-tcp_conn_stats"] = {
+tcp_conn_stats_translation = {
     "SYN_SENT"    : { "name": "tcp_syn_sent" },
     "SYN_RECV"    : { "name": "tcp_syn_recv" },
     "ESTABLISHED" : { "name": "tcp_established" },
+    "LISTEN"      : { "name": "tcp_listen" },
     "TIME_WAIT"   : { "name": "tcp_time_wait" },
     "LAST_ACK"    : { "name": "tcp_last_ack" },
     "CLOSE_WAIT"  : { "name": "tcp_close_wait" },
@@ -2719,14 +4063,18 @@ check_metrics["check_mk-tcp_conn_stats"] = {
     "FIN_WAIT1"   : { "name": "tcp_fin_wait1" },
     "FIN_WAIT2"   : { "name": "tcp_fin_wait2" },
     "BOUND"       : { "name": "tcp_bound" },
+    "IDLE"        : { "name": "tcp_idle" },
 }
+check_metrics["check_mk-tcp_conn_stats"] = tcp_conn_stats_translation
+check_metrics["check_mk-datapower_tcp"] = tcp_conn_stats_translation
 
 check_metrics["check_mk_active-disk_smb"] = {
     "~.*" : { "name" : "fs_used" }
 }
 
 df_translation = {
-    "~(?!inodes_used|fs_size|growth|trend|fs_provisioning).*"   : { "name"  : "fs_used", "scale" : MB },
+    "~(?!inodes_used|fs_size|growth|trend|fs_provisioning|"
+      "uncommitted|overprovisioned).*$"   : { "name"  : "fs_used", "scale" : MB },
     "fs_size" : { "scale" : MB },
     "growth"  : { "name"  : "fs_growth", "scale" : MB / 86400.0 },
     "trend"   : { "name"  : "fs_trend", "scale" : MB / 86400.0 },
@@ -2752,14 +4100,30 @@ check_metrics["check_mk-ibm_svc_mdiskgrp"]                      = df_translation
 check_metrics["check_mk-fast_lta_silent_cubes.capacity"]        = df_translation
 check_metrics["check_mk-fast_lta_volumes"]                      = df_translation
 check_metrics["check_mk-libelle_business_shadow.archive_dir"]   = df_translation
-check_metrics["check_mk-netapp_api_volume"]                     = df_translation
+check_metrics["check_mk-netapp_api_volumes"]                    = df_translation
+check_metrics["check_mk-netapp_api_qtree_quota"]                = df_translation
 check_metrics["check_mk-emc_isilon_quota"]                      = df_translation
 check_metrics["check_mk-emc_isilon_ifs"]                        = df_translation
+check_metrics["check_mk-mongodb_collections"]                   = df_translation
+
+disk_utilization_translation = { "disk_utilization" : { "scale" : 100.0 } }
+
+check_metrics["check_mk-diskstat"]                      = disk_utilization_translation
+check_metrics["check_mk-emc_vplex_director_stats"]      = disk_utilization_translation
+check_metrics["check_mk-emc_vplex_volumes"]             = disk_utilization_translation
+check_metrics["check_mk-esx_vsphere_counters.diskio"]   = disk_utilization_translation
+check_metrics["check_mk-hp_msa_controller.io"]          = disk_utilization_translation
+check_metrics["check_mk-hp_msa_disk.io"]                = disk_utilization_translation
+check_metrics["check_mk-hp_msa_volume.io"]              = disk_utilization_translation
+check_metrics["check_mk-winperf_phydisk"]               = disk_utilization_translation
+check_metrics["check_mk-arbor_peakflow_sp.disk_usage"]  = disk_utilization_translation
+check_metrics["check_mk-arbor_peakflow_tms.disk_usage"] = disk_utilization_translation
+check_metrics["check_mk-arbor_pravail.disk_usage"]      = disk_utilization_translation
 
 # in=0;;;0; inucast=0;;;; innucast=0;;;; indisc=0;;;; inerr=0;0.01;0.1;; out=0;;;0; outucast=0;;;; outnucast=0;;;; outdisc=0;;;; outerr=0;0.01;0.1;; outqlen=0;;;0;
 if_translation = {
-    "in"        : { "name": "if_in_octets" },
-    "out"       : { "name": "if_out_octets" },
+    "in"        : { "name": "if_in_bps", "scale": 8 },
+    "out"       : { "name": "if_out_bps", "scale": 8 },
     "indisc"    : { "name": "if_in_discards" },
     "inerr"     : { "name": "if_in_errors" },
     "outdisc"   : { "name": "if_out_discards" },
@@ -2797,6 +4161,7 @@ check_metrics["check_mk-brocade_fcport"] = {
     "txframes"       : { "name": "fc_tx_frames", },
     "rxcrcs"         : { "name": "fc_crc_errors" },
     "rxencoutframes" : { "name": "fc_encouts" },
+    "rxencinframes"  : { "name": "fc_encins" },
     "c3discards"     : { "name": "fc_c3discards" },
     "notxcredits"    : { "name": "fc_notxcredits" },
 }
@@ -2838,10 +4203,11 @@ check_metrics["check_mk-mysql.innodb_io"] = {
 }
 
 check_metrics["check_mk-esx_vsphere_counters.diskio"] = {
-    "read"      : { "name" : "disk_read_throughput" },
-    "write"     : { "name" : "disk_write_throughput" },
-    "ios"       : { "name" : "disk_ios" },
-    "latency"   : { "name" : "disk_latency" },
+    "read"             : { "name" : "disk_read_throughput" },
+    "write"            : { "name" : "disk_write_throughput" },
+    "ios"              : { "name" : "disk_ios" },
+    "latency"          : { "name" : "disk_latency" },
+    "disk_utilization" : { "scale" : 100.0 },
 }
 
 check_metrics["check_mk-emcvnx_disks"] = {
@@ -2851,12 +4217,8 @@ check_metrics["check_mk-emcvnx_disks"] = {
 
 check_metrics["check_mk-diskstat"] = {
     "read" : { "name" : "disk_read_throughput" },
-    "write": { "name" : "disk_write_throughput" }
-}
-
-check_metrics["check_mk-netapp_api_protocol"] = {
-    "read_ops" : { "name" : "disk_read_ios" },
-    "write_ops": { "name" : "disk_write_ios" }
+    "write": { "name" : "disk_write_throughput" },
+    "disk_utilization" : { "scale" : 100.0 },
 }
 
 check_metrics["check_mk-ibm_svc_systemstats.iops"] = {
@@ -2866,6 +4228,10 @@ check_metrics["check_mk-ibm_svc_systemstats.iops"] = {
 
 check_metrics["check_mk-dell_powerconnect_temp"] = {
     "temperature" : { "name" : "temp" }
+}
+
+check_metrics["check_mk-bluecoat_diskcpu"] = {
+    "value" : { "name" : "generic_util" }
 }
 
 check_metrics["check_mk-ipmi_sensors"] = {
@@ -2892,7 +4258,16 @@ check_metrics["check_mk-apc_symmetra"] = {
     "runtime"    : { "name" : "lifetime_remaining", "scale" : 60 },
 }
 
-check_metrics["check_mk-kernel.util"]                           = {
+check_metrics["check_mk-apc_symmetra.temp"] = {
+    "systemp"    : { "name" : "battery_temp" },
+}
+
+check_metrics["check_mk-apc_symmetra.elphase"] = {
+    "OutputLoad" : { "name" : "output_load" },
+    "batcurr"    : { "name" : "battery_current" },
+}
+
+check_metrics["check_mk-kernel.util"] = {
     "wait" : { "name" : "io_wait" },
     "guest" : { "name" : "cpu_util_guest" },
     "steal" : { "name" : "cpu_util_steal" },
@@ -2950,7 +4325,13 @@ check_metrics["check_mk-ibm_svc_systemstats.cache"] = {
 }
 
 check_metrics["check_mk-esx_vsphere_hostsystem.mem_usage"] = {
-    "usage" : { "name" : "mem_used" }
+    "usage"     : { "name" : "mem_used" },
+    "mem_total" : { "auto_graph" : False },
+}
+
+check_metrics["check_mk-esx_vsphere_hostsystem.mem_usage_cluster"] = {
+    "usage"     : { "name" : "mem_used" },
+    "mem_total" : { "auto_graph" : False },
 }
 
 check_metrics["check_mk-ibm_svc_host"] = {
@@ -3074,11 +4455,17 @@ check_metrics["check_mk-raritan_pdu_outletcount"] = {
 }
 
 check_metrics["check_mk-docsis_channels_upstream"] = {
-    "total"      : { "name" : "total_modems" },
-    "active"     : { "name" : "active_modems" },
-    "registered" : { "name" : "registered_modems" },
-    "util"       : { "name" : "channel_utilization" },
-    "frequency"  : { "scale" : 1000000.0 },
+    "total"                   : { "name" : "total_modems" },
+    "active"                  : { "name" : "active_modems" },
+    "registered"              : { "name" : "registered_modems" },
+    "util"                    : { "name" : "channel_utilization" },
+    "frequency"               : { "scale" : 1000000.0 },
+    "codewords_corrected"     : { "scale" : 100.0 },
+    "codewords_uncorrectable" : { "scale" : 100.0 },
+}
+
+check_metrics["check_mk-docsis_channels_downstream"] = {
+    "power" : { "name" : "downstream_power" },
 }
 
 check_metrics["check_mk-zfs_arc_cache"]  = {
@@ -3109,6 +4496,22 @@ check_metrics["check_mk-oracle_logswitches"] = {
 
 check_metrics["check_mk-oracle_dataguard_stats"] = {
     "apply_lag" : { "name" : "database_apply_lag" }
+}
+
+check_metrics["check_mk-oracle_performance"] = {
+    "DB_CPU"                  : { "name" : "oracle_db_cpu" },
+    "DB_time"                 : { "name" : "oracle_db_time" },
+    "buffer_hit_ratio"        : { "name" : "oracle_buffer_hit_ratio" },
+    "db_block_gets"           : { "name" : "oracle_db_block_gets" },
+    "db_block_change"         : { "name" : "oracle_db_block_change" },
+    "consistent_gets"         : { "name" : "oracle_db_block_gets" },
+    "physical_reads"          : { "name" : "oracle_physical_reads" },
+    "physical_writes"         : { "name" : "oracle_physical_writes" },
+    "free_buffer_wait"        : { "name" : "oracle_free_buffer_wait" },
+    "buffer_busy_wait"        : { "name" : "oracle_buffer_busy_wait" },
+    "library_cache_hit_ratio" : { "name" : "oracle_library_cache_hit_ratio" },
+    "pinssum"                 : { "name" : "oracle_pins_sum" },
+    "pinhitssum"              : { "name" : "oracle_pin_hits_sum" },
 }
 
 check_metrics["check_mk-db2_logsize"] = {
@@ -3261,6 +4664,28 @@ check_metrics["check_mk-smart.stats"] = {
 check_metrics["check_mk-ps"] = ps_translation
 check_metrics["check_mk-ps.perf"] = ps_translation
 
+check_metrics["check_mk-mssql_counters.sqlstats"] = {
+    "batch_requests/sec"        : { "name" : "requests_per_second" },
+    "sql_compilations/sec"      : { "name" : "requests_per_second" },
+    "sql_re-compilations/sec"   : { "name" : "requests_per_second" },
+}
+
+check_metrics["check_mk-cisco_mem"] = {
+    "mem_used" : { "name" : "mem_used_percent" }
+}
+
+check_metrics["check_mk-cisco_sys_mem"] = {
+    "mem_used" : { "name" : "mem_used_percent" }
+}
+
+check_metrics["check_mk-cisco_mem_asa"] = {
+    "mem_used" : { "name" : "mem_used_percent" }
+}
+
+check_metrics["check_mk-fortigate_sessions_base"] = {
+    "session"   : { "name" : "active_sessions" }
+}
+
 
 #.
 #   .--Perf-O-Meters-------------------------------------------------------.
@@ -3274,6 +4699,9 @@ check_metrics["check_mk-ps.perf"] = ps_translation
 #   |  Definition of Perf-O-Meters                                         |
 #   '----------------------------------------------------------------------'
 
+# If multiple Perf-O-Meters apply, the first applicable Perf-O-Meter in the list will
+# be the one appearing in the GUI.
+
 # Types of Perf-O-Meters:
 # linear      -> multiple values added from left to right
 # logarithmic -> one value in a logarithmic scale
@@ -3281,6 +4709,11 @@ check_metrics["check_mk-ps.perf"] = ps_translation
 # stacked     -> two Perf-O-Meters of type linear, logarithmic or dual, stack vertically
 # The label of dual and stacked is taken from the definition of the contained Perf-O-Meters
 
+perfometer_info.append({
+    "type"     : "linear",
+    "segments" : [ "mem_used_percent" ],
+    "total"    : 100.0,
+})
 
 perfometer_info.append({
     "type"     : "linear",
@@ -3304,6 +4737,13 @@ perfometer_info.append({
 perfometer_info.append({
     "type"       : "logarithmic",
     "metric"     : "uptime",
+    "half_value" : 2592000.0,
+    "exponent"   : 2,
+})
+
+perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "age",
     "half_value" : 2592000.0,
     "exponent"   : 2,
 })
@@ -3363,6 +4803,13 @@ perfometer_info.append({
 
 perfometer_info.append({
     "type"       : "logarithmic",
+    "metric"     : "pressure_pa",
+    "half_value" : 10,
+    "exponent"   : 2,
+})
+
+perfometer_info.append({
+    "type"       : "logarithmic",
     "metric"     : "cifs_share_users",
     "half_value" : 10,
     "exponent"   : 2,
@@ -3385,6 +4832,13 @@ perfometer_info.append({
 perfometer_info.append({
     "type"          : "logarithmic",
     "metric"        : "sync_latency",
+    "half_value"    : 5,
+    "exponent"      : 2,
+})
+
+perfometer_info.append({
+    "type"          : "logarithmic",
+    "metric"        : "mail_latency",
     "half_value"    : 5,
     "exponent"      : 2,
 })
@@ -3582,6 +5036,12 @@ perfometer_info.append({
 
 perfometer_info.append({
     "type"      : "linear",
+    "segments"  : [ "generic_util", ],
+    "total"     : 100.0,
+})
+
+perfometer_info.append({
+    "type"      : "linear",
     "segments"  : [ "util1", ],
     "total"     : 100.0,
 })
@@ -3637,7 +5097,7 @@ perfometer_info.append({
 })
 
 # TODO total = None?
-perfometer_info.append(("linear", ( [ "mem_used", "swap_used", "caches", "mem_free", "swap_free" ], None, ("mem_total,mem_used,+,swap_used,/", "ratio"))))
+perfometer_info.append(("linear", ( [ "mem_used", "swap_used", "caches", "mem_free", "swap_free" ], None, ("mem_total,mem_used,+,swap_used,/,100,*", "%"))))
 
 perfometer_info.append({
     "type"      : "linear",
@@ -3714,6 +5174,7 @@ perfometer_info.append(("dual", [
         "exponent"      : 2,
     }
 ]))
+
 
 perfometer_info.append(("dual", [
     {
@@ -3845,6 +5306,13 @@ perfometer_info.append({
 })
 
 perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "energy",
+    "half_value" : 10000,
+    "exponent"   : 3,
+})
+
+perfometer_info.append({
     "type"      : "linear",
     "segments"  : [ "voltage_percent" ],
     "total"     : 100.0,
@@ -3874,6 +5342,18 @@ perfometer_info.append(("stacked", [
 perfometer_info.append({
     "type"      : "linear",
     "segments"  : [ "cache_hit_ratio" ],
+    "total"     : 100,
+})
+
+perfometer_info.append({
+    "type"      : "linear",
+    "segments"  : [ "varnish_worker_thread_ratio" ],
+    "total"     : 100,
+})
+
+perfometer_info.append({
+    "type"      : "linear",
+    "segments"  : [ "varnish_backend_success_ratio" ],
     "total"     : 100,
 })
 
@@ -3991,6 +5471,12 @@ perfometer_info.append({
 
 perfometer_info.append({
     "type"      : "linear",
+    "segments"  : [ "health_perc" ],
+    "total"     : 100,
+})
+
+perfometer_info.append({
+    "type"      : "linear",
     "segments"  : [ "deviation_calibration_point" ],
     "total"     : 10,
 })
@@ -3999,6 +5485,20 @@ perfometer_info.append({
     "type"      : "linear",
     "segments"  : [ "deviation_airflow" ],
     "total"     : 10,
+})
+
+perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "airflow",
+    "half_value" : 300,
+    "exponent"   : 2,
+})
+
+perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "fluidflow",
+    "half_value" : 0.2,
+    "exponent"   : 5,
 })
 
 perfometer_info.append(("stacked", [
@@ -4019,8 +5519,8 @@ perfometer_info.append(("stacked", [
 # TODO: :max should be the default?
 perfometer_info.append({
     "type"      : "linear",
-    "segments"  : [ "used_dhcp_leases" ],
-    "total"     : "used_dhcp_leases:max",
+    "segments"  : [ "free_dhcp_leases" ],
+    "total"     : "free_dhcp_leases:max",
 })
 
 perfometer_info.append(("stacked", [
@@ -4048,7 +5548,7 @@ perfometer_info.append(("stacked", [
     {
         "type"          : "logarithmic",
         "metric"        : "security_updates",
-        "hal_value"     : 10,
+        "half_value"    : 10,
         "exponent"      : 2,
     }
 ]))
@@ -4087,6 +5587,13 @@ perfometer_info.append({
     "metric"        : "mail_queue_deferred_length",
     "half_value"    : 10000,
     "exponent"      : 5
+})
+
+perfometer_info.append({
+    "type"          : "logarithmic",
+    "metric"        : "messages_inbound,messages_outbound,+",
+    "half_value"    : 100,
+    "exponent"      : 5,
 })
 
 perfometer_info.append({
@@ -4151,6 +5658,69 @@ perfometer_info.append({
     "exponent"   : 2,
 })
 
+perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "mem_pages_rate",
+    "half_value" : 5000,
+    "exponent"   : 2,
+})
+
+perfometer_info.append({
+    "type"     : "linear",
+    "segments" : [ "storage_processor_util" ],
+    "total"    : 100.0,
+})
+
+perfometer_info.append({
+    "type"     : "linear",
+    "segments" : [ "active_vpn_tunnels" ],
+    "total"    : "active_vpn_tunnels:max"
+})
+
+
+for x in reversed(range(1, MAX_NUMBER_HOPS)):
+    perfometer_info.append(("dual", [
+        {
+            "type"     : "linear",
+            "segments" : [ "hop_%d_pl" % x ],
+            "total"    : 100.0,
+        },
+        {
+            "type"       : "logarithmic",
+            "metric"        : "hop_%d_rta" % x,
+            "half_value"    : 0.1,
+            "exponent"      : 4
+        }
+    ]))
+
+perfometer_info.append({
+    "type"       : "logarithmic",
+    "metric"     : "oracle_db_cpu",
+    "half_value" : 50.0,
+    "exponent"   : 2,
+})
+
+perfometer_info.append({
+    "type" : "linear",
+    "segments" : ["active_sessions_%s" % device
+                  for device, name, color in skype_mobile_devices],
+    # there is no limit and no way to determine the max so far for
+    # all segments
+})
+
+perfometer_info.append({
+    "type"     : "linear",
+    "segments" : [ "filehandler_perc" ],
+    "total"    : 100.0,
+})
+
+perfometer_info.append({
+    "type"      : "logarithmic",
+    "metric"    : "fan",
+    "half_value": 3000,
+    "exponent"  : 2,
+})
+
 #.
 #   .--Graphs--------------------------------------------------------------.
 #   |                    ____                 _                            |
@@ -4163,10 +5733,21 @@ perfometer_info.append({
 #   |  Definitions of time series graphs                                   |
 #   '----------------------------------------------------------------------'
 
+# Beware: The order of the list elements of graph_info is actually important.
+# It determines the order of graphs of a service, which in turn is used by
+# the report definitions to determine which graph to include.
+
 # Order of metrics in graph definitions important if you use only 'area':
 # The first one must be the bigger one, then descending.
 # Example: ('tablespace_size', 'area'),
 #          ('tablespace_used', 'area')
+
+graph_info.append({
+    "title"     : _("Fan speed"),
+    "metrics"   : [
+        ( "fan_speed", "area" ),
+    ]
+})
 
 graph_info.append({
     "title"   : _("Context switches"),
@@ -4243,10 +5824,10 @@ graph_info.append({
 
 
 graph_info.append({
-    "title"   : _("Qos class traffic"),
+    "title"   : _("QoS class traffic"),
     "metrics" : [
-        ( "qos_outbound_bytes_rate", "area" ),
-        ( "qos_dropped_bytes_rate", "-area" ),
+        ( "qos_outbound_bytes_rate,8,*@bits/s", "area", _("Qos outbound bits")),
+        ( "qos_dropped_bytes_rate,8,*@bits/s", "-area", _("QoS dropped bits")),
     ],
 })
 
@@ -4299,6 +5880,14 @@ graph_info.append({
 })
 
 graph_info.append({
+    "title"   : _("Read / Write queue length"),
+    "metrics" : [
+        ( "disk_read_ql", "area" ),
+        ( "disk_write_ql", "-area" )
+    ],
+})
+
+graph_info.append({
     "title"   : _("Backup time"),
     "metrics" : [
         ( "checkpoint_age", "area" ),
@@ -4312,6 +5901,13 @@ graph_info.append({
         ( "time_offset", "area" ),
         ( "jitter", "line" )
     ],
+    "scalars" : [
+        ( "time_offset:crit",     _("Upper critical level")),
+        ( "time_offset:warn",     _("Upper warning level")),
+        ( "0,time_offset:warn,-", _("Lower warning level")),
+        ( "0,time_offset:crit,-", _("Lower critical level")),
+    ],
+    "range" : ( "0,time_offset:crit,-", "time_offset:crit" ),
 })
 
 graph_info.append({
@@ -4327,6 +5923,7 @@ graph_info.append({
         ( "zfs_metadata_limit", "line" ),
     ],
 })
+
 
 graph_info.append({
     "title"     : _("Cache hit ratio"),
@@ -4352,7 +5949,27 @@ graph_info.append({
         ( "children_user_time",   "stack" ),
         ( "system_time",          "stack" ),
         ( "children_system_time", "stack" ),
-        ( "user_time,children_user_time,system_time,children_system_time,+,+,+#888", "line", _("Total") ),
+        ( "user_time,children_user_time,system_time,children_system_time,+,+,+#888888", "line", _("Total") ),
+    ],
+    "omit_zero_metrics" : True,
+    "conflicting_metrics" : [ "cmk_time_agent", "cmk_time_snmp", "cmk_time_ds" ],
+})
+
+
+graph_info.append({
+    "title" : _("Time usage by phase"),
+    "metrics" : [
+        ( "user_time,children_user_time,+",     "stack", _("CPU time in user space") ),
+        ( "system_time,children_system_time,+", "stack", _("CPU time in operating system") ),
+        ( "cmk_time_agent",                     "stack" ),
+        ( "cmk_time_snmp",                      "stack" ),
+        ( "cmk_time_ds",                        "stack" ),
+        ( "execution_time",                     "line" ),
+    ],
+    "optional_metrics" : [
+        "cmk_time_agent",
+        "cmk_time_snmp",
+        "cmk_time_ds"
     ],
 })
 
@@ -4379,6 +5996,17 @@ graph_info.append({
 })
 
 graph_info.append({
+    "title"   : _("Storage Processor utilization"),
+    "metrics" : [
+        ( "storage_processor_util", "area" ),
+    ],
+    "scalars" : [
+        "storage_processor_util:warn",
+        "storage_processor_util:crit",
+    ]
+})
+
+graph_info.append({
     "title"   : _("CPU Load - %(load1:max@count) CPU Cores"),
     "metrics" : [
         ( "load1", "area" ),
@@ -4388,7 +6016,7 @@ graph_info.append({
         "load1:warn",
         "load1:crit",
     ],
-    "optional_metrics" : [ "load15" ],
+    "optional_metrics" : [ "load15", ],
 })
 
 graph_info.append({
@@ -4445,6 +6073,19 @@ graph_info.append({
 })
 
 graph_info.append({
+    "title"  : _( "Per Core utilization" ),
+    "metrics" : [
+        ( "cpu_core_util_%d" % num, "line" )
+        for num in range(MAX_CORES)
+    ],
+    "range" : (0, 100),
+    "optional_metrics" : [
+        "cpu_core_util_%d" % num
+        for num in range(2, MAX_CORES)
+    ]
+})
+
+graph_info.append({
     "metrics" : [
         ( "fs_used", "area" ),
         ( "fs_size,fs_used,-#e3fff9", "stack", _("Free space") ),
@@ -4458,9 +6099,16 @@ graph_info.append({
 })
 
 graph_info.append({
-    "title" : _("Growing / Shrinking"),
+    "title" : _("Growing"),
     "metrics" : [
        ( "fs_growth.max,0,MAX",             "area",  _("Growth"), ),
+    ],
+})
+
+graph_info.append({
+    "title" : _("Shrinking"),
+    "consolidation_function": "min",
+    "metrics" : [
        ( "fs_growth.min,0,MIN,-1,*#299dcf", "-area", _("Shrinkage") ),
     ],
 })
@@ -4469,7 +6117,6 @@ graph_info.append({
     "metrics" : [
        ( "fs_trend", "line" ),
     ],
-    "range" : (0, 0),
 })
 
 graph_info.append({
@@ -4506,6 +6153,22 @@ graph_info.append({
         "cpu_util_guest",
         "cpu_util_steal",
     ],
+    "range" : (0, 100),
+})
+
+graph_info.append({
+    "title"   : _("CPU utilization"),
+    "metrics" : [
+        ( "user",                           "area"  ),
+        ( "system",                         "stack" ),
+        ( "io_wait",                        "stack" ),
+        ( "cpu_util_steal",                 "stack" ),
+        ( "user,system,io_wait,cpu_util_steal,+,+,+#004080", "line", _("Total") ),
+    ],
+    "conflicting_metrics" : [
+        "cpu_util_guest",
+    ],
+    "omit_zero_metrics" : True,
     "range" : (0, 100),
 })
 
@@ -4586,7 +6249,7 @@ graph_info.append({
     "metrics" : [
         ( "disk_utilization",  "area" ),
     ],
-    "range" : (0, 1),
+    "range" : (0, 100),
 })
 
 graph_info.append({
@@ -4663,11 +6326,12 @@ graph_info.append({
         ( "indexes_size",  "stack" ),
         ( "unused_size",  "stack" ),
     ],
-})
-
-graph_info.append({
-    "metrics" : [
-        ( "database_size",  "area" ),
+    "optional_metrics" : [
+        "unallocated_size",
+        "reserved_size",
+        "data_size",
+        "indexes_size",
+        "unused_size",
     ],
     "legend_scale" : MB,
 })
@@ -4789,6 +6453,16 @@ graph_info.append({
     ],
 })
 
+# Same but for checks that have been translated in to bits/s
+graph_info.append({
+    "title" : _("Bandwidth"),
+    "metrics" : [
+        ( "if_in_bps",   "area", ),
+        ( "if_out_bps",  "-area", ),
+    ],
+})
+
+
 graph_info.append({
     "title" : _("Packets"),
     "metrics" : [
@@ -4856,8 +6530,24 @@ graph_info.append({
     "metrics" : [
         ("mem_used",  "area"),
         ("swap_used",  "stack"),
-        ("mem_total",  "line"),
     ],
+    "conflicting_metrics" : [ "swap_total" ],
+    "scalars" : [
+        ( "swap_used:max,mem_used:max,+#008080", _("Total RAM + SWAP installed") ),
+        ( "mem_used:max#80ffff",                 _("Total RAM installed") ),
+    ],
+    "range" : (0, "swap_used:max,mem_used:max,+"),
+})
+
+graph_info.append({
+    "metrics" : [
+        ("mem_used_percent",  "area"),
+    ],
+    "scalars" : [
+        "mem_used_percent:warn",
+        "mem_used_percent:crit",
+    ],
+    "range" : (0, 100),
 })
 
 # Linux memory graphs. They are a lot...
@@ -4913,6 +6603,32 @@ graph_info.append({
         ("mem_lnx_inactive", "area"),
     ],
     "conflicting_metrics" : [ "mem_lnx_active_anon" ],
+})
+
+graph_info.append({
+    "title" : _("RAM used"),
+    "metrics" : [
+        ("mem_used", "area"),
+    ],
+    "scalars" : [
+        ("mem_used:max#000000", "Maximum"),
+        ("mem_used:warn", "Warning"),
+        ("mem_used:crit", "Critical"),
+    ],
+    "range" : (0, "mem_used:max"),
+})
+
+graph_info.append({
+    "title" : _("Commit Charge"),
+    "metrics" : [
+        ("pagefile_used", "area"),
+    ],
+    "scalars" : [
+        ("pagefile_used:max#000000", "Maximum"),
+        ("pagefile_used:warn", "Warning"),
+        ("pagefile_used:crit", "Critical"),
+    ],
+    "range" : (0, "pagefile_used:max"),
 })
 
 graph_info.append({
@@ -5013,8 +6729,18 @@ graph_info.append({
 
 
 graph_info.append({
+    "title" : _("Private and shared memory"),
+    "metrics" : [
+        ("mem_esx_shared", "area"),
+        ("mem_esx_private", "area"),
+    ],
+})
+
+
+graph_info.append({
     "title" : _("TCP Connection States"),
     "metrics" : [
+       ( "tcp_listen",      "stack"),
        ( "tcp_syn_sent",    "stack"),
        ( "tcp_syn_recv",    "stack"),
        ( "tcp_established", "stack"),
@@ -5026,6 +6752,7 @@ graph_info.append({
        ( "tcp_fin_wait1",   "stack"),
        ( "tcp_fin_wait2",   "stack"),
        ( "tcp_bound",       "stack"),
+       ( "tcp_idle",        "stack"),
     ],
     "omit_zero_metrics" : True,
 })
@@ -5076,10 +6803,67 @@ graph_info.append({
 })
 
 graph_info.append({
+    "title" : _("Event Console performance"),
+    "metrics" : [
+        ( "average_message_rate",   "area" ),
+        ( "average_rule_trie_rate", "area" ),
+        ( "average_rule_hit_rate",  "area" ),
+        ( "average_drop_rate",      "area" ),
+        ( "average_event_rate",     "area" ),
+        ( "average_connect_rate",   "area" ),
+    ],
+})
+
+graph_info.append({
+    "title" : _("Event Console times"),
+    "metrics" : [
+        ( "average_request_time",    "stack" ),
+        ( "average_processing_time", "stack" ),
+    ],
+})
+
+graph_info.append({
     "title" : _("Livestatus Requests per Connection"),
     "metrics" : [
         ( "livestatus_request_rate,livestatus_connect_rate,/#88aa33", "area",
           _("Average requests per connection")),
+    ],
+})
+
+graph_info.append({
+    "metrics" : [
+        ( "livestatus_usage", "area" ),
+    ],
+    "range" : (0, 100),
+})
+
+
+graph_info.append({
+    "metrics" : [
+        ( "livestatus_overflows_rate", "area" ),
+    ],
+})
+
+
+graph_info.append({
+    "metrics" : [
+        ( "helper_usage_cmk",  "area" ),
+    ],
+    "range" : (0, 100),
+})
+
+graph_info.append({
+    "metrics" : [
+        ( "helper_usage_generic", "area" ),
+    ],
+    "range" : (0, 100),
+})
+
+graph_info.append({
+    "title" : _("Average check latency"),
+    "metrics" : [
+        ( "average_latency_cmk",     "line" ),
+        ( "average_latency_generic", "line" ),
     ],
 })
 
@@ -5098,25 +6882,29 @@ graph_info.append({
         ( "free_dhcp_leases",    "stack" ),
         ( "pending_dhcp_leases", "stack" ),
     ],
-    "range" : (0, "free_dhcp_leases:max"),
     "scalars" : [
         "free_dhcp_leases:warn",
         "free_dhcp_leases:crit",
+    ],
+    "range" : (0, "free_dhcp_leases:max"),
+    "omit_zero_metrics" : True,
+    "optional_metrics" : [
+        "pending_dhcp_leases"
     ]
 })
 
-graph_info.append({
-    "title" : _("Used DHCP Leases"),
-    "metrics" : [
-        ( "used_dhcp_leases",    "area" ),
-    ],
-    "range" : (0, "used_dhcp_leases:max"),
-    "scalars" : [
-        "used_dhcp_leases:warn",
-        "used_dhcp_leases:crit",
-        ("used_dhcp_leases:max#000000", _("Total number of leases")),
-    ]
-})
+#graph_info.append({
+#    "title" : _("Used DHCP Leases"),
+#    "metrics" : [
+#        ( "used_dhcp_leases",    "area" ),
+#    ],
+#    "range" : (0, "used_dhcp_leases:max"),
+#    "scalars" : [
+#        "used_dhcp_leases:warn",
+#        "used_dhcp_leases:crit",
+#        ("used_dhcp_leases:max#000000", _("Total number of leases")),
+#    ]
+#})
 
 graph_info.append({
     "title" : _("Handled Requests"),
@@ -5139,7 +6927,7 @@ graph_info.append({
 })
 
 graph_info.append({
-    "title" : _("Seconds serving"),
+    "title" : _("Time spent for various page types"),
     "metrics" : [
         ("secs_cmk_views",      "stack"),
         ("secs_cmk_wato",       "stack"),
@@ -5179,10 +6967,26 @@ graph_info.append({
 })
 
 graph_info.append({
-    "title" : _("Outgoing Mails"),
+    "title" : _("Amount of mails in queues"),
     "metrics" : [
-        ( "mail_queue_deferred_length",   "stack" ),
-        ( "mail_queue_active_length",     "stack" ),
+        ( "mail_queue_deferred_length", "stack" ),
+        ( "mail_queue_active_length",   "stack" ),
+    ],
+})
+
+graph_info.append({
+    "title" : _("Size of mails in queues"),
+    "metrics" : [
+        ( "mail_queue_deferred_size", "stack" ),
+        ( "mail_queue_active_size",   "stack" ),
+    ],
+})
+
+graph_info.append({
+    "title" : _("Inbound and Outbound Messages"),
+    "metrics" : [
+        ( "messages_outbound", "stack" ),
+        ( "messages_inbound",  "stack" ),
     ],
 })
 
@@ -5204,11 +7008,21 @@ graph_info.append({
 })
 
 graph_info.append({
+    "title" : _("Number of processes"),
+    "metrics" : [
+        ( "processes", "area" ),
+    ]
+})
+
+graph_info.append({
     "title" : _("Size of processes"),
     "metrics" : [
         ( "process_resident_size", "area" ),
         ( "process_virtual_size", "stack" ),
-    ]
+        ( "process_resident_size", "area" ),
+        ( "process_mapped_size", "stack" ),
+    ],
+    "optional_metrics": [ "process_mapped_size" ]
 })
 
 graph_info.append({
@@ -5238,11 +7052,17 @@ graph_info.append({
 graph_info.append({
     "title" : _("Errors"),
     "metrics" : [
-        ( "fc_crc_errors", "area" ),
-        ( "fc_encouts", "stack" ),
-        ( "fc_c3discards", "stack" ),
-        ( "fc_notxcredits", "stack" ),
-    ]
+        ( "fc_crc_errors",    "area" ),
+        ( "fc_c3discards",    "stack" ),
+        ( "fc_notxcredits",   "stack" ),
+        ( "fc_encouts",       "stack" ),
+        ( "fc_encins",        "stack" ),
+        ( "fc_bbcredit_zero", "stack" ),
+    ],
+    "optional_metrics" : [
+        "fc_encins",
+        "fc_bbcredit_zero",
+    ],
 })
 
 graph_info.append({
@@ -5264,85 +7084,30 @@ graph_info.append({
     ]
 })
 
-graph_info.append({
-    "title" : _("NFS traffic"),
-    "metrics" : [
-        ("nfs_read_data", "-area"),
-        ("nfs_write_data", "area"),
-    ],
-})
+for what, text in [ ("nfs",     "NFS"),
+                    ("cifs",    "CIFS"),
+                    ("san",     "SAN"),
+                    ("fcp",     "FCP"),
+                    ("iscsi",   "iSCSI"),
+                    ("nfsv4",   "NFSv4"),
+                    ("nfsv4_1", "NFSv4.1"),
+                  ]:
+    graph_info.append({
+        "title" : _("%s traffic") % text,
+        "metrics" : [
+            ("%s_read_data" % what, "-area"),
+            ("%s_write_data" % what, "area"),
+        ],
+    })
 
-graph_info.append({
-    "title" : _("NFS latency"),
-    "metrics" : [
-        ("nfs_read_latency", "-area"),
-        ("nfs_write_latency", "area"),
-    ],
-})
+    graph_info.append({
+        "title" : _("%s latency") % text,
+        "metrics" : [
+            ("%s_read_latency" % what, "-area"),
+            ("%s_write_latency" % what, "area"),
+        ],
+    })
 
-graph_info.append({
-    "title" : _("CIFS traffic"),
-    "metrics" : [
-        ("cifs_read_data", "-area"),
-        ("cifs_write_data", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("CIFS latency"),
-    "metrics" : [
-        ("cifs_read_latency", "-area"),
-        ("cifs_write_latency", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("SAN traffic"),
-    "metrics" : [
-        ("san_read_data", "-area"),
-        ("san_write_data", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("SAN latency"),
-    "metrics" : [
-        ("san_read_latency", "-area"),
-        ("san_write_latency", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("FCP traffic"),
-    "metrics" : [
-        ("fcp_read_data", "-area"),
-        ("fcp_write_data", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("FCP latency"),
-    "metrics" : [
-        ("fcp_read_latency", "-area"),
-        ("fcp_write_latency", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("ISCSI traffic"),
-    "metrics" : [
-        ("icsci_read_data", "-area"),
-        ("icsci_write_data", "area"),
-    ],
-})
-
-graph_info.append({
-    "title" : _("ICSCI latency"),
-    "metrics" : [
-        ("icsci_read_latency", "-area"),
-        ("icsci_write_latency", "area"),
-    ],
-})
 
 graph_info.append({
     "title" : _("Harddrive health statistic"),
@@ -5373,6 +7138,322 @@ graph_info.append({
     "metrics" : [
         ( "rtmax", "area" ),
         ( "rtmin", "area" ),
-        ( "rta", "line" ),
+        ( "rta",   "line" ),
+    ],
+})
+
+for idx in range(1, MAX_NUMBER_HOPS):
+    graph_info.append({
+        "title" : _("Hop %d Round trip average") % idx,
+        "metrics" : [
+            ( "hop_%d_rtmax"   % idx, "area" ),
+            ( "hop_%d_rtmin"   % idx, "area" ),
+            ( "hop_%d_rta"     % idx, "line" ),
+            ( "hop_%d_rtstddev" % idx, "line" ),
+            ( "hop_%d_response_time" % idx, "line" ),
+        ],
+    })
+    graph_info.append({
+        "title" : _("Hop %d Packet loss") % idx,
+        "metrics" : [
+            ( "hop_%d_pl"   % idx, "area" ),
+        ],
+    })
+
+
+def create_hop_response_graph():
+    max_hops  = MAX_NUMBER_HOPS
+    new_graph = {
+        "title" : _("Hop response times"),
+        "metrics": [],
+        "optional_metrics": [],
+    }
+    for idx in range(1, max_hops):
+        color = indexed_color(idx, max_hops)
+        new_graph["metrics"].append( ("hop_%d_response_time%s" % (idx, parse_color_into_hexrgb(color)), "line") )
+        if idx > 0:
+            new_graph["optional_metrics"].append( ("hop_%d_response_time" % (idx + 1)) )
+
+    graph_info.append(new_graph)
+
+create_hop_response_graph()
+
+graph_info.append({
+    "metrics" : [
+        ( "mem_perm_used", "area" )
+    ],
+    "scalars" : [
+        "mem_perm_used:warn",
+        "mem_perm_used:crit",
+        ("mem_perm_used:max#000000", _("Max Perm used")),
+    ],
+    "range" : (0, "mem_perm_used:max")
+})
+
+graph_info.append({
+    "title"     : _("Palo Alto Sessions"),
+    "metrics"   : [ ("tcp_active_sessions", "area"),
+                    ("udp_active_sessions", "stack"),
+                    ("icmp_active_sessions", "stack"),
+                    ("sslproxy_active_sessions", "stack"),
+                ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Backend Connections"),
+    "metrics"   : [
+        ( "varnish_backend_busy_rate",      "line" ),
+        ( "varnish_backend_unhealthy_rate", "line" ),
+        ( "varnish_backend_req_rate",       "line" ),
+        ( "varnish_backend_recycle_rate",   "line" ),
+        ( "varnish_backend_retry_rate",     "line" ),
+        ( "varnish_backend_fail_rate",      "line" ),
+        ( "varnish_backend_toolate_rate",   "line" ),
+        ( "varnish_backend_conn_rate",      "line" ),
+        ( "varnish_backend_reuse_rate",     "line" ),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Cache"),
+    "metrics"   : [
+        ( "varnish_cache_miss_rate",    "line" ),
+        ( "varnish_cache_hit_rate",     "line" ),
+        ( "varnish_cache_hitpass_rate", "line" ),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Clients"),
+    "metrics"   : [
+        ( "varnish_client_req_rate",       "line" ),
+        ( "varnish_client_conn_rate",      "line" ),
+        ( "varnish_client_drop_rate",      "line" ),
+        ( "varnish_client_drop_late_rate", "line" ),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish ESI Errors and Warnings"),
+    "metrics"   : [
+        ( "varnish_esi_errors_rate",   "line" ),
+        ( "varnish_esi_warnings_rate", "line" ),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Fetch"),
+    "metrics"   : [
+        ( "varnish_fetch_oldhttp_rate", "line" ),
+        ( "varnish_fetch_head_rate",    "line" ),
+        ( "varnish_fetch_eof_rate",     "line" ),
+        ( "varnish_fetch_zero_rate",    "line" ),
+        ( "varnish_fetch_304_rate",     "line" ),
+        ( "varnish_fetch_length_rate",  "line" ),
+        ( "varnish_fetch_failed_rate",  "line" ),
+        ( "varnish_fetch_bad_rate",     "line" ),
+        ( "varnish_fetch_close_rate",   "line" ),
+        ( "varnish_fetch_1xx_rate",     "line" ),
+        ( "varnish_fetch_chunked_rate", "line" ),
+        ( "varnish_fetch_204_rate",     "line" ),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Objects"),
+    "metrics"   : [
+        ( "varnish_objects_expired_rate",   "line"),
+        ( "varnish_objects_lru_nuked_rate", "line"),
+        ( "varnish_objects_lru_moved_rate", "line"),
+    ],
+})
+
+graph_info.append({
+    "title"     : _("Varnish Worker"),
+    "metrics"   : [
+        ( "varnish_worker_lqueue_rate", "line" ),
+        ( "varnish_worker_create_rate", "line" ),
+        ( "varnish_worker_drop_rate",   "line" ),
+        ( "varnish_worker_rate",        "line" ),
+        ( "varnish_worker_failed_rate", "line" ),
+        ( "varnish_worker_queued_rate", "line" ),
+        ( "varnish_worker_max_rate",    "line" ),
+    ],
+})
+
+graph_info.append({
+    "title" : _("Optical Signal Power"),
+    "metrics" : [
+        ( "rx_light", "line" ),
+        ( "tx_light", "line" )
+    ]
+})
+
+for i in range(10):
+    graph_info.append({
+        "title" : _("Optical Signal Power Lane %d") % i,
+        "metrics" : [
+            ( "rx_light_%d" % i, "line" ),
+            ( "tx_light_%d" % i, "line" )
+        ]
+    })
+
+graph_info.append({
+    "title" : _("Page Activity"),
+    "metrics" : [
+        ("page_reads_sec",   "area" ),
+        ("page_writes_sec",  "-area"),
+    ]
+})
+
+graph_info.append({
+    "title" : _("Datafile Sizes"),
+    "metrics" : [
+        ("allocated_size",   "line" ),
+        ("data_size", "area" )
+    ]
+})
+
+graph_info.append({
+    "title" : _("Authentication Failures"),
+    "metrics" : [
+        ("udp_failed_auth", "line"),
+        ("tcp_failed_auth", "line")
+    ]
+})
+
+graph_info.append({
+    "title" : _("Allocate Requests Exceeding Port Limit"),
+    "metrics" : [
+        ("udp_allocate_requests_exceeding_port_limit", "line"),
+        ("tcp_allocate_requests_exceeding_port_limit", "line")
+    ]
+})
+
+graph_info.append({
+    "title" : _("Packets Dropped"),
+    "metrics" : [
+        ("udp_packets_dropped", "line"),
+        ("tcp_packets_dropped", "line"),
+    ]
+})
+
+graph_info.append({
+    "title" : _("Active Sessions"),
+    "metrics" : [("active_sessions_%s" % device, idx == 0 and "area" or "stack")
+                 for idx, (device, name, color) in enumerate(skype_mobile_devices[::-1])]
+})
+
+graph_info.append({
+    "title" : _("Streams"),
+    "metrics" : [
+        ("failed_inbound_streams", "area"),
+        ("failed_outbound_streams", "-area")
+    ]
+})
+
+graph_info.append({
+    "title"   : _("ORACLE physical IO"),
+    "metrics" : [
+        ("oracle_physical_reads",  "area"),
+        ("oracle_physical_writes", "-area"),
+    ]
+})
+
+graph_info.append({
+    "title"   : _("ORACLE DB time statistics"),
+    "metrics" : [
+        ("oracle_db_cpu",  "line"),
+        ("oracle_db_time", "line"),
+    ]
+})
+
+graph_info.append({
+    "title"   : _("ORACLE buffer pool statistics"),
+    "metrics" : [
+        ("oracle_db_block_gets",    "line"),
+        ("oracle_db_block_change",  "line"),
+        ("oracle_consistent_gets",  "line"),
+        ("oracle_free_buffer_wait", "line"),
+        ("oracle_buffer_busy_wait", "line"),
+    ],
+})
+
+graph_info.append({
+    "title"   : _("ORACLE library cache statistics"),
+    "metrics" : [
+        ("oracle_pins_sum",     "line"),
+        ("oracle_pin_hits_sum", "line"),
+    ],
+})
+
+graph_info.append({
+    "title" : _("DHCP statistics (received messages)"),
+    "metrics" : [
+        ( "dhcp_discovery", "area" ),
+        ( "dhcp_requests",  "stack" ),
+        ( "dhcp_releases",  "stack" ),
+        ( "dhcp_declines",  "stack" ),
+        ( "dhcp_informs",   "stack" ),
+        ( "dhcp_others",    "stack" ),
+    ]
+})
+
+graph_info.append({
+    "title" : _("DHCP statistics (sent messages)"),
+    "metrics" : [
+        ( "dhcp_offers", "area" ),
+        ( "dhcp_acks",   "stack" ),
+        ( "dhcp_nacks",  "stack" ),
+    ]
+})
+
+graph_info.append({
+    "title" : _("DNS statistics"),
+    "metrics" : [
+        ( "dns_successes", "area" ),
+        ( "dns_referrals", "stack" ),
+        ( "dns_recursion", "stack" ),
+        ( "dns_failures",  "stack" ),
+        ( "dns_nxrrset",   "stack" ),
+        ( "dns_nxdomain",  "stack" ),
+    ]
+})
+
+graph_info.append({
+    "title" : _("Connection durations"),
+    "metrics" : [
+        ( "connections_duration_min", "line" ),
+        ( "connections_duration_max", "line" ),
+        ( "connections_duration_mean", "line" ),
+    ]
+})
+
+graph_info.append({
+    "title"   : _("HTTP Timings"),
+    "metrics" : [
+        ( "time_connect", "area", _("Connect") ),
+        ( "time_ssl", "stack", _("Negotiate SSL") ),
+        ( "time_headers", "stack", _("Send request") ),
+        ( "time_transfer", "stack", _("Receive full response") ),
+        ( "time_firstbyte", "line", _("Receive start of response") ),
+        ( "response_time", "line", _("Roundtrip") ),
+    ],
+    "optional_metrics" : [ "time_ssl" ],
+})
+
+graph_info.append({
+    "title"   : _("Web gateway statistics"),
+    "metrics" : [
+        ( "infections_rate",          "stack" ),
+        ( "connections_blocked_rate", "stack" ),
+    ],
+})
+
+graph_info.append({
+    "title"   : _("Web gateway miscellaneous statistics"),
+    "metrics" : [
+        ( "open_network_sockets", "stack" ),
+        ( "connections",          "stack" ),
     ],
 })

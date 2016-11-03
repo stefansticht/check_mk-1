@@ -7,9 +7,6 @@ description:
  This check monitors the temperature for Carel
  air conditioning devices.
 
-perfdata:
- The current temperature in degrees celsius
-
 item:
  The description of the sensor.
 
@@ -17,6 +14,3 @@ inventory:
  One check for each sensor is created by the inventory if the
  sensor does not read 0 or -9999.
 
-[parameters]
-warn(int): Warning level for the temperature.
-crit(int): Critical level for the temperature.

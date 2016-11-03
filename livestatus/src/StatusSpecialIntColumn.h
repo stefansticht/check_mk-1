@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,17 +25,33 @@
 #ifndef StatusSpecialIntColumn_h
 #define StatusSpecialIntColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <string>
 #include "IntColumn.h"
+
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
 
 #define SPIC_MK_INVENTORY_LAST 0
 
-class StatusSpecialIntColumn : public IntColumn
-{
-    int _type;
+class StatusSpecialIntColumn : public IntColumn {
 public:
-    StatusSpecialIntColumn(string name, string description, int type)
-      : IntColumn(name, description, -1), _type(type) {}
-    int32_t getValue(void *, Query *);
+    StatusSpecialIntColumn(const std::string& name,
+                           const std::string& description,
+                           const std::string& inventory_path, int type,
+                           int indirect_offset = -1, int extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset)
+        , _inventory_path(inventory_path)
+        , _type(type) {}
+    int32_t getValue(void* row, contact* auth_user) override;
+
+private:
+    std::string _inventory_path;
+    int _type;
 };
 
-#endif // StatusSpecialIntColumn_h
+#endif  // StatusSpecialIntColumn_h

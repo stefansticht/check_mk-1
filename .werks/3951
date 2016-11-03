@@ -1,0 +1,9 @@
+Title: oracle_sessions: fixed bug with default absolute levels
+Level: 1
+Component: wato
+Compatible: compat
+Version: 1.4.0i2
+Date: 1477397596
+Class: fix
+
+When relative levels were given in a rule but no absolute levels, the default levels from the checkplugin still have been used. Now absolute levels are ignored by default if setting up a rule. This allows to set up a rule for only relative levels. This change is compatible to existing rules! Additionally defaults for absolute levels are still used if no rule is given.

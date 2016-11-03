@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -48,7 +48,12 @@ def inventory_brocade_mlx_temp(parsed):
 
 def check_brocade_mlx_temp(item, params, parsed):
     if item in parsed:
-        return check_temperature(parsed[item], params)
+        return check_temperature(parsed[item], params, "brocade_mlx_temp_%s" % item)
+    elif "Module" in item and not "Sensor" in item:
+        # item discovered in 1.2.6 had the sensor-id stripped and module id replaced
+        # so it's impossible to look by that name
+        return 3, "check had an incompatible change, please re-discover this host"
+
 
 
 check_info["brocade_mlx_temp"] = {

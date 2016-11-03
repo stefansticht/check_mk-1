@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -167,9 +167,14 @@ def paint_perfometer(row):
     content += '<img class=glass src="images/perfometer-bg.png">'
 
     # pnpgraph_present: -1 means unknown (path not configured), 0: no, 1: yes
-    if 'X' in html.display_options and \
-       row["service_pnpgraph_present"] != 0:
-        return "perfometer" + stale_css, ('<a href="%s">%s</a>' % (pnp_url(row, "service"), content))
+    if display_options.enabled(display_options.X) \
+       and row["service_pnpgraph_present"] != 0:
+        if metrics.cmk_graphs_possible():
+            url = new_graphing_url(row, "service")
+        else:
+            url = pnp_url(row, "service")
+        return "perfometer" + stale_css, ('<a href="%s" title="%s">%s</a>' % \
+                                            (url, title, content))
     else:
         return "perfometer" + stale_css, content
 

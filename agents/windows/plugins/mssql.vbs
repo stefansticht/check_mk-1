@@ -5,7 +5,7 @@
 ' on the local system.
 '
 ' The current implementation of the check uses the "trusted authentication"
-' where no user/password needs to be created in the MSSQL server instance by 
+' where no user/password needs to be created in the MSSQL server instance by
 ' default. It is only needed to grant the user as which the Check_MK windows
 ' agent service is running access to the MSSQL database.
 '
@@ -18,7 +18,8 @@
 ' password = secret-pw
 '
 ' The following sources are asked:
-' 1. WMI - to gather a list of local MSSQL-Server instances
+' 1. Registry - To gather a list of local MSSQL-Server instances
+' 2. WMI - To check for the state of the MSSQL service
 ' 2. MSSQL-Servers via ADO/sqloledb connection to gather infos these infos:
 '      a) list and sizes of available databases
 '      b) counters of the database instance
@@ -29,22 +30,22 @@
 
 Option Explicit
 
-Dim WMI, FSO, SHO, prop, instId, instIdx, instVersion, instIds, instName, output
-Dim WMIservice, colRunningServices, objService, cfg_dir, cfg_file, hostname
+Dim WMI, FSO, SHO, items, objItem, prop, instVersion, registry
+Dim sources, instances, instance, instance_id, instance_name
+Dim cfg_dir, cfg_file, hostname
 
-WScript.Timeout = 10
+Const HKLM = &H80000002
 
 ' Directory of all database instance names
-Set instIds = CreateObject("Scripting.Dictionary")
+Set instances = CreateObject("Scripting.Dictionary")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 Set SHO = CreateObject("WScript.Shell")
 
 hostname = SHO.ExpandEnvironmentStrings("%COMPUTERNAME%")
-cfg_dir = "C:\check_mk_agent" 'SHO.ExpandEnvironmentStrings("%MK_CONFDIR%")
+cfg_dir = SHO.ExpandEnvironmentStrings("%MK_CONFDIR%")
 
-output = ""
 Sub addOutput(text)
-    output = output & text & vbLf
+    wscript.echo text
 End Sub
 
 Function readIniFile(path)
@@ -66,85 +67,125 @@ Function readIniFile(path)
                     End If
                 End If
             End If
+            Set FH = Nothing
         Loop
         FH.Close
     End If
     Set readIniFile = parsed
+    Set parsed = Nothing
 End Function
 
-' Dummy empty output.
-' Contains timeout error if this scripts runtime exceeds the timeout
-WScript.echo "<<<mssql_versions>>>"
+Set registry = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\default:StdRegProv")
+Set sources = CreateObject("Scripting.Dictionary")
 
-' Loop all found local MSSQL server instances
-' Try different trees to handle different versions of MSSQL
-On Error Resume Next
-' try SQL Server 2014:
-Set WMI = GetObject("WINMGMTS:\\.\root\Microsoft\SqlServer\ComputerManagement12")
-If Err.Number <> 0 Then
-    Err.Clear()
-    ' try SQL Server 2012:
-    Set WMI = GetObject("WINMGMTS:\\.\root\Microsoft\SqlServer\ComputerManagement11")
-    If Err.Number <> 0 Then
-        Err.Clear()
+Dim service, i, version, edition, value_types, value_names, value_raw, cluster_name
+Set WMI = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
 
-        ' try SQL Server 2008
-        Set WMI = GetObject("WINMGMTS:\\.\root\Microsoft\SqlServer\ComputerManagement10")
-        If Err.Number <> 0 Then
-            Err.Clear()
+'
+' Gather instances on this host, store instance in instances and output version section for it
+'
+registry.EnumValues HKLM, "SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL", _
+                          value_names, value_types
 
-            ' try MSSQL < 10
-            Set WMI = GetObject("WINMGMTS:\\.\root\Microsoft\SqlServer\ComputerManagement")
-            If Err.Number <> 0 Then
-                addOutput( "Error: " & Err.Number & " " & Err.Description )
-                Err.Clear()
-                wscript.quit()
-            End If
-        End If
-    End If
+If Not IsArray(value_names) Then
+    addOutput("ERROR: Failed to gather SQL server instances")
+    wscript.quit(1)
 End If
-On Error Goto 0
 
-Set WMIservice = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+' Make sure that always all sections are present, even in case of an error. 
+' Note: the section <<<mssql_instance>>> section shows the general state 
+' of a database instance. If that section fails for an instance then all 
+' other sections do not contain valid data anyway.
+'
+' Don't move this to another place. We need the steps above to decide whether or
+' not this is a MSSQL server.
+Dim sections, section_id
+Set sections = CreateObject("Scripting.Dictionary")
+sections.add "instance", "<<<mssql_instance:sep(124)>>>"
+sections.add "counters", "<<<mssql_counters>>>"
+sections.add "tablespaces", "<<<mssql_tablespaces>>>"
+sections.add "blocked_sessions", "<<<mssql_blocked_sessions>>>"
+sections.add "backup", "<<<mssql_backup>>>"
+sections.add "transactionlogs", "<<<mssql_transactionlogs>>>"
+sections.add "datafiles", "<<<mssql_datafiles>>>"
+sections.add "clusters", "<<<mssql_clusters>>>"
+' Has been deprecated with 1.4.0i1. Keep this for nicer transition for some versions.
+sections.add "versions", "<<<mssql_versions:sep(124)>>>"
 
-For Each prop In WMI.ExecQuery("SELECT * FROM SqlServiceAdvancedProperty WHERE " & _
-                               "SQLServiceType = 1 AND PropertyName = 'VERSION'")
-
-
-    Set colRunningServices = WMIservice.ExecQuery("SELECT State FROM Win32_Service WHERE Name = '" & prop.ServiceName & "'")
-    instId      = Replace(prop.ServiceName, "$", "__")
-    instVersion = prop.PropertyStrValue
-    instIdx = Replace(instId, "__", "_")
-    addOutput( "<<<mssql_versions>>>" )
-    addOutput( instIdx & "  " & instVersion )
-
-    ' Now query the server instance for the databases
-    ' Use name as key and always empty value for the moment
-    For Each objService In colRunningServices
-        If objService.State = "Running" Then
-            instIds.add instId, ""
-        End If
-    Next
+For Each section_id In sections.Keys
+    addOutput(sections(section_id))
 Next
 
-Set WMI = nothing
+For i = LBound(value_names) To UBound(value_names)
+    instance_id = value_names(i)
+
+    registry.GetStringValue HKLM, "SOFTWARE\Microsoft\Microsoft SQL Server\" & _
+                                  "Instance Names\SQL", _
+                                  instance_id, instance_name
+
+    ' HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL10_50.MSSQLSERVER\MSSQLServer\CurrentVersion
+    registry.GetStringValue HKLM, "SOFTWARE\Microsoft\Microsoft SQL Server\" & _
+                                  instance_name & "\MSSQLServer\CurrentVersion", _
+                                  "CurrentVersion", version
+
+    ' HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Microsoft SQL Server\MSSQL10_50.MSSQLSERVER\Setup
+    registry.GetStringValue HKLM, "SOFTWARE\Microsoft\Microsoft SQL Server\" & _
+                                  instance_name & "\Setup", _
+                                  "Edition", edition
+
+    ' Check whether or not this instance is clustered
+    registry.GetStringValue HKLM, "SOFTWARE\Microsoft\Microsoft SQL Server\" & _
+                                  instance_name & "\Cluster", "ClusterName", cluster_name
+
+    If IsNull(cluster_name) Then
+        cluster_name = ""
+
+        ' In case of instance name "MSSQLSERVER" always use (local) as connect string
+        If instance_id = "MSSQLSERVER" Then
+            sources.add instance_id, "(local)"
+        Else
+            sources.add instance_id, hostname & "\" & instance_id
+        End If
+    Else
+        ' In case the instance name is "MSSQLSERVER" always use the virtual server name
+        If instance_id = "MSSQLSERVER" Then
+            sources.add instance_id, cluster_name
+        Else
+            sources.add instance_id, cluster_name & "\" & instance_id
+        End If
+    End If
+
+    addOutput(sections("instance"))
+    addOutput("MSSQL_" & instance_id & "|config|" & version & "|" & edition & "|" & cluster_name)
+
+    ' Only collect results for instances which services are currently running
+    Set service = WMI.ExecQuery("SELECT State FROM Win32_Service " & _
+                          "WHERE Name = 'MSSQL$" & instance_id & "' AND State = 'Running'")
+    If Not IsNull(service) Then
+        instances.add instance_id, ""
+    End If
+Next
+
+Set service  = Nothing
+Set WMI      = Nothing
+Set registry = Nothing
 
 Dim CONN, RS, CFG, AUTH
 
-' Initialize connection objects
-Set CONN = CreateObject("ADODB.Connection")
-Set RS = CreateObject("ADODB.Recordset")
+' Initialize database connection objects
+Set CONN      = CreateObject("ADODB.Connection")
+Set RS        = CreateObject("ADODB.Recordset")
 CONN.Provider = "sqloledb"
-
-' Select a special DB
-'CONN.Properties("Initial Catalog").Value = "test123"
+' It's a local connection. 2 seconds should be enough!
+CONN.ConnectionTimeout = 2
 
 ' Loop all found server instances and connect to them
 ' In my tests only the connect using the "named instance" string worked
-For Each instId In instIds.Keys
+For Each instance_id In instances.Keys: Do ' Continue trick
+
     ' Use either an instance specific config file named mssql_<instance-id>.ini
     ' or the default mysql.ini file.
-    cfg_file = cfg_dir & "\mssql_" & instId & ".ini"
+    cfg_file = cfg_dir & "\mssql_" & instance & ".ini"
     If Not FSO.FileExists(cfg_file) Then
         cfg_file = cfg_dir & "\mssql.ini"
         If Not FSO.FileExists(cfg_file) Then
@@ -167,27 +208,46 @@ For Each instId In instIds.Keys
         CONN.Properties("Password").Value = AUTH("password")
     End If
 
-    If InStr(instId, "__") <> 0 Then
-        instName = Split(instId, "__")(1)
-    instId = Replace(instId, "__", "_")
-    Else
-        instName = instId
-    End If
+    CONN.Properties("Data Source").Value = sources(instance_id)
 
-    ' In case of instance name "MSSQLSERVER" always use (local) as connect string
-    If instName = "MSSQLSERVER" Then
-        CONN.Properties("Data Source").Value = "(local)"
-    Else
-        CONN.Properties("Data Source").Value = hostname & "\" & instName
-    End If
-
+    ' Try to connect to the instance and catch the error when not able to connect
+    ' Then add the instance to the agent output and skip over to the next instance
+    ' in case the connection could not be established.
+    On Error Resume Next
     CONN.Open
+    On Error GoTo 0
+
+    ' Collect eventual error messages of errors occured during connecting. Hopefully
+    ' there is only on error in the list of errors.
+    Dim error_msg
+    If CONN.Errors.Count > 0 Then
+        error_msg = CONN.Errors(0).Description
+    End If
+    Err.Clear
+
+    addOutput(sections("instance"))
+    ' 0 - closed
+    ' 1 - open
+    ' 2 - connecting
+    ' 4 - executing a command
+    ' 8 - rows are being fetched
+    addOutput("MSSQL_" & instance_id & "|state|" & CONN.State & "|" & error_msg)
+
+    ' adStateClosed = 0
+    If CONN.State = 0 Then
+        Exit Do
+    End If
 
     ' Get counter data for the whole instance
+    addOutput(sections("counters"))
+    RS.Open "SELECT GETUTCDATE() as utc_date", CONN
+    addOutput( "None utc_time None " & RS("utc_date") )
+    RS.Close
+
     RS.Open "SELECT counter_name, object_name, instance_name, cntr_value " & _
             "FROM sys.dm_os_performance_counters " & _
             "WHERE object_name NOT LIKE '%Deprecated%'", CONN
-    addOutput( "<<<mssql_counters>>>" )
+
     Dim objectName, counterName, instanceName, value
     Do While NOT RS.Eof
         objectName   = Replace(Replace(Trim(RS("object_name")), " ", "_"), "$", "_")
@@ -205,14 +265,14 @@ For Each instId In instIds.Keys
     RS.Open "SELECT session_id, wait_duration_ms, wait_type, blocking_session_id " & _
             "FROM sys.dm_os_waiting_tasks " & _
             "WHERE blocking_session_id <> 0 ", CONN
-    addOutput( "<<<mssql_blocked_sessions>>>" )
+    addOutput(sections("blocked_sessions"))
     Dim session_id, wait_duration_ms, wait_type, blocking_session_id
     Do While NOT RS.Eof
         session_id = Trim(RS("session_id"))
         wait_duration_ms = Trim(RS("wait_duration_ms"))
         wait_type = Trim(RS("wait_type"))
         blocking_session_id = Trim(RS("blocking_session_id"))
-        addOutput( session_id & " " & wait_duration_ms & " " & wait_type & " " & blocking_session_id  )
+        addOutput(session_id & " " & wait_duration_ms & " " & wait_type & " " & blocking_session_id)
         RS.MoveNext
     Loop
     RS.Close
@@ -229,8 +289,8 @@ For Each instId In instIds.Keys
     RS.Close
 
     ' Now gather the db size and unallocated space
-    addOutput( "<<<mssql_tablespaces>>>" )
-    Dim i, dbSize, unallocated, reserved, data, indexSize, unused
+    addOutput(sections("tablespaces"))
+    Dim dbSize, unallocated, reserved, data, indexSize, unused
     For Each dbName in dbNames.Keys
         ' Switch to other database and then ask for stats
         RS.Open "USE [" & dbName & "]", CONN
@@ -263,37 +323,121 @@ For Each instId In instIds.Keys
             Set RS = RS.NextRecordset
             i = i + 1
         Loop
-        addOutput( instId & " " & Replace(dbName, " ", "_") & " " & dbSize & " " & unallocated & " " & reserved & " " & _
-                     data & " " & indexSize & " " & unused )
+        addOutput("MSSQL_" & instance_id & " " & Replace(dbName, " ", "_") & " " & dbSize & " " & _
+                  unallocated & " " & reserved & " " & data & " " & indexSize & " " & unused)
         Set RS = CreateObject("ADODB.Recordset")
     Next
 
     ' Loop all databases to get the date of the last backup. Only show databases
-    ' which have at least one backup 
-    Dim lastBackupDate
-    addOutput( "<<<mssql_backup>>>" )
-    addOutput( "Blocked _Sessions" )
+    ' which have at least one backup
+    Dim lastBackupDate, backup_type
+    addOutput(sections("backup"))
     For Each dbName in dbNames.Keys
-        RS.open "SELECT CONVERT(VARCHAR, DATEADD(s, DATEDIFF(s, '19700101', MAX(backup_finish_date)), '19700101'), 120) AS last_backup_date " & _
+        RS.open "SELECT CONVERT(VARCHAR, DATEADD(s, DATEDIFF(s, '19700101', MAX(backup_finish_date)), '19700101'), 120) AS last_backup_date," & _
+                "type " & _
                 "FROM msdb.dbo.backupset " & _
-                "WHERE database_name = '" & dbName & "'", CONN
+                "WHERE database_name = '" & dbName & "'" & _
+                "GROUP BY type", CONN
         Do While Not RS.Eof
             lastBackupDate = Trim(RS("last_backup_date"))
+
+            backup_type = Trim(RS("type"))
+            If backup_type = "" Then
+                backup_type = "-"
+            End If
+
             If lastBackupDate <> "" Then
-                addOutput( instId & " " & Replace(dbName, " ", "_") & " " & lastBackupDate )
+                addOutput("MSSQL_" & instance_id & " " & Replace(dbName, " ", "_") & _
+                          " " & lastBackupDate & " " & backup_type)
             End If
             RS.MoveNext
         Loop
         RS.Close
     Next
 
-    CONN.Close
-Next
+    ' Loop all databases to get the size of the transaction log
+    addOutput(sections("transactionlogs"))
+    For Each dbName in dbNames.Keys
+       RS.Open "USE [" & dbName & "];", CONN
+       RS.Open "SELECT name, physical_name," &_
+                  "  cast(max_size/128 as bigint) as MaxSize," &_
+                  "  cast(size/128 as bigint) as AllocatedSize," &_
+                  "  cast(FILEPROPERTY (name, 'spaceused')/128 as bigint) as UsedSize," &_
+                  "  case when max_size = '-1' then '1' else '0' end as Unlimited" &_
+                  " FROM sys.database_files WHERE type_desc = 'LOG'", CONN
+        Do While Not RS.Eof
+            addOutput( instance_id & " " & Replace(dbName, " ", "_") & " " & Replace(RS("name"), " ", "_") & _
+                      " " & Replace(RS("physical_name"), " ", "_") & " " & _
+                      RS("MaxSize") & " " & RS("AllocatedSize") & " " & RS("UsedSize")) & _
+                      " " & RS("Unlimited")
+            RS.MoveNext
+        Loop
+        RS.Close
+    Next
 
+    ' Loop all databases to get the size of the transaction log
+    addOutput(sections("datafiles"))
+    For Each dbName in dbNames.Keys
+        RS.Open "USE [" & dbName & "];", CONN
+        RS.Open "SELECT name, physical_name," &_
+                "  cast(max_size/128 as bigint) as MaxSize," &_
+                "  cast(size/128 as bigint) as AllocatedSize," &_
+                "  cast(FILEPROPERTY (name, 'spaceused')/128 as bigint) as UsedSize," &_
+                "  case when max_size = '-1' then '1' else '0' end as Unlimited" &_
+                " FROM sys.database_files WHERE type_desc = 'ROWS'", CONN
+        Do While Not RS.Eof
+            addOutput( instance_id & " " & Replace(dbName, " ", "_") & " " & Replace(RS("name"), " ", "_") & _
+                      " " & Replace(RS("physical_name"), " ", "_") & " " & _
+                      RS("MaxSize") & " " & RS("AllocatedSize") & " " & RS("UsedSize")) & _
+                      " " & RS("Unlimited")
+            RS.MoveNext
+        Loop
+        RS.Close
+    Next
+    
+    addOutput(sections("clusters"))
+    Dim active_node, nodes
+    For Each dbName in dbNames.Keys : Do
+        RS.Open "USE [" & dbName & "];", CONN
+    
+        ' Skip non cluster instances
+        RS.Open "SELECT SERVERPROPERTY('IsClustered') AS is_clustered", CONN
+        If RS("is_clustered") = 0 Then
+            RS.Close
+            Exit Do
+        End If
+        RS.Close
+        
+        nodes = ""
+        RS.Open "SELECT nodename FROM sys.dm_os_cluster_nodes", CONN
+        Do While Not RS.Eof
+            If nodes <> "" Then
+                nodes = nodes & ","
+            End If    
+            nodes = nodes & RS("nodename")
+            RS.MoveNext
+        Loop
+        RS.Close
+
+        active_node = "-"
+        RS.Open "SELECT SERVERPROPERTY('ComputerNamePhysicalNetBIOS') AS active_node", CONN
+        Do While Not RS.Eof
+            active_node = RS("active_node")
+            RS.MoveNext
+        Loop
+        RS.Close
+        
+        addOutput(instance_id & " " & Replace(dbName, " ", "_") & " " & active_node & " " & nodes)
+    Loop While False: Next
+
+    CONN.Close
+
+Loop While False: Next
+
+Set sources = nothing
+Set instances = nothing
+Set sections = nothing
 Set RS = nothing
 Set CONN = nothing
 Set FSO = nothing
 Set SHO = nothing
-
-' finally output collected data
-WScript.echo output

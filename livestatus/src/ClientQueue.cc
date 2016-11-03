@@ -17,58 +17,51 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "ClientQueue.h"
 #include <unistd.h>
+#include <algorithm>
 
-ClientQueue::ClientQueue()
-{
-    pthread_mutex_init(&_lock, 0);
-    pthread_cond_init(&_signal, 0);
-}
+using std::for_each;
+using std::lock_guard;
+using std::mutex;
+using std::unique_lock;
 
-ClientQueue::~ClientQueue()
-{
-    for (_queue_t::iterator it = _queue.begin();
-            it != _queue.end();
-            ++it)
+ClientQueue::ClientQueue() : _should_terminate(false) {}
+
+ClientQueue::~ClientQueue() { for_each(_queue.begin(), _queue.end(), close); }
+
+void ClientQueue::addConnection(int fd) {
     {
-        close(*it);
+        lock_guard<mutex> lg(_mutex);
+        _queue.push_back(fd);
     }
-    pthread_mutex_destroy(&_lock);
-    pthread_cond_destroy(&_signal);
+    _cond.notify_one();
 }
 
-void ClientQueue::addConnection(int fd)
-{
-    pthread_mutex_lock(&_lock);
-    _queue.push_back(fd);
-    pthread_mutex_unlock(&_lock);
-    pthread_cond_signal(&_signal);
-}
-
-
-int ClientQueue::popConnection()
-{
-    pthread_mutex_lock(&_lock);
-    if (_queue.size() == 0) {
-        pthread_cond_wait(&_signal, &_lock);
+int ClientQueue::popConnection() {
+    unique_lock<mutex> ul(_mutex);
+    while (_queue.empty() && !_should_terminate) {
+        _cond.wait(ul);
     }
-
-    int fd = -1;
-    if (_queue.size() > 0) {
-        fd = _queue.front();
-        _queue.pop_front();
+    if (_queue.empty()) {
+        return -1;
     }
-    pthread_mutex_unlock(&_lock);
+    int fd = _queue.front();
+    _queue.pop_front();
     return fd;
 }
 
-void ClientQueue::wakeupAll()
-{
-    pthread_cond_broadcast(&_signal);
+// Note: What we *really* want here is the functionality of
+// notify_all_at_thread_exit.
+void ClientQueue::terminate() {
+    {
+        lock_guard<mutex> lg(_mutex);
+        _should_terminate = true;
+    }
+    _cond.notify_all();
 }

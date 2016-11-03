@@ -17,57 +17,35 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "ContactsColumn.h"
-#include "nagios.h"
-#include "TableContacts.h"
-#include "logger.h"
-#include "Query.h"
-#include "tables.h"
+#include "Renderer.h"
+
+using std::string;
 
 extern contact *contact_list;
 
-void *ContactsColumn::getNagiosObject(char *name)
-{
-    return (void *)find_contact(name);
-}
-
-void ContactsColumn::output(void *data, Query *query)
-{
-    query->outputBeginList();
-    data = shiftPointer(data);
-
-    if (data) {
-        bool first = true;
-
-        contact *ctc = contact_list;
-        while (ctc) {
-            if (isNagiosMember(data, ctc)) {
-                if (first)
-                    first = false;
-                else
-                    query->outputListSeparator();
-                query->outputString(ctc->name);
+void ContactsColumn::output(void *row, RowRenderer &r,
+                            contact * /* auth_user */) {
+    ListRenderer l(r);
+    if (auto data = shiftPointer(row)) {
+        for (contact *ctc = contact_list; ctc != nullptr; ctc = ctc->next) {
+            if ((*containsContact(ctc))(data)) {
+                l.output(string(ctc->name));
             }
-            ctc = ctc->next;
         }
     }
-    query->outputEndList();
 }
 
-
-bool ContactsColumn::isEmpty(void *svc)
-{
-    contact *ct = contact_list;
-    while (ct) {
-        if (isNagiosMember(svc, ct))
+bool ContactsColumn::isEmpty(void *data) {
+    for (contact *ctc = contact_list; ctc != nullptr; ctc = ctc->next) {
+        if ((*containsContact(ctc))(data)) {
             return false;
-        ct = ct->next;
+        }
     }
     return true;
 }
-

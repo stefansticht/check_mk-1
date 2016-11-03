@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -58,14 +58,25 @@
 # SCSITargetId                : 0
 
 def inv_win_disks(info):
-    node = inv_tree("hardware.storage.disks:")
+    node = inv_tree_list("hardware.storage.disks:")
     array = {}
+    first_varname = None
+
     for line in info:
         if len(line) > 2:
             line = [ line[0], ":".join(line[1:]) ]
         varname, value = line
         varname = re.sub(" *","", varname)
         value = re.sub("^ ", "", value)
+
+        if first_varname and varname == first_varname:
+            # Looks like we have a new instance
+            node.append(array)
+            array = {}
+
+        if not first_varname:
+            first_varname = varname
+
         if varname == "Manufacturer":
             array["vendor"] = value
         elif varname == "InterfaceType":
@@ -77,9 +88,11 @@ def inv_win_disks(info):
         elif varname == "SerialNumber":
             array["serial"] = value
         elif varname == "Size":
-            array["size"] = int(value)
+            if value != "":
+                array["size"] = int(value)
         elif varname == "MediaType":
-            array["type"] = value
+            if value != "":
+                array["type"] = value
         elif varname == "Signature":
             if value != "":
                 array["signature"] = int(value)

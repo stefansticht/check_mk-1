@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -27,24 +27,27 @@
 
 extern TimeperiodsCache *g_timeperiods_cache;
 
-// Get the name of a timeperiod from a custom variable and
-// lookup the current state of that period
-int32_t CustomTimeperiodColumn::getValue(void *data, Query *)
-{
-    customvariablesmember *cvm = getCVM(data);
-    while (cvm) {
-        if (cvm->variable_name == _varname)
-            return g_timeperiods_cache->inTimeperiod(cvm->variable_value);
-        cvm = cvm->next;
+// Get the name of a timeperiod from a custom variable and lookup the current
+// state of that period
+int32_t CustomTimeperiodColumn::getValue(void *row, contact * /* auth_user */) {
+    for (customvariablesmember *cvm = getCVM(row); cvm != nullptr;
+         cvm = cvm->next) {
+        if (cvm->variable_name == _varname) {
+            return static_cast<int32_t>(
+                g_timeperiods_cache->inTimeperiod(cvm->variable_value));
+        }
     }
-    return 1; // assume 7X24
+    return 1;  // assume 7X24
 }
 
-customvariablesmember *CustomTimeperiodColumn::getCVM(void *data)
-{
-    if (!data) return 0;
+customvariablesmember *CustomTimeperiodColumn::getCVM(void *data) {
+    if (data == nullptr) {
+        return nullptr;
+    }
     data = shiftPointer(data);
-    if (!data) return 0;
-    return *(customvariablesmember **)((char *)data + _offset);
+    if (data == nullptr) {
+        return nullptr;
+    }
+    return *reinterpret_cast<customvariablesmember **>(
+        reinterpret_cast<char *>(data) + _offset);
 }
-

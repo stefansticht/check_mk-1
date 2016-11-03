@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,22 +25,28 @@
 #ifndef OffsetIntColumn_h
 #define OffsetIntColumn_h
 
-#include "config.h"
-
-#include <stdlib.h>
+#include "config.h"  // IWYU pragma: keep
+#include <sys/types.h>
+#include <string>
 #include "IntColumn.h"
 
-class OffsetIntColumn : public IntColumn
-{
-    int _offset;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class OffsetIntColumn : public IntColumn {
 public:
-    OffsetIntColumn(string name, string description, int offset, int indirect_offset = -1)
-        : IntColumn(name, description, indirect_offset), _offset(offset) {}
-    int32_t getValue(void *data, Query *);
-protected:
-    int offset() { return _offset; }
+    OffsetIntColumn(const std::string& name, const std::string& description,
+                    int offset, int indirect_offset = -1, int extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset) {}
+    int32_t getValue(void* row, contact* auth_user) override;
+    int offset() const { return _offset; }
+
+private:
+    const int _offset;
 };
 
-
-#endif // OffsetIntColumn_h
-
+#endif  // OffsetIntColumn_h

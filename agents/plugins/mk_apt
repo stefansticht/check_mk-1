@@ -1,4 +1,5 @@
 #!/bin/bash
+# Check for APT updates (Debian, Ubuntu)
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -18,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -39,10 +40,26 @@
 UPGRADE=upgrade
 DO_UPDATE=yes
 
-if type apt-get > /dev/null ; then
-    echo '<<<apt:sep(0)>>>'
+
+function check_apt_update {
     if [ "$DO_UPDATE" = yes ] ; then
-        apt-get update -qq
+        # NOTE: Even with -qq, apt-get update can output several lines to
+        # stderr, e.g.:
+        #
+        # W: There is no public key available for the following key IDs:
+        # 1397BC53640DB551
+        apt-get update -qq 2> /dev/null
     fi
     apt-get -o 'Debug::NoLocking=true' -s -qq "$UPGRADE" | grep -v '^Conf'
+}
+
+
+if type apt-get > /dev/null ; then
+    echo '<<<apt:sep(0)>>>'
+    out=$(check_apt_update)
+    if [ -z "$out" ]; then
+        echo "No updates pending for installation"
+    else
+        echo "$out"
+    fi
 fi

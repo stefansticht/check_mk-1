@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,28 +25,35 @@
 #ifndef ServicelistColumn_h
 #define ServicelistColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Column.h"
 #include "nagios.h"
+#include "opids.h"
+class Filter;
+class RowRenderer;
 
-class ServicelistColumn : public Column
-{
+class ServicelistColumn : public Column {
     int _offset;
     bool _show_host;
     int _info_depth;
+
 public:
-    ServicelistColumn(string name, string description, int offset, int indirect_offset, bool show_host, int info_depth)
-        : Column(name, description, indirect_offset), _offset(offset), _show_host(show_host), _info_depth(info_depth) {}
-    int type() { return COLTYPE_LIST; };
-    void output(void *, Query *);
-    Filter *createFilter(int opid, char *value);
+    ServicelistColumn(const std::string &name, const std::string &description,
+                      int offset, int indirect_offset, bool show_host,
+                      int info_depth, int extra_offset = -1)
+        : Column(name, description, indirect_offset, extra_offset)
+        , _offset(offset)
+        , _show_host(show_host)
+        , _info_depth(info_depth) {}
+    ColumnType type() override { return ColumnType::list; };
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
     servicesmember *getMembers(void *data);
+
 private:
     int inCustomTimeperiod(service *svc, const char *varname);
 };
 
-
-
-#endif // ServicelistColumn_h
-
+#endif  // ServicelistColumn_h

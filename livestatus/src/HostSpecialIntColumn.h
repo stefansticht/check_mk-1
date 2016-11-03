@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,23 +25,26 @@
 #ifndef HostSpecialIntColumn_h
 #define HostSpecialIntColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <string>
 #include "IntColumn.h"
+#include "nagios.h"
 
-#define HSIC_REAL_HARD_STATE      0
-#define HSIC_PNP_GRAPH_PRESENT    1
-#define HSIC_MK_INVENTORY_LAST    2
+#define HSIC_REAL_HARD_STATE 0
+#define HSIC_PNP_GRAPH_PRESENT 1
+#define HSIC_MK_INVENTORY_LAST 2
 
-class HostSpecialIntColumn : public IntColumn
-{
+class HostSpecialIntColumn : public IntColumn {
     int _type;
 
 public:
-    HostSpecialIntColumn(string name, string description, int hsic_type, int indirect)
-        : IntColumn(name, description, indirect) , _type(hsic_type) {}
-    int32_t getValue(void *data, Query *);
+    HostSpecialIntColumn(const std::string& name,
+                         const std::string& description, int hsic_type,
+                         int indirect_offset, int extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset)
+        , _type(hsic_type) {}
+    int32_t getValue(void* row, contact* auth_user) override;
 };
 
-#endif // HostSpecialIntColumn_h
-
+#endif  // HostSpecialIntColumn_h

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,28 +25,28 @@
 #ifndef ColumnsColumn_h
 #define ColumnsColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "StringColumn.h"
-
-#define COLCOL_TABLE 1
-#define COLCOL_NAME  2
-#define COLCOL_DESCR 3
-#define COLCOL_TYPE  4
-
 class TableColumns;
 
-class ColumnsColumn : public StringColumn
-{
+#define COLCOL_TABLE 1
+#define COLCOL_NAME 2
+#define COLCOL_DESCR 3
+#define COLCOL_TYPE 4
+
+class ColumnsColumn : public StringColumn {
     int _colcol;
     TableColumns *_table_columns;
 
 public:
-    ColumnsColumn(string name, string description, int colcol, TableColumns *tablecols) :
-        StringColumn(name, description, -1), _colcol(colcol), _table_columns(tablecols) {}
-    char *getValue(void *data);
+    ColumnsColumn(const std::string &name, const std::string &description,
+                  int colcol, TableColumns *tablecols, int indirect_offset = -1,
+                  int extra_offset = -1)
+        : StringColumn(name, description, indirect_offset, extra_offset)
+        , _colcol(colcol)
+        , _table_columns(tablecols) {}
+    std::string getValue(void *data) const override;
 };
 
-
-#endif // ColumnsColumn_h
-
+#endif  // ColumnsColumn_h

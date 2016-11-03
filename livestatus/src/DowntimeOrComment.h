@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,17 +25,13 @@
 #ifndef DowntimeOrComment_h
 #define DowntimeOrComment_h
 
-#include "config.h"
-
-#include "nagios.h"
+#include "config.h"  // IWYU pragma: keep
+#include <ctime>
 #include <string>
-using namespace std;
+#include "nagios.h"  // IWYU pragma: keep
 
 /* The structs for downtime and comment are so similar, that
    we handle them with the same logic */
-
-
-
 
 /*
    typedef struct nebstruct_downtime_struct{
@@ -83,41 +79,39 @@ using namespace std;
    }nebstruct_comment_data;
  */
 
-struct DowntimeOrComment
-{
-    int           _type;
-    host         *_host;
-    service      *_service;
-    time_t        _entry_time;
-    char *        _author_name;
-    char*         _comment;
+class DowntimeOrComment {
+public:
+    int _type;
+    host *_host;
+    service *_service;
+    time_t _entry_time;
+    std::string _author_name;
+    std::string _comment;
     unsigned long _id;
-    int           _is_service;
+    int _is_service;
 
-    DowntimeOrComment(nebstruct_downtime_struct *data, unsigned long id);
+    DowntimeOrComment(nebstruct_downtime_struct *dt, unsigned long id);
     virtual ~DowntimeOrComment();
 };
 
-struct Downtime : public DowntimeOrComment
-{
-    time_t        _start_time;
-    time_t        _end_time;
-    int           _fixed;
-    int           _duration;
-    int           _triggered_by;
-    Downtime(nebstruct_downtime_struct *data);
+class Downtime : public DowntimeOrComment {
+public:
+    time_t _start_time;
+    time_t _end_time;
+    int _fixed;
+    int _duration;
+    int _triggered_by;
+    explicit Downtime(nebstruct_downtime_struct *dt);
 };
 
-struct Comment : public DowntimeOrComment
-{
-    time_t        _expire_time;
-    int           _persistent;
-    int           _source;
-    int           _entry_type;
-    int           _expires;
-    Comment(nebstruct_comment_struct *data);
+class Comment : public DowntimeOrComment {
+public:
+    time_t _expire_time;
+    int _persistent;
+    int _source;
+    int _entry_type;
+    int _expires;
+    explicit Comment(nebstruct_comment_struct *co);
 };
 
-
-#endif // Downtime_h
-
+#endif  // DowntimeOrComment_h

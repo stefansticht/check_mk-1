@@ -16,19 +16,3 @@ inventory:
 item:
  Check item is the ip address of the remote tunnel endpoint
 
-examples:
- checkgroup_parameters.setdefault('vpn_tunnel', [])
-
- checkgroup_parameters['vpn_tunnel'] = [
-   ( {'state': 1, 'tunnels': [('12.34.56.78', 'dark tunnel', 2)]}, [], ALL_HOSTS, ALL_SERVICES ),
-   ] + checkgroup_parameters['vpn_tunnel']
-
-
-[parameters]
-parameters(dict): with the keys "state" and "tunnel"
-
- 'state' is the globally returned state of no longer existent tunnels
-
- 'tunnels' is a list of tuples. Each tuple consists of the ip address of the tunnel endpoint,
- a corresponding name of the tunnel shown in the check output, and the state which is returned
- when the tunnel no longer exists.

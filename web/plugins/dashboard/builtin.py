@@ -19,10 +19,12 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+import config
 
 builtin_dashboards["main"] = {
     "single_infos": [],
@@ -73,7 +75,6 @@ builtin_dashboards["main"] = {
                     'hst2': 'on',
                     'hstp': '',
                 },
-                'summary_host': {'is_summary_host': '0'},
                 'host_acknowledged': {'is_host_acknowledged': '0'},
                 'host_scheduled_downtime_depth': {'is_host_scheduled_downtime_depth': '0'},
             },
@@ -111,7 +112,6 @@ builtin_dashboards["main"] = {
             'group_painters': [],
             'context': {
                 'service_acknowledged': {'is_service_acknowledged': '0'},
-                'summary_host': {'is_summary_host': '0'},
                 'in_downtime': {'is_in_downtime': '0'},
                 'hoststate': {'hst0': 'on',
                               'hst1': '',
@@ -181,42 +181,42 @@ builtin_dashboards["main"] = {
 
             'play_sounds': False,
             'public': True,
-            'sorters': [],
+            'sorters': [
+                ('log_time', True)
+            ],
         },
     ]
 }
 
-#Only work in OMD installations
-if defaults.omd_site:
-    def topology_url():
-        return defaults.url_prefix + 'nagvis/frontend/nagvis-js/index.php?' + \
-               'mod=Map&header_template=on-demand-filter&header_menu=1&label_show=1' + \
-               '&sources=automap&act=view&backend_id=' + defaults.omd_site + \
-               '&render_mode=undirected&url_target=main&filter_group=' + \
-               (config.topology_default_filter_group or '')
+def topology_url():
+    return config.url_prefix() + 'nagvis/frontend/nagvis-js/index.php?' + \
+           'mod=Map&header_template=on-demand-filter&header_menu=1&label_show=1' + \
+           '&sources=automap&act=view&backend_id=' + config.omd_site() + \
+           '&render_mode=undirected&url_target=main&filter_group=' + \
+           (config.topology_default_filter_group or '')
 
-    builtin_dashboards["topology"] = {
-        "single_infos": [],
-        "context"     : {},
-        "mtime"       : 0,
-        "show_title"  : True,
-        "title"       : _("Network Topology"),
-        "topic"       : _("Overview"),
-        "description" : _("This dashboard uses the parent relationships of your hosts to display a "
-                          "hierarchical map."),
-        "dashlets" : [
-            {
-                "type"             : "url",
-                "title"            : "Topology of Site " + defaults.omd_site,
-                "urlfunc"          : 'topology_url',
-                "reload_on_resize" : True,
-                "position"         : (1, 1),
-                "size"             : (GROW, GROW),
-                "context"          : {},
-                "single_infos"     : [],
-            },
-        ]
-    }
+builtin_dashboards["topology"] = {
+    "single_infos": [],
+    "context"     : {},
+    "mtime"       : 0,
+    "show_title"  : True,
+    "title"       : _("Network Topology"),
+    "topic"       : _("Overview"),
+    "description" : _("This dashboard uses the parent relationships of your hosts to display a "
+                      "hierarchical map."),
+    "dashlets" : [
+        {
+            "type"             : "url",
+            "title"            : "Topology of Site " + config.omd_site(),
+            "urlfunc"          : 'topology_url',
+            "reload_on_resize" : True,
+            "position"         : (1, 1),
+            "size"             : (GROW, GROW),
+            "context"          : {},
+            "single_infos"     : [],
+        },
+    ]
+}
 
 builtin_dashboards["simple_problems"] = {
     "single_infos": [],
@@ -244,7 +244,6 @@ builtin_dashboards["simple_problems"] = {
             'context': {
                 'host_acknowledged': {'is_host_acknowledged': '0'},
                 'host_scheduled_downtime_depth': {'is_host_scheduled_downtime_depth': '0'},
-                'summary_host': {'is_summary_host': '0'},
                 'hoststate': {'hst0': '',
                               'hst1': 'on',
                               'hst2': 'on',
@@ -284,7 +283,6 @@ builtin_dashboards["simple_problems"] = {
             'group_painters': [],
             'context': {
                 'service_acknowledged': {'is_service_acknowledged': '0'},
-                'summary_host': {'is_summary_host': '0'},
                 'in_downtime': {'is_in_downtime': '0'},
                 'hoststate': {'hst0': 'on',
                               'hst1': '',

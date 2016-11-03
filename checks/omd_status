@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -73,15 +73,19 @@ def parse_omd_status(info):
     return parsed
 
 
-def check_omd_status(item, _no_params, info):
+def check_omd_status(item, _no_params, parsed):
 
-    parsed_site = info[item]
+    if item not in parsed:
+        return
+
+    parsed_site = parsed[item]
     number_nodes = len(parsed_site)
     stopped_nodes = 0
 
     for node, services in parsed_site.iteritems():
-        if services["overall"] == "stopped":
+        if "overall" in services and services["overall"] == "stopped":
             stopped_nodes += 1
+
 
     # stopped sites are only CRIT when all are stopped
     if stopped_nodes == number_nodes:
@@ -94,7 +98,10 @@ def check_omd_status(item, _no_params, info):
             node_text = " on %s" % node
         else:
             node_text = ""
-        if services["overall"] == "running":
+        if "overall" not in services:
+            infotext = "defective installation%s" % node_text
+            yield 2, infotext
+        elif services["overall"] == "running":
             infotext = "running%s" % node_text
             # running sites are always OK
             yield 0, infotext

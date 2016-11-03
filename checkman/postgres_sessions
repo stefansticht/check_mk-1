@@ -15,11 +15,3 @@ inventory:
   The check generates one item for the sessions connected to the PostgreSQL
   daemon.
 
-perfdata:
-  The check generates perfdata for the total and running sessions.
-
-[configuration]
-warn(int): number of sessions at which the check goes warn
-crit(int): number of sessions for a critical state
-
-

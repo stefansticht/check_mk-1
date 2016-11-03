@@ -34,11 +34,6 @@
 //#   | Generic library functions used anywhere in Check_MK                |
 //#   '--------------------------------------------------------------------'
 
-// Make JS understand Python source code
-// FIXME TODO remove this crap
-var True = true;
-var False = false;
-
 // The nextSibling attribute points also to "text nodes" which might
 // be created by spaces or even newlines in the HTML code and not to
 // the next painted dom object.
@@ -88,14 +83,6 @@ function add_class(o, cn) {
 function change_class(o, a, b) {
     remove_class(o, a);
     add_class(o, b);
-}
-
-function hilite_icon(oImg, onoff) {
-    src = oImg.src;
-    if (onoff == 0)
-        oImg.src = oImg.src.replace("hi.png", "lo.png");
-    else
-        oImg.src = oImg.src.replace("lo.png", "hi.png");
 }
 
 function pageHeight() {
@@ -199,6 +186,10 @@ function rad(g) {
     return (g * 360 / 100 * Math.PI) / 180;
 }
 
+// Returns timestamp in seconds incl. subseconds as decimal
+function time() {
+    return (new Date()).getTime() / 1000;
+}
 
 // simple implementation of function default arguments when
 // using objects as function parameters. Example:
@@ -222,6 +213,7 @@ function merge_args()
     return defaults;
 }
 
+// Tells the caller whether or not there are graphs on the current page
 function has_graphing()
 {
     return typeof g_graphs !== 'undefined';
@@ -246,6 +238,14 @@ function has_cross_domain_ajax_support()
 
 function getTarget(event) {
     return event.target ? event.target : event.srcElement;
+}
+
+function get_event_offset_x(event) {
+    return event.offsetX == undefined ? event.layerX : event.offsetX;
+}
+
+function get_event_offset_y(event) {
+    return event.offsetY == undefined ? event.layerY : event.offsetY;
 }
 
 function getButton(event) {
@@ -396,6 +396,18 @@ if (navigator.appVersion.indexOf("MSIE 7.") != -1)
     };
 }
 
+// Not available in IE <9
+if (!("nextElementSibling" in document.documentElement)) {
+    Object.defineProperty(Element.prototype, "nextElementSibling", {
+        get: function(){
+            var e = this.nextSibling;
+            while(e && 1 !== e.nodeType)
+                e = e.nextSibling;
+            return e;
+        }
+    });
+}
+
 //#.
 //#   .-AJAX---------------------------------------------------------------.
 //#   |                         _       _   _    __  __                    |
@@ -408,17 +420,18 @@ if (navigator.appVersion.indexOf("MSIE 7.") != -1)
 //#   | AJAX call related functions                                        |
 //#   '--------------------------------------------------------------------'
 
-function call_ajax(url, args)
+function call_ajax(url, optional_args)
 {
-    args = merge_args({
+    var args = merge_args({
         add_ajax_id      : true,
+        plain_error      : false,
         response_handler : null,
         error_handler    : null,
         handler_data     : null,
         method           : "GET",
         post_data        : null,
         sync             : false
-    }, args);
+    }, optional_args);
 
     var AJAX = window.XMLHttpRequest ? new XMLHttpRequest()
                                      : new ActiveXObject("Microsoft.XMLHTTP");
@@ -429,6 +442,11 @@ function call_ajax(url, args)
     if (args.add_ajax_id) {
         url += url.indexOf('\?') !== -1 ? "&" : "?";
         url += "_ajaxid="+Math.floor(Date.parse(new Date()) / 1000);
+    }
+
+    if (args.plain_error) {
+        url += url.indexOf('\?') !== -1 ? "&" : "?";
+        url += "_plain_error=1";
     }
 
     try {
@@ -479,12 +497,20 @@ function call_ajax(url, args)
 
 function get_url(url, handler, data, errorHandler, addAjaxId)
 {
-    call_ajax(url, {
-        response_handler : handler,
-        handler_data     : data,
-        error_handler    : errorHandler,
-        add_ajax_id      : addAjaxId
-    });
+    var args = {
+        response_handler: handler
+    };
+
+    if (typeof data !== 'undefined')
+        args.handler_data = data;
+
+    if (typeof errorHandler !== 'undefined')
+        args.error_handler = errorHandler;
+
+    if (typeof addAjaxId !== 'undefined')
+        args.add_ajax_id = addAjaxId;
+
+    call_ajax(url, args);
 }
 
 function get_url_sync(url)
@@ -493,12 +519,24 @@ function get_url_sync(url)
     return AJAX.responseText;
 }
 
-function post_url(url, params)
+function post_url(url, post_params, responseHandler, handler_data, errorHandler)
 {
-    call_ajax(url, {
+    var args = {
         method: "POST",
-        post_data: params
-    });
+        post_data: post_params
+    }
+
+    if (typeof responseHandler !== 'undefined') {
+        args.response_handler = responseHandler;
+    }
+
+    if (typeof handler_data !== 'undefined')
+        args.handler_data = handler_data;
+
+    if (typeof errorHandler !== 'undefined')
+        args.error_handler = errorHandler;
+
+    call_ajax(url, args);
 }
 
 function bulkUpdateContents(ids, codes)
@@ -536,6 +574,8 @@ function executeJS(id)
     executeJSbyObject(document.getElementById(id));
 }
 
+var g_current_script = null;
+
 function executeJSbyObject(obj)
 {
     var aScripts = obj.getElementsByTagName('script');
@@ -545,9 +585,12 @@ function executeJSbyObject(obj)
             oScr.src = aScripts[i].src;
             document.getElementsByTagName("HEAD")[0].appendChild(oScr);
             oScr = null;
-        } else {
+        }
+        else {
             try {
+                g_current_script = aScripts[i];
                 eval(aScripts[i].text);
+                g_current_script = null;
             } catch(e) {
                 alert(aScripts[i].text + "\nError:" + e.message);
             }
@@ -618,7 +661,7 @@ function makeuri(addvars, url) {
 
     // Add new params
     for (var key in addvars) {
-        params.push(key + '=' + addvars[key]);
+        params.push(encodeURIComponent(key) + '=' + encodeURIComponent(addvars[key]));
     }
 
     return base + '?' + params.join('&')
@@ -711,7 +754,7 @@ function pnp_response_handler(data, code) {
         response = eval(code);
         for(var i = 0; i < response.length; i++) {
             var view = data['view'] == '' ? '0' : data['view'];
-            create_graph(data, '&' + response[i]['image_url'].replace('#', '%23').replace('&view='+view, ''));
+            create_pnp_graph(data, '&' + response[i]['image_url'].replace('#', '%23').replace('&view='+view, ''));
         }
         view = null;
         i = null;
@@ -737,11 +780,11 @@ function pnp_response_handler(data, code) {
 // Fallback bei doofer/keiner Antwort
 function fallback_graphs(data) {
     for(var s = 0; s < 8; s++) {
-        create_graph(data, '&host=' + data['host'] + '&srv=' + data['service'] + '&source=' + s);
+        create_pnp_graph(data, '&host=' + data['host'] + '&srv=' + data['service'] + '&source=' + s);
     }
 }
 
-function create_graph(data, params) {
+function create_pnp_graph(data, params) {
     var urlvars = params + '&theme=multisite&baseurl='+data['base_url'];
 
     if (typeof(data['start']) !== 'undefined' && typeof(data['end']) !== 'undefined')
@@ -770,7 +813,8 @@ function create_graph(data, params) {
                 toggle_popup(event, this, 'add_visual', 'add_visual',
                     ['pnpgraph',
                      { 'host': host, 'service': service },
-                     { 'timerange': view, 'source': source }]
+                     { 'timerange': view, 'source': source }],
+                    "add_type=pnpgraph"
                 );
             }
         }(data['host'], data['service'], view, source);
@@ -816,26 +860,32 @@ function render_pnp_graphs(container, site, host, service, pnpview, base_url, pn
 
 function hover_graph(site, host_name, service)
 {
-    var c = get_url_sync('show_graph.py?site='+encodeURIComponent(site)
+    var c = get_url_sync('host_service_graph_popup.py?site='+encodeURIComponent(site)
                        +'&host_name='+encodeURIComponent(host_name)
                        +'&service='+encodeURIComponent(service));
 
     if (c.indexOf('pnp4nagios') !== -1) {
-        // fallback to pnp graph handling
-        var c = get_url_sync(c);
-        // It is possible that, if using multisite based authentication, pnp sends a 302 redirect
-        // to the login page which is transparently followed by XmlHttpRequest. There is no chance
-        // to catch the redirect. So we try to check the response content. If it does not contain
-        // the expected code, simply display an error message.
-        if (c.indexOf('/image?') === -1) {
-            // Error! unexpected response
-            c = '<div class="error"> '
-              + 'ERROR: Received an unexpected response '
-              + 'while trying to display the PNP-Graphs. Maybe there is a problem with the '
-              + 'authentication.</div>';
-        }
+        // fallback to pnp graph handling (received an URL by the get_url_sync())
+        return fetch_pnp_hover_contents(c);
     }
 
+    return c;
+}
+
+function fetch_pnp_hover_contents(url)
+{
+    var c = get_url_sync(url);
+    // It is possible that, if using multisite based authentication, pnp sends a 302 redirect
+    // to the login page which is transparently followed by XmlHttpRequest. There is no chance
+    // to catch the redirect. So we try to check the response content. If it does not contain
+    // the expected code, simply display an error message.
+    if (c.indexOf('/image?') === -1) {
+        // Error! unexpected response
+        c = '<div class="error"> '
+          + 'ERROR: Received an unexpected response '
+          + 'while trying to display the PNP-Graphs. Maybe there is a problem with the '
+          + 'authentication.</div>';
+    }
     return c;
 }
 
@@ -861,9 +911,11 @@ function hover_graph(site, host_name, service)
 // Everything else:
 // <undefined> - Unknown format. Simply echo.
 
-function actionResponseHandler(oImg, code) {
+function reschedule_check_response_handler(img, code) {
     var validResponse = true;
     var response = null;
+
+    remove_class(img, "reloading");
 
     try {
         response = eval(code);
@@ -872,41 +924,35 @@ function actionResponseHandler(oImg, code) {
     }
 
     if(validResponse && response[0] === 'OK') {
-        oImg.src   = 'images/icon_reload.png';
         window.location.reload();
     } else if(validResponse && response[0] === 'TIMEOUT') {
-        oImg.src   = 'images/icon_reload_failed.gif';
-        oImg.title = 'Timeout while performing action: ' + response[1];
+        add_class(img, "reload_failed");
+        img.title = 'Timeout while performing action: ' + response[1];
     } else if(validResponse) {
-        oImg.src   = 'images/icon_reload_failed.gif';
-        oImg.title = 'Problem while processing - Response: ' + response.join(' ');
+        add_class(img, "reload_failed");
+        img.title = 'Problem while processing - Response: ' + response.join(' ');
     } else {
-        oImg.src   = 'images/icon_reload_failed.gif';
-        oImg.title = 'Invalid response: ' + response;
+        add_class(img, "reload_failed");
+        img.title = 'Invalid response: ' + response;
     }
 
     response = null;
     validResponse = null;
-    oImg = null;
+    img = null;
 }
 
-function performAction(oLink, action, site, host, service, wait_svc) {
-    var oImg = oLink.childNodes[0];
+function reschedule_check(oLink, site, host, service, wait_svc) {
+    var img = oLink.childNodes[0];
+    remove_class(img, "reload_failed");
+    add_class(img, "reloading");
 
-    if(wait_svc != service)
-        oImg.src = 'images/icon_reloading_cmk.gif';
-    else
-        oImg.src = 'images/icon_reloading.gif';
-
-    // Chrome and IE are not animating the gif during sync ajax request
-    // So better use the async request here
-    get_url('nagios_action.py?action=' + action +
-            '&site='     + encodeURIComponent(site) +
+    get_url('ajax_reschedule.py' +
+            '?site='     + encodeURIComponent(site) +
             '&host='     + encodeURIComponent(host) +
             '&service='  + service + // Already URL-encoded!
             '&wait_svc=' + wait_svc,
-            actionResponseHandler, oImg);
-    oImg = null;
+            reschedule_check_response_handler, img);
+    img = null;
 }
 
 //#.
@@ -921,8 +967,11 @@ function performAction(oLink, action, site, host, service, wait_svc) {
 //#   |                                                                    |
 //#   '--------------------------------------------------------------------'
 
-// Stores the reload timer object
+// Stores the reload timer object (of views and also dashboards)
 var g_reload_timer = null;
+// Stores the reload pause timer object once the regular reload has
+// been paused e.g. by modifying a graphs timerange or vertical axis.
+var g_reload_pause_timer = null;
 // This stores the refresh time of the page (But never 0)
 var g_reload_interval = 0; // seconds
 // This flag tells the handle_content_reload_error() function to add an
@@ -979,8 +1028,7 @@ function update_header_timer()
 // When called with two parmeters the 2nd one is used as new url.
 function set_reload(secs, url)
 {
-    if (g_reload_timer)
-        clearTimeout(g_reload_timer);
+    stop_reload_timer();
 
     update_foot_refresh(secs);
 
@@ -989,6 +1037,7 @@ function set_reload(secs, url)
         schedule_reload(url);
     }
 }
+
 
 // Issues the timer for the next page reload. If some timer is already
 // running, this timer is terminated and replaced by the new one.
@@ -1000,13 +1049,13 @@ function schedule_reload(url, milisecs)
     if (typeof milisecs === 'undefined')
         milisecs = parseFloat(g_reload_interval) * 1000; // use default reload interval
 
-    if (g_reload_timer)
-        clearTimeout(g_reload_timer);
+    stop_reload_timer();
 
     g_reload_timer = setTimeout(function() {
         do_reload(url);
     }, milisecs);
 }
+
 
 function handle_content_reload(_unused, code) {
     g_reload_error = false;
@@ -1019,6 +1068,7 @@ function handle_content_reload(_unused, code) {
 
     schedule_reload();
 }
+
 
 function handle_content_reload_error(_unused, status_code, error_msg)
 {
@@ -1033,23 +1083,15 @@ function handle_content_reload_error(_unused, status_code, error_msg)
     schedule_reload();
 }
 
-function get_content_reload_data()
+
+function stop_reload_timer()
 {
-    var data = {};
-
-    if (has_graphing())
-        data = merge_args(data, get_modified_graph_contextes());
-
-    // now urlencode the data
-    var params = [];
-    for (var name in data)
-        params.push(name + '=' + encodeURIComponent(data[name]));
-
-    if (params)
-        return params.join('&');
-    else
-        return null;
+    if (g_reload_timer) {
+        clearTimeout(g_reload_timer);
+        g_reload_timer = null;
+    }
 }
+
 
 function do_reload(url)
 {
@@ -1066,7 +1108,7 @@ function do_reload(url)
         // Enforce specific display_options to get only the content data.
         // All options in "opts" will be forced. Existing upper-case options will be switched.
         var display_options = getUrlParam('display_options');
-        // Removed 'w' to reflect original rengering mechanism during reload
+        // Removed 'w' to reflect original rendering mechanism during reload
         // For example show the "Your query produced more than 1000 results." message
         // in views even during reload.
         var opts = [ 'h', 't', 'b', 'f', 'c', 'o', 'd', 'e', 'r', 'u' ];
@@ -1089,15 +1131,116 @@ function do_reload(url)
         if(real_display_options !== '')
             params['display_options'] = real_display_options;
 
-        params['_do_actions'] = getUrlParam('_do_actions')
+        params['_do_actions'] = getUrlParam('_do_actions');
+
+        // For dashlet reloads add a parameter to mark this request as reload
+        if (window.location.href.indexOf("dashboard_dashlet.py") != -1)
+            params["_reload"] = "1";
+
+        if (g_selection_enabled)
+            params["selection"] = g_selection;
 
         call_ajax(makeuri(params), {
             response_handler : handle_content_reload,
             error_handler    : handle_content_reload_error,
-            method           : 'POST',
-            post_data        : get_content_reload_data()
+            method           : 'GET'
         });
     }
+}
+
+
+// Sets the reload timer in pause mode for X seconds. This is shown to
+// the user with a pause overlay icon. The icon also shows the time when
+// the pause ends. Once the user clicks on the pause icon or the time
+// is reached, the whole page is reloaded.
+function pause_reload(seconds)
+{
+    stop_reload_timer();
+    draw_reload_pause_overlay(seconds);
+    set_reload_pause_timer(seconds);
+}
+
+
+function set_reload_pause_timer(seconds)
+{
+    if (g_reload_pause_timer)
+        clearTimeout(g_reload_pause_timer);
+
+    g_reload_pause_timer = setTimeout(function () {
+        update_reload_pause_timer(seconds);
+    }, 1000);
+}
+
+
+function update_reload_pause_timer(seconds_left)
+{
+    seconds_left -= 1;
+
+    if (seconds_left <= 0) {
+        window.location.reload(false);
+    }
+    else {
+        // update the pause counter
+        var counter = document.getElementById("reload_pause_counter");
+        if (counter) {
+            counter.innerHTML = seconds_left;
+        }
+
+        g_reload_pause_timer = setTimeout(function() {
+            update_reload_pause_timer(seconds_left);
+        }, 1000);
+    }
+}
+
+
+function stop_reload_pause_timer()
+{
+    if (!g_reload_pause_timer)
+        return;
+
+    clearTimeout(g_reload_pause_timer);
+    g_reload_pause_timer = null;
+
+    var counter = document.getElementById("reload_pause_counter");
+    if (counter)
+        counter.style.display = "none";
+}
+
+
+function draw_reload_pause_overlay(seconds)
+{
+    var container = document.getElementById("reload_pause");
+    if (container) {
+        // only render once. Just update the counter.
+        var counter = document.getElementById("reload_pause_counter");
+        counter.innerHTML = seconds;
+        return;
+    }
+
+    var container = document.createElement("a");
+    container.setAttribute("id", "reload_pause");
+    container.href = "javascript:window.location.reload(false)";
+    // FIXME: Localize
+    container.title = "Page update paused. Click for reload.";
+
+    var p1 = document.createElement("div");
+    p1.className = "pause_bar p1";
+    container.appendChild(p1);
+
+    var p2 = document.createElement("div");
+    p2.className = "pause_bar p2";
+    container.appendChild(p2);
+
+    container.appendChild(document.createElement("br"));
+
+    var counter = document.createElement("a");
+    counter.setAttribute("id", "reload_pause_counter");
+    // FIXME: Localize
+    counter.title = "Click to stop the countdown."
+    counter.href = "javascript:stop_reload_pause_timer()";
+    container.appendChild(counter);
+
+    document.body.appendChild(container);
 }
 
 //#.
@@ -1112,43 +1255,12 @@ function do_reload(url)
 //#   |                                                                    |
 //#   '--------------------------------------------------------------------'
 
-var fold_steps = [ 0, 10, 10, 15, 20, 30, 40, 55, 80 ];
-
-function toggle_folding(oImg, state) {
-    // state
-    // 0: is currently opened and should be closed now
-    // 1: is currently closed and should be opened now
-    setTimeout(function() { folding_step(oImg, state); }, 0);
-}
-
-function folding_step(oImg, state, step) {
-    // Initialize unset step
-    if (typeof step === 'undefined')
-        if (state == 1)
-            step = 1;
-        else
-            step = 8;
-
-    // Relace XX.png at the end of the image with the
-    // current rotating angle
-    oImg.src = oImg.src.substr(0, oImg.src.length - 6) + step + "0.png";
-
-    if (state == 1) {
-        if (step == 9) {
-            oImg = null;
-            return;
-        }
-        step += 1;
+function toggle_folding(img, to_be_opened) {
+    if (to_be_opened) {
+        change_class(img, "closed", "open");
+    } else {
+        change_class(img, "open", "closed");
     }
-    else {
-        if (step == 0) {
-            oImg = null;
-            return;
-        }
-        step -= 1;
-    }
-
-    setTimeout(function() { folding_step(oImg, state, step); }, fold_steps[step]);
 }
 
 function toggle_tree_state(tree, name, oContainer, fetch_url) {
@@ -1172,11 +1284,16 @@ function toggle_tree_state(tree, name, oContainer, fetch_url) {
                 change_class(oContainer, 'open', 'closed');
         }
     }
-    get_url('tree_openclose.py?tree=' + encodeURIComponent(tree)
-            + '&name=' + encodeURIComponent(name) + '&state=' + state);
+
+    persist_tree_state(tree, name, state);
     oContainer = null;
 }
 
+function persist_tree_state(tree, name, state)
+{
+    get_url('tree_openclose.py?tree=' + encodeURIComponent(tree)
+            + '&name=' + encodeURIComponent(name) + '&state=' + state);
+}
 
 // fetch_url: dynamically load content of opened element.
 function toggle_foldable_container(treename, id, fetch_url) {
@@ -1184,9 +1301,9 @@ function toggle_foldable_container(treename, id, fetch_url) {
     var oNform = document.getElementById('nform.' + treename + '.' + id);
     if (oNform) {
         var oImg = oNform.childNodes[0];
-        toggle_folding(oImg, oImg.src[oImg.src.length - 6] == '0');
         var oTr = oNform.parentNode.nextSibling;
         toggle_tree_state(treename, id, oTr, fetch_url);
+        toggle_folding(oImg, !has_class(oTr, "closed"));
     }
     else {
         var oImg = document.getElementById('treeimg.' + treename + '.' + id);
@@ -1195,6 +1312,34 @@ function toggle_foldable_container(treename, id, fetch_url) {
         toggle_folding(oImg, !has_class(oBox, "closed"));
         oImg = null;
         oBox = null;
+    }
+}
+
+
+function toggle_grouped_rows(tree, id, cell, num_rows)
+{
+    var group_title_row = cell.parentNode;
+
+    if (has_class(group_title_row, "closed")) {
+        remove_class(group_title_row, "closed");
+        var display = "";
+        var toggle_img_open = true;
+        var state = "on";
+    }
+    else {
+        add_class(group_title_row, "closed");
+        var display = "none";
+        var toggle_img_open = false;
+        var state = "off";
+    }
+
+    toggle_folding(cell.getElementsByTagName("IMG")[0], toggle_img_open);
+    persist_tree_state(tree, id, state);
+
+    var row = group_title_row;
+    for (var i = 0; i < num_rows; i++) {
+        var row = row.nextElementSibling;
+        row.style.display = display;
     }
 }
 
@@ -1854,6 +1999,17 @@ function vs_passwordspec_randomize(img) {
     oInput.value = password;
 }
 
+function vs_toggle_hidden(img) {
+    var oInput = img;
+    while (oInput.tagName != "INPUT")
+        oInput = oInput.previousElementSibling;
+    if (oInput.type == "text") {
+        oInput.type = "password";
+    } else {
+        oInput.type = "text";
+    }
+}
+
 function vs_duallist_enlarge(field_suffix, varprefix) {
     var field = document.getElementById(varprefix + '_' + field_suffix);
     if (field.id != varprefix + '_selected') {
@@ -2048,12 +2204,143 @@ function vs_listofmultiple_toggle_fields(root, varprefix, enable) {
 function vs_listofmultiple_init(varprefix) {
     document.getElementById(varprefix + '_choice').value = '';
 
-    // Mark fields of unused elements as disabled
+    vs_listofmultiple_disable_selected_options(varprefix);
+
+    // Mark input fields of unused elements as disabled
     var container = document.getElementById(varprefix + '_table');
     var unused = document.getElementsByClassName('unused', container);
     for (var i in unused) {
         vs_listofmultiple_toggle_fields(unused[i], varprefix, false);
     }
+}
+
+// The <option> elements in the <select> field of the currently choosen
+// elements need to be disabled.
+function vs_listofmultiple_disable_selected_options(varprefix)
+{
+    var active_choices = document.getElementById(varprefix + '_active').value.split(";");
+
+    var choice_field = document.getElementById(varprefix + '_choice');
+    for (var i = 0; i < choice_field.childNodes.length; i++) {
+        if (active_choices.indexOf(choice_field.childNodes[i].value) !== -1) {
+            choice_field.childNodes[i].disabled = true;
+        }
+    }
+}
+
+var g_autocomplete_ajax = null;
+
+function vs_autocomplete(input, completion_ident, completion_params, on_change)
+{
+    // TextAscii does not set the id attribute on the input field.
+    // Set the id to the name of the field here.
+    input.setAttribute("id", input.name);
+
+    // Terminate pending request
+    if (g_autocomplete_ajax) {
+        g_autocomplete_ajax.abort();
+    }
+
+    g_autocomplete_ajax = call_ajax("ajax_vs_autocomplete.py?ident=" + encodeURIComponent(completion_ident), {
+        response_handler : vs_autocomplete_handle_response,
+        error_handler    : vs_autocomplete_handle_error,
+        handler_data     : [ input.id, on_change ],
+        method           : "POST",
+        post_data        : "params="+encodeURIComponent(JSON.stringify(completion_params))
+                          +"&value="+encodeURIComponent(input.value)
+                          +"&_plain_error=1",
+        add_ajax_id      : false
+    });
+}
+
+function vs_autocomplete_handle_response(handler_data, response_text)
+{
+    var input_id = handler_data[0];
+    var on_change = handler_data[1];
+
+    try {
+        var response = eval(response_text);
+    } catch(e) {
+        vs_autocomplete_show_error(input_id, response_text);
+        return;
+    }
+
+    if (response.length == 0) {
+        vs_autocomplete_close(input_id);
+    }
+    else {
+        // When only one result and values equal, hide the menu
+        var input = document.getElementById(input_id);
+        if (response.length == 1
+            && input
+            && response[0][0] == input.value) {
+            vs_autocomplete_close(input_id);
+            return;
+        }
+
+        vs_autocomplete_show_choices(input_id, on_change, response);
+    }
+}
+
+function vs_autocomplete_handle_error(handler_data, status_code, error_msg)
+{
+    var input_id = handler_data[0];
+
+    if (status_code == 0)
+        return; // aborted (e.g. by subsequent call)
+    vs_autocomplete_show_error(input_id, error_msg + " (" + status_code + ")");
+}
+
+function vs_autocomplete_show_choices(input_id, on_change, choices)
+{
+    var code = "<ul>";
+    for(var i = 0; i < choices.length; i++) {
+        var value = choices[i][0];
+        var label = choices[i][1];
+
+        code += "<li onclick=\"vs_autocomplete_choose('"
+                    + input_id + "', '" + value + "');"
+                    + on_change + "\">" + label + "</li>";
+    }
+    code += "</ul>";
+
+    vs_autocomplete_show(input_id, code);
+}
+
+function vs_autocomplete_choose(input_id, value)
+{
+    var input = document.getElementById(input_id);
+    input.value = value;
+    vs_autocomplete_close(input_id);
+}
+
+function vs_autocomplete_show_error(input_id, msg)
+{
+    vs_autocomplete_show(input_id, "<div class=error>ERROR: " + msg + "</div>");
+}
+
+function vs_autocomplete_show(input_id, inner_html)
+{
+    var popup = document.getElementById(input_id + "_popup");
+    if (!popup) {
+        var input = document.getElementById(input_id);
+        var popup = document.createElement("div");
+        popup.setAttribute("id", input_id + "_popup");
+        popup.className = "vs_autocomplete";
+        input.parentNode.appendChild(popup);
+
+        // set minimum width of list to input field width
+        popup.style.minWidth = input.clientWidth + "px";
+    }
+
+    popup.innerHTML = inner_html;
+}
+
+function vs_autocomplete_close(input_id)
+{
+    var popup = document.getElementById(input_id + "_popup");
+    if (popup)
+        popup.parentNode.removeChild(popup);
 }
 
 //#.
@@ -2068,24 +2355,28 @@ function vs_listofmultiple_init(varprefix) {
 //#   |                                                                    |
 //#   '--------------------------------------------------------------------'
 
-function help_enable() {
-    var aHelp = document.getElementById('helpbutton');
-    aHelp.style.display = "inline-block";
+function enable_help()
+{
+    var help = document.getElementById('helpbutton');
+    help.style.display = "inline-block";
 }
 
-function help_toggle() {
-    var aHelp = document.getElementById('helpbutton');
-    if (aHelp.className == "active") {
-        aHelp.className = "passive";
-        help_switch(false);
-    }
-    else {
-        aHelp.className = "active";
-        help_switch(true);
+function toggle_help()
+{
+    var help = document.getElementById('helpbutton');
+    if (has_class(help, "active")) {
+        remove_class(help, "active");
+        add_class(help, "passive");
+        switch_help(false);
+    } else {
+        add_class(help, "active");
+        remove_class(help, "passive");
+        switch_help(true);
     }
 }
 
-function help_switch(how) {
+function switch_help(how)
+{
     // recursive scan for all div class=help elements
     var helpdivs = document.getElementsByClassName('help');
     for (var i=0; i<helpdivs.length; i++) {
@@ -2151,18 +2442,41 @@ function view_toggle_form(oButton, idForm) {
     add_class(oButton, down);
 }
 
-function init_optiondial(id) {
+function wheel_event_name()
+{
+    if ("onwheel" in window)
+        return "wheel";
+    else if (weAreFirefox)
+        return "DOMMouseScroll";
+    else
+        return "mousewheel";
+}
+
+function wheel_event_delta(event)
+{
+    return event.deltaY ? event.deltaY
+                        : event.detail ? event.detail * (-120)
+                                       : event.wheelDelta;
+}
+
+function init_optiondial(id)
+{
     var container = document.getElementById(id);
     make_unselectable(container);
-
-    var eventname = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel"
-    add_event_handler(eventname, optiondial_wheel, container);
+    add_event_handler(wheel_event_name(), optiondial_wheel, container);
 }
 
 var g_dial_direction = 1;
+var g_last_optiondial = null;
 function optiondial_wheel(event) {
     event = event || window.event;
-    var delta = event.detail ? event.detail * (-120) : event.wheelDelta;
+    var delta = wheel_event_delta(event);
+
+    // allow updates every 100ms
+    if (g_last_optiondial > time() - 0.1) {
+        return prevent_default_events(event);
+    }
+    g_last_optiondial = time();
 
     var container = getTarget(event);
     if (event.nodeType == 3) // defeat Safari bug
@@ -2292,7 +2606,7 @@ function host_tag_update_value(prefix, grp) {
 
 function timeline_hover(td, row_nr, onoff)
 {
-    var timeline_bar_table = td.parentNode.parentNode.parentNode;
+    var timeline_bar_table = td.parentNode.parentNode.parentNode.parentNode;
     var events_table = timeline_bar_table.nextElementSibling;
     var row = events_table.children[0].children[row_nr+1];
     if (onoff)
@@ -2390,6 +2704,9 @@ function close_popup()
         menu = null;
     }
     popup_id = null;
+
+    if (on_popup_close)
+        eval(on_popup_close);
 }
 
 // Registerd as click handler on the page while the popup menu is opened
@@ -2409,11 +2726,20 @@ function handle_popup_close(event) {
     close_popup();
 }
 
-function toggle_popup(event, trigger_obj, ident, what, data, params)
+// trigger_obj: DOM object of trigger object (e.g. icon)
+// ident:       page global uinique identifier of the popup
+// what:        type of popup (used for constructing webservice url 'ajax_popup_'+what+'.py')
+//              This can be null for fixed content popup windows. In this case
+//              "data" and "url_vars" are not used and can be left null.
+//              The static content of the menu is given in the "menu_content" parameter.
+// data:        json data which can be used by actions in popup menus
+// url_vars:    vars are added to ajax_popup_*.py calls for rendering the popup menu
+var on_popup_close = null;
+function toggle_popup(event, trigger_obj, ident, what, data, url_vars, menu_content, onclose)
 {
-    var params = typeof(params) === "undefined" ? '' : '?'+params;
+    on_popup_close = onclose;
 
-    if(!event)
+    if (!event)
         event = window.event;
     var container = trigger_obj.parentNode;
 
@@ -2421,7 +2747,8 @@ function toggle_popup(event, trigger_obj, ident, what, data, params)
         if (popup_id === ident) {
             close_popup();
             return; // same icon clicked: just close the menu
-        } else {
+        }
+        else {
             close_popup();
         }
     }
@@ -2435,19 +2762,26 @@ function toggle_popup(event, trigger_obj, ident, what, data, params)
     container.appendChild(menu);
     fix_popup_menu_position(event, menu);
 
-    popup_data = data;
+    // update the menus contents using a webservice
+    if (what) {
+        popup_data = data;
 
-    menu.innerHTML = '<img src="images/icon_loading.gif" class=icon>';
+        menu.innerHTML = '<img src="images/icon_reload.png" class="icon reloading">';
 
-    // populate the menu using a webservice, because the list of dashboards
-    // is not known in the javascript code. But it might have been cached
-    // before. In this case do not perform a second request.
-    // LM: Don't use the cache for the moment. There might be too many situations where
-    // we don't want the popup to be cached.
-    //if (ident in popup_contents)
-    //    menu.innerHTML = popup_contents[ident];
-    //else
-    get_url('ajax_popup_'+what+'.py'+params, handle_render_popup_contents, [ident, event]);
+        // populate the menu using a webservice, because the list of dashboards
+        // is not known in the javascript code. But it might have been cached
+        // before. In this case do not perform a second request.
+        // LM: Don't use the cache for the moment. There might be too many situations where
+        // we don't want the popup to be cached.
+        //if (ident in popup_contents)
+        //    menu.innerHTML = popup_contents[ident];
+        //else
+        var url_vars = !url_vars ? '' : '?'+url_vars;
+        get_url('ajax_popup_'+what+'.py'+url_vars, handle_render_popup_contents, [ident, event]);
+    } else {
+        menu.innerHTML = menu_content;
+        executeJSbyObject(menu);
+    }
 }
 
 function handle_render_popup_contents(data, response_text)
@@ -2468,17 +2802,32 @@ function fix_popup_menu_position(event, menu) {
     // Check whether or not the menu is out of the bottom border
     // -> if so, move the menu up
     if (rect.bottom > (window.innerHeight || document.documentElement.clientHeight)) {
-        menu.style.top    = 'auto';
-        menu.style.bottom = '15px';
+        var height = rect.bottom - rect.top;
+        if (rect.top - height < 0) {
+            // would hit the top border too, then put the menu to the top border
+            // and hope that it fits within the screen
+            menu.style.top    = '-' + (rect.top - 15) + 'px';
+            menu.style.bottom = 'auto';
+        } else {
+            menu.style.top    = 'auto';
+            menu.style.bottom = '15px';
+        }
     }
 
     // Check whether or not the menu is out of right border and
     // a move to the left would fix the issue
     // -> if so, move the menu to the left
-    if (rect.right > (window.innerWidth || document.documentElement.clientWidth)
-        && rect.left - (rect.right - rect.left) >= 0) {
-        menu.style.left  = 'auto';
-        menu.style.right = '15px';
+    if (rect.right > (window.innerWidth || document.documentElement.clientWidth)) {
+        var width = rect.right - rect.left;
+        if (rect.left - width < 0) {
+            // would hit the left border too, then put the menu to the left border
+            // and hope that it fits within the screen
+            menu.style.left  = '-' + (rect.left - 15) + 'px';
+            menu.style.right = 'auto';
+        } else {
+            menu.style.left  = 'auto';
+            menu.style.right = '15px';
+        }
     }
 }
 
@@ -2488,22 +2837,34 @@ function add_to_visual(visual_type, visual_name)
 {
     close_popup();
 
-    response = get_url_sync('ajax_add_visual.py?visual_type=' + visual_type
-                                  + '&visual_name=' + visual_name
-                                  + '&type=' + popup_data[0]
-                                  + '&context=' + encodeURIComponent(JSON.stringify(popup_data[1]))
-                                  + '&params=' + encodeURIComponent(JSON.stringify(popup_data[2])));
+    var AJAX = call_ajax('ajax_add_visual.py?visual_type=' + visual_type
+                         + '&visual_name=' + visual_name
+                         + '&type=' + popup_data[0]
+                         + '&context=' + encodeURIComponent(JSON.stringify(popup_data[1]))
+                         + '&params=' + encodeURIComponent(JSON.stringify(popup_data[2])), {
+        sync: true,
+        plain_error : true
+    })
+    var response = AJAX.responseText;
     popup_data = null;
 
     // After adding a dashlet, go to the choosen dashboard
-    if (response)
-        window.location.href = response;
+    if (response.substr(0, 2) == "OK") {
+        window.location.href = response.substr(3);
+    } else {
+        alert("Failed to add element: "+response);
+    }
 }
 
+// FIXME: Adapt error handling which has been addded to add_to_visual() in the meantime
 function pagetype_add_to_container(page_type, page_name)
 {
-    var element_type = popup_data[0]; // e.g. 'graph'
-    var create_info  = popup_data[1]; // complex JSON struct describing the thing
+    var element_type = popup_data[0]; // e.g. 'pnpgraph'
+    // complex JSON struct describing the thing
+    var create_info  = {
+        "context"    : popup_data[1],
+        "parameters" : popup_data[2]
+    };
     var create_info_json = JSON.stringify(create_info);
 
     close_popup();
@@ -2650,21 +3011,22 @@ function bi_toggle_subtree(oImg, lazy)
     }
     var oSubtree = oImg.parentNode.childNodes[6];
     var url = "bi_save_treestate.py?path=" + encodeURIComponent(oSubtree.id);
-    var do_open;
 
-    if (oSubtree.style.display == "none") {
-        oSubtree.style.display = "";
+    if (has_class(oImg, "closed")) {
+        change_class(oSubtree, "closed", "open");
+        toggle_folding(oImg, true);
+
         url += "&state=open";
-        toggle_folding(oImg, 1);
         do_open = true;
     }
     else {
-        oSubtree.style.display = "none";
+        change_class(oSubtree, "open", "closed");
+        toggle_folding(oImg, false);
+
         url += "&state=closed";
-        toggle_folding(oImg, 0);
         do_open = false;
     }
-    oSubtree = null;
+
     if (lazy && do_open)
         get_url(url, bi_update_tree, oImg);
     else
@@ -2682,8 +3044,8 @@ function bi_update_tree(oImg, code)
     while (oDiv.className != "bi_tree_container") {
         oDiv = oDiv.parentNode;
     }
-    var url = "bi_render_tree.py?" + oDiv.id;
-    get_url(url, bi_update_tree_response, oDiv);
+
+    post_url("bi_render_tree.py", oDiv.id, bi_update_tree_response, oDiv);
 }
 
 function bi_update_tree_response(oDiv, code) {
@@ -2858,4 +3220,96 @@ function hide_crash_report_processing_msg()
 {
     var msg = document.getElementById("pending_msg");
     msg.parentNode.removeChild(msg);
+}
+
+//#.
+//#   .-Backup-------------------------------------------------------------.
+//#   |                  ____             _                                |
+//#   |                 | __ )  __ _  ___| | ___   _ _ __                  |
+//#   |                 |  _ \ / _` |/ __| |/ / | | | '_ \                 |
+//#   |                 | |_) | (_| | (__|   <| |_| | |_) |                |
+//#   |                 |____/ \__,_|\___|_|\_\\__,_| .__/                 |
+//#   |                                             |_|                    |
+//#   +--------------------------------------------------------------------+
+//#   |                                                                    |
+//#   '--------------------------------------------------------------------'
+
+function refresh_job_details(url, ident, is_site)
+{
+    setTimeout(function() {
+        do_job_detail_refresh(url, ident, is_site);
+    }, 1000);
+}
+
+function do_job_detail_refresh(url, ident, is_site)
+{
+    call_ajax(url, {
+        method           : "GET",
+        post_data        : "job=" + encodeURIComponent(ident),
+        response_handler : handle_job_detail_response,
+        error_handler    : handle_job_detail_error,
+        handler_data     : {
+            "url"     : url,
+            "ident"   : ident,
+            "is_site" : is_site,
+        }
+    });
+}
+
+function handle_job_detail_response(handler_data, response_body)
+{
+    // when a message was shown and now not anymore, assume the job has finished
+    if (document.getElementById("job_detail_msg"))
+        had_message = true;
+    else
+        had_message = false;
+
+    var container = document.getElementById("job_details");
+    container.innerHTML = response_body;
+
+    if (!had_message) {
+        refresh_job_details(handler_data["url"], handler_data["ident"], handler_data["is_site"]);
+    }
+    else {
+        reload_sidebar();
+        window.location.reload();
+    }
+}
+
+function handle_job_detail_error(handler_data, status_code, error_msg)
+{
+    hide_job_detail_msg();
+
+    if (status_code == 0)
+        return; // ajax request aborted. Stop refresh.
+
+    var container = document.getElementById("job_details");
+
+    var msg = document.createElement("div");
+    container.insertBefore(msg, container.firstChild);
+    msg.setAttribute("id", "job_detail_msg");
+    msg.className = "message";
+
+    txt = "Could not update the job details.";
+    if (handler_data.is_site)
+        txt += " The site will be started again after the restore.";
+    else
+        txt += " Maybe the device is currently being rebooted.";
+
+    txt += "<br>Will continue trying to refresh the job details.";
+
+    txt += "<br><br>HTTP status code: "+status_code;
+    if (error_msg)
+        txt += ", Error: "+error_msg;
+
+    msg.innerHTML = txt;
+
+    refresh_job_details(handler_data["url"], handler_data["ident"], handler_data["is_site"]);
+}
+
+function hide_job_detail_msg()
+{
+    var msg = document.getElementById("job_detail_msg");
+    if (msg)
+        msg.parentNode.removeChild(msg);
 }

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,28 @@
 #ifndef CustomTimeperiodColumn_h
 #define CustomTimeperiodColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <string>
 #include "IntColumn.h"
 #include "nagios.h"
 
-using namespace std;
-
-
-class CustomTimeperiodColumn : public IntColumn
-{
-    int _offset; // within data structure (differs from host/service)
+class CustomTimeperiodColumn : public IntColumn {
+    int _offset;  // within data structure (differs from host/service)
     std::string _varname;
 
 public:
-    CustomTimeperiodColumn(string name, string description, int offset, int indirect_offset, const char *varname)
-        : IntColumn(name, description, indirect_offset),  _offset(offset), _varname(varname) {}
-    int32_t getValue(void *data, Query *);
+    CustomTimeperiodColumn(const std::string &name,
+                           const std::string &description, int offset,
+                           int indirect_offset, const char *varname,
+                           int extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset)
+        , _varname(varname) {}
+    int32_t getValue(void *row, contact *auth_user) override;
+
 private:
     customvariablesmember *getCVM(void *data);
 };
 
-
-#endif // CustomTimeperiodColumn_h
+#endif  // CustomTimeperiodColumn_h

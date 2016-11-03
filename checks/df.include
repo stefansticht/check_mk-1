@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -61,12 +61,12 @@ factory_settings["filesystem_default_levels"] = {
     "trend_range"     : 24,
     "trend_perfdata"  : True,    # do send performance data for trends
     "show_levels"     : "onmagic",
+    "inodes_levels"   : (10.0, 5.0),
     "show_inodes"     : "onlow",
     "show_reserved"   : False,
 }
 
 def df_inventory(mplist):
-    import fnmatch
     group_patterns = {}
     for line in host_extra_conf(g_hostname, filesystem_groups):
         for group_name, pattern in line:
@@ -201,19 +201,19 @@ def get_filesystem_levels(host, mountpoint, size_gb, params):
     levels["levels_mb"] = (warn_mb, crit_mb)
     if type(warn) == float:
         if warn_scaled < 0 and crit_scaled < 0:
-            label = 'levels at free space below'
+            label = 'warn/crit at free space below'
             warn_scaled *= -1
             crit_scaled *= -1
         else:
-            label = 'levels at'
+            label = 'warn/crit at'
         levels["levels_text"] = "(%s %.2f/%.2f%%)" % (label, warn_scaled, crit_scaled)
     else:
         if warn * mega < 0 and crit * mega < 0:
-            label = 'levels at free space below'
+            label = 'warn/crit at free space below'
             warn *= -1
             crit *= -1
         else:
-            label = 'levels at'
+            label = 'warn/crit at'
         warn_hr = get_bytes_human_readable(warn * mega)
         crit_hr = get_bytes_human_readable(crit * mega)
         levels["levels_text"] = "(%s %s/%s)" % (label, warn_hr, crit_hr)
@@ -248,8 +248,6 @@ def df_check_filesystem(hostname, mountpoint, size_mb, avail_mb, reserved_mb, pa
 # New function for checks that support groups.
 def df_check_filesystem_list(item, params, fslist_blocks, fslist_inodes = None):
     if "patterns" in params:
-        import fnmatch
-
         patterns = params["patterns"]
         count = 0
         total_size_mb      = 0
@@ -306,11 +304,6 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, reserved
     # bigger than 100 GB and lowers it for file systems smaller than 100 GB.
     # Please run df_magic_factor.py to understand how it works.
 
-    # TODO: In some future version use a fixed name as perf variable
-    perf_var = mountpoint.replace(" ", "_")
-    perfdata = [(perf_var, str(used_mb) + 'MB', warn_mb, crit_mb, 0, size_mb)]
-    perfdata.append(('fs_size', str(size_mb) + 'MB'))
-
     used_hr = get_bytes_human_readable(used_mb * 1024 * 1024)
     size_hr = get_bytes_human_readable(size_mb * 1024 * 1024)
     # If both numbers end with both MB or GB or TB, then drop the first one
@@ -322,21 +315,22 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, reserved
     infotext = "%s used (%s of %s)" % (
        get_percent_human_readable(used_perc), used_hr, size_hr)
 
+    if warn_mb < 0.0:
+        # Negative levels, so user configured thresholds based on space left. Calculate the
+        # upper thresholds based on the size of the filesystem
+        crit_mb = size_mb + crit_mb
+        warn_mb = size_mb + warn_mb
+
     status = 0
-    if warn_mb <= -1:
-        # Negative levels, so calculate MB left
-        rest_mb = size_mb - used_mb
-        crit_mb = crit_mb * -1
-        warn_mb = warn_mb * -1
-        if rest_mb <= crit_mb:
-            status = 2
-        elif rest_mb <= warn_mb:
-            status = max(1, status)
-    else:
-       if used_mb >= crit_mb:
-           status = 2
-       elif used_mb >= warn_mb:
-           status = max(1, status)
+    if used_mb >= crit_mb:
+        status = 2
+    elif used_mb >= warn_mb:
+        status = max(1, status)
+
+    # TODO: In some future version use a fixed name as perf variable
+    perf_var = mountpoint.replace(" ", "_")
+    perfdata = [(perf_var, str(used_mb) + 'MB', warn_mb, crit_mb, 0, size_mb)]
+    perfdata.append(('fs_size', str(size_mb) + 'MB'))
 
     if type(params) == dict:
         show_levels = params.get("show_levels")
@@ -400,7 +394,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, reserved
                 wa, cr = trend_mb
                 warn_perf, crit_perf = wa, cr
                 if trend >= wa:
-                    problems.append("growing too fast (levels at %s/%s per %.1f h)(!" %
+                    problems.append("growing too fast (warn/crit at %s/%s per %.1f h)(!" %
                        ( get_bytes_human_readable(wa * MB), get_bytes_human_readable(cr * MB), range))
                     status = max(1, status)
                     if trend >= cr:
@@ -422,7 +416,7 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, reserved
                 else:
                     warn_perf, crit_perf = wa, cr
                 if trend >= wa:
-                    problems.append("growing too fast (levels at %.3f%%/%.3f%% per %.1f h)(!" %
+                    problems.append("growing too fast (warn/crit at %.3f%%/%.3f%% per %.1f h)(!" %
                        ( wa_perc, cr_perc, range))
                     status = max(1, status)
                     if trend >= cr:
@@ -441,7 +435,11 @@ def df_check_filesystem_single(hostname, mountpoint, size_mb, avail_mb, reserved
                 hours_left = space_left / trend * range
                 timeleft = levels.get("trend_timeleft")
                 def format_hours(hours):
-                    if hours > 4 * 7 * 24: # 4 weeks
+                    if hours > 365 * 24:
+                        return "more than a year"
+                    elif hours > 90 * 24:
+                        return "%0d months" % (hours/ (30 * 24))
+                    elif hours > 4 * 7 * 24: # 4 weeks
                         return "%0d weeks" % (hours/ (7 * 24))
                     elif hours > 7 * 24:   # 1 week
                         return "%0.1f weeks" % (hours/ (7 * 24))

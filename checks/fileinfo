@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -60,27 +60,56 @@ def inventory_fileinfo(info, case):
                         inventory.append((group, {}))
     return inventory
 
-def fileinfo_process_date(pattern,reftime):
-    disect = re.match('(/.*/)\$DATE:((?:%\w.?){1,})\$(.*)',pattern)
-    if disect:
-        prefix = disect.group(1)
-        datepattern =  time.strftime(disect.group(2),time.localtime(reftime))
-        postfix = disect.group(3)
-        pattern = prefix+datepattern+postfix
+def fileinfo_process_date(pattern, reftime):
+    for what, the_time in [ ("DATE", reftime), ("YESTERDAY", reftime - 86400) ]:
+        the_regex = '(/.*)\$%s:((?:%%\w.?){1,})\$(.*)' % what
+        disect = re.match(the_regex, pattern)
+        if disect:
+            prefix = disect.group(1)
+            datepattern = time.strftime(disect.group(2),time.localtime(the_time))
+            postfix = disect.group(3)
+            pattern = prefix+datepattern+postfix
+            return pattern
+
     return pattern
 
-def fileinfo_groups_of_file(check_filename,reftime):
-    import fnmatch
+def fileinfo_groups_of_file(check_filename, reftime):
     groups = []
     for line in host_extra_conf(g_hostname, fileinfo_groups):
         for group_name, pattern in line:
             if type(pattern) == str: # support old format
                 pattern = ( pattern, '' )
+
             inclusion, exclusion = pattern
-            inclusion = fileinfo_process_date(inclusion,reftime)
-            if fnmatch.fnmatch(check_filename, inclusion) \
-                    and not fnmatch.fnmatch(check_filename, exclusion):
+
+            inclusion_is_regex = False
+            exclusion_is_regex = False
+            if inclusion.startswith("~"):
+                inclusion_is_regex = True
+                inclusion = inclusion[1:]
+            if exclusion.startswith("~"):
+                exclusion_is_regex = True
+                exclusion = exclusion[1:]
+
+            inclusion_tmp = fileinfo_process_date(inclusion, reftime)
+            if inclusion != inclusion_tmp:
+                inclusion = inclusion_tmp
+
+            if inclusion_is_regex:
+                reg = regex(inclusion)
+                incl_match = reg.match( check_filename )
+            else:
+                incl_match = fnmatch.fnmatch( check_filename, inclusion )
+
+            if exclusion_is_regex:
+                reg = regex(exclusion)
+                excl_match = reg.match( check_filename )
+            else:
+                excl_match = fnmatch.fnmatch( check_filename, exclusion )
+
+            if incl_match and not excl_match:
                 groups.append(group_name)
+
     return groups
 
 def fileinfo_check_timeranges(params):
@@ -105,24 +134,30 @@ def check_fileinfo(item, params, info):
     if len(info) == 0:
         return (3, "no information sent by agent")
 
-    outof_range_txt = fileinfo_check_timeranges(params)
-    in_timerange = outof_range_txt == None
-    reftime = int(info[0][0])
+    outof_range_txt  = fileinfo_check_timeranges(params)
+    in_timerange     = outof_range_txt == None
+    reftime          = None
     check_definition = False
-    for line in info[1:]:
+    state_missing    = params.get("state_missing", 3)
+    for line in info:
+        if len(line) == 1:
+            reftime = int(line[0])
+            continue
+
         if item == line[0]:
             if line[1] == "missing":
-                return in_timerange and 3 or 0, "File not found" + (outof_range_txt or "")
+                continue
             state = 0
             size = int(line[1])
             age = reftime - int(line[2])
 
             check_definition = [
-                ("size", size, get_filesize_human_readable),
-                ("age",  age,  get_age_human_readable) ]
+                ("Size", "size", size, get_filesize_human_readable),
+                ("Age",  "age",  age,  get_age_human_readable) ]
 
     if check_definition == False:
-        return in_timerange and 3 or 0, "File not found" + (outof_range_txt or "")
+        return in_timerange and state_missing or 0, "File not found" + (outof_range_txt or "")
+
     return fileinfo_check_function(check_definition, params, outof_range_txt)
 
 # Extracts patterns that are relevant for the current host and item.
@@ -135,8 +170,11 @@ def fileinfo_groups_precompile(hostname, item, params):
                 if type(pattern) == str: # support old format
                     pattern = (pattern, '')
                 patterns.append(pattern)
-    params['precompiled_patterns'] = patterns
-    return params
+
+    precomped = params.copy()
+    precomped['precompiled_patterns'] = patterns
+    return precomped
+
 
 def check_fileinfo_groups(item, params, info):
     if not info:
@@ -144,15 +182,7 @@ def check_fileinfo_groups(item, params, info):
 
     outof_range_txt = fileinfo_check_timeranges(params)
 
-    import fnmatch
-    reftime = int(info[0][0])
-
-    # Get the grouping patterns (either compile or reuse the precompiled ones)
-    # Check_MK creates an empty string if the precompile function has
-    # not been exectued yet. The precompile function creates an empty
-    # list when no rules/patterns are defined.
-    if 'precompiled_patterns' not in params:
-        params = fileinfo_groups_precompile(g_hostname, item, params)
+    reftime = None
 
     count_all = 0
     age_oldest = None
@@ -162,18 +192,47 @@ def check_fileinfo_groups(item, params, info):
     size_largest  = 0
     date_inclusion = ""
     # Start counting values on all files
-    for line in info[1:]:
+    for line in info:
+        if len(line) == 1:
+            reftime = int(line[0])
+            continue
+
         for pattern in params['precompiled_patterns']:
+            # endswith("No such file...") is needed to
+            # support the solaris perl based version of fileinfo
+            if line[0].endswith("No such file or directory"):
+                continue
+
             inclusion, exclusion = pattern
-            inclusion_tmp = fileinfo_process_date(inclusion,reftime)
+
+            inclusion_is_regex = False
+            exclusion_is_regex = False
+            if inclusion.startswith("~"):
+                inclusion_is_regex = True
+                inclusion = inclusion[1:]
+            if exclusion.startswith("~"):
+                exclusion_is_regex = True
+                exclusion = exclusion[1:]
+
+            inclusion_tmp = fileinfo_process_date(inclusion, reftime)
             if inclusion != inclusion_tmp:
                 inclusion = inclusion_tmp
                 date_inclusion = inclusion_tmp
-            # endswith("No such file...") is needed to
-            # support the solaris perl based version of fileinfo
-            if not line[0].endswith("No such file or directory") \
-                        and fnmatch.fnmatch(line[0], inclusion) and str(line[1]) not in ['missing',''] \
-                        and not fnmatch.fnmatch(line[0], exclusion):
+
+            if inclusion_is_regex:
+                reg = regex(inclusion)
+                incl_match = reg.match( line[0] )
+            else:
+                incl_match = fnmatch.fnmatch( line[0], inclusion )
+
+            if exclusion_is_regex:
+                reg = regex(exclusion)
+                excl_match = reg.match( line[0] )
+            else:
+                excl_match = fnmatch.fnmatch( line[0], exclusion )
+
+            if str(line[1]) not in [ 'missing', '' ] and \
+               incl_match and not excl_match:
                 size = int(line[1])
                 size_all += size
                 if size_smallest == None:
@@ -196,31 +255,33 @@ def check_fileinfo_groups(item, params, info):
 
     # Start Checking
     check_definition = [
-        ("age_oldest",    age_oldest,    get_age_human_readable),
-        ("age_newest",    age_newest,    get_age_human_readable),
-        ("count",         count_all,     saveint),
-        ("size",          size_all,      get_filesize_human_readable),
+        ("Oldest age", "age_oldest", age_oldest, get_age_human_readable),
+        ("Newest age", "age_newest", age_newest, get_age_human_readable),
+        ("Count",      "count",      count_all,  saveint),
+        ("Size",       "size",       size_all,   get_filesize_human_readable),
     ]
 
     if size_smallest is not None:
-        check_definition.append(("size_smallest", size_smallest, get_filesize_human_readable))
+        check_definition.append(("Smallest size", "size_smallest", size_smallest, get_filesize_human_readable))
     if size_largest != 0:
-        check_definition.append(("size_largest",  size_largest,  get_filesize_human_readable))
+        check_definition.append(("Largest size", "size_largest",  size_largest,  get_filesize_human_readable))
     if date_inclusion:
-        check_definition.append(("date pattern",  date_inclusion, str ))
+        check_definition.append(("Date pattern", "date pattern",  date_inclusion, str ))
 
     return fileinfo_check_function(check_definition, params, outof_range_txt)
 
 def fileinfo_check_function(check_definition, params, outof_range_txt):
-    import operator
     state = 0
     infos = []
     perfdata = []
-    for what, val, verbfunc in check_definition:
-        infos.append("%s is %s" % (what, verbfunc(val)))
+    for what_title, what, val, verbfunc in check_definition:
+        infos.append("%s: %s" % (what_title, verbfunc(val)))
         if type(val) in [long, int]: # because strings go into infos but not into perfdata
             warn, crit = "", ""
-            for how, comp, cfunc in [ ("min", "<", operator.lt), ("max", ">", operator.gt) ]:
+            for how, comp, cfunc in [
+                ("min", "<", lambda a, b: a < b),
+                ("max", ">", lambda a, b: a > b),
+            ]:
                 p = params.get(how + what)
                 if p:
                     warn, crit = p
@@ -231,6 +292,7 @@ def fileinfo_check_function(check_definition, params, outof_range_txt):
                         state = max(state, 1)
                         infos[-1] += " (%s %s)(!)" % (comp, verbfunc(warn))
             perfdata.append((what, val, warn, crit))
+
     infotext = ", ".join(infos)
     if outof_range_txt:
         state = 0

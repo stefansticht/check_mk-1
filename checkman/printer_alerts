@@ -18,14 +18,3 @@ description:
 inventory:
  One check is being created for each device.
 
-examples:
- # Make 'Energiesparen' an OK state
- printer_alerts_text_map = {
-     'Energiesparen' : 0,
- }
-
-[configuration]
-printer_alerts_text_map(dict): Some printers send a status code of {-1} in some cases.
- But you can use the additional descriptive text sent by the printer for assigning
- a monitoring state by using this dictionary. The key is the descriptive text. The
- value is 0 (OK), 1 (WARN), 2 (CRIT) or 3 (UNKNOWN).

@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -75,7 +75,6 @@ multisite_builtin_views.update({
                   ('is_service_acknowledged', '-1'),
                   ('host', ''),
                   ('is_service_active_checks_enabled', '-1'),
-                  ('is_summary_host', '-1'),
                   ('service', ''),
                   ('check_command', ''),
                   ('st0', 'on'),
@@ -129,7 +128,7 @@ multisite_builtin_views.update({
     'mobile_svcproblems': mobile_view({
         'datasource': 'services',
         'group_painters': [],
-        'hard_filters': ['summary_host', 'in_downtime'],
+        'hard_filters': ['in_downtime'],
         'hard_filtervars': [
 	    ('is_in_downtime', '0'),
             ('st0', ''),
@@ -141,7 +140,6 @@ multisite_builtin_views.update({
             ('hst1', ''),
             ('hst2', ''),
             ('hstp', 'on'),
-            ('is_summary_host', '0')
          ],
         'hide_filters': [],
         'layout': 'mobilelist',
@@ -173,7 +171,7 @@ multisite_builtin_views.update({
     'mobile_svcproblems_unack': mobile_view({
         'datasource': 'services',
         'group_painters': [],
-        'hard_filters': ['summary_host', 'in_downtime', 'service_acknowledged'],
+        'hard_filters': ['in_downtime', 'service_acknowledged'],
         'hard_filtervars': [
             ('is_service_in_notification_period', '-1'),
             ('hst0', 'on'),
@@ -186,7 +184,6 @@ multisite_builtin_views.update({
             ('hdst2', 'on'),
             ('hdst3', 'on'),
             ('hdstp', 'on'),
-            ('is_summary_host', '0'),
             ('st0', ''),
             ('st1', 'on'),
             ('st2', 'on'),
@@ -384,7 +381,7 @@ multisite_builtin_views.update({
      'mobile_hostproblems': mobile_view({
                   'datasource': 'hosts',
                   'group_painters': [('host_state', None)],
-                  'hard_filters': ['host_scheduled_downtime_depth', 'summary_host'],
+                  'hard_filters': ['host_scheduled_downtime_depth'],
                   'hard_filtervars': [
 		      ('is_host_scheduled_downtime_depth', '0'),
                       ('is_host_in_notification_period', '-1'),
@@ -394,7 +391,6 @@ multisite_builtin_views.update({
                       ('hstp', ''),
                       ('is_host_acknowledged', '-1'),
                       ('host', ''),
-                      ('is_summary_host', '0'),
                       ('opthostgroup', '')
                    ],
                   'hide_filters': [],
@@ -424,7 +420,7 @@ multisite_builtin_views.update({
      'mobile_hostproblems_unack': mobile_view({
                   'datasource': 'hosts',
                   'group_painters': [('host_state', None)],
-                  'hard_filters': ['host_scheduled_downtime_depth', 'summary_host', 'host_acknowledged'],
+                  'hard_filters': ['host_scheduled_downtime_depth', 'host_acknowledged'],
                   'hard_filtervars': [
 		      ('is_host_scheduled_downtime_depth', '0'),
                       ('is_host_in_notification_period', '-1'),
@@ -434,7 +430,6 @@ multisite_builtin_views.update({
                       ('hstp', ''),
                       ('is_host_acknowledged', '0'),
                       ('host', ''),
-                      ('is_summary_host', '0'),
                       ('opthostgroup', '')],
                   'hide_filters': [],
                   'layout': 'mobilelist',
@@ -723,39 +718,40 @@ multisite_builtin_views.update({
 #   | one for a list of items, one for a single dataset.                   |
 #   '----------------------------------------------------------------------'
 
-def render_mobile_table(rows, view, group_painters, painters, num_columns, show_checkboxes):
+def render_mobile_table(rows, view, group_cells, cells, num_columns, show_checkboxes):
     if not html.mobile:
         html.show_error(_("This view can only be used in mobile mode."))
         return
 
     # Force relative timestamp always. This saves space.
-    multisite_painter_options["ts_format"]["value"] = "rel"
+    painter_options.set("ts_format", "rel")
 
     odd = "odd"
-    html.write('<table class="mobile data">')
+    html.open_table(class_="mobile data")
 
     # Paint header
     if view.get("column_headers") != "off":
-        html.write("<tr>")
+        html.open_tr()
         n = 0
-        for p in painters:
-            paint_header(view, p)
-        html.write("</tr>\n")
+        for cell in cells:
+            cell.paint_as_header()
+        html.close_tr()
 
     # Paint data rows
     for row in rows:
         odd = odd == "odd" and "even" or "odd"
-        html.write('<tr class="%s0">' % odd)
-        for n, p in enumerate(painters):
+        html.open_tr(class_="%s0" % odd)
+        for n, cell in enumerate(cells):
             if n > 0 and n % num_columns == 0:
-                html.write('</tr><tr class="%s0">' % odd)
-            if n == len(painters) - 1 and n % num_columns != (num_columns - 1):
+                html.close_tr()
+                html.open_tr(class_="%s0" % odd)
+            if n == len(cells) - 1 and n % num_columns != (num_columns - 1):
                 tdattrs = 'colspan="%d"' % (num_columns - (n % num_columns))
             else:
                 tdattrs = ""
-            paint(p, row, tdattrs)
-        html.write('</row>')
-    html.write('</table>')
+            cell.paint(row, tdattrs=tdattrs)
+        html.close_row()
+    html.close_table()
     html.javascript('$("table.mobile a").attr("data-ajax", "false");')
 
 multisite_layouts["mobiletable"] = {
@@ -765,32 +761,45 @@ multisite_layouts["mobiletable"] = {
     "checkboxes" : False,
 }
 
-def render_mobile_list(rows, view, group_painters, painters, num_columns, show_checkboxes):
+def render_mobile_list(rows, view, group_cells, cells, num_columns, show_checkboxes):
     if not html.mobile:
         html.show_error(_("This view can only be used in mobile mode."))
         return
 
     # Force relative timestamp always. This saves space.
-    multisite_painter_options["ts_format"]["value"] = "rel"
+    painter_options.set("ts_format", "rel")
 
     odd = "odd"
-    html.write('<ul class="mobilelist" data-role="listview">\n')
+    html.open_ul(class_="mobilelist", **{"data-role":"listview"})
 
     # Paint data rows
     for row in rows:
-        html.write('<li>')
-        cells = [ prepare_paint(p, row) for p in painters ]
-        if len(cells) > 0: # First cell (assumedly state) is left
-            html.write('<p class="ui-li-aside ui-li-desc %s">%s</p>' % cells[0])
-            if len(cells) > 1:
-                content = " &middot; ".join([ cell[1] for cell in cells[1:num_columns+1]])
-                html.write('<h3>%s</h3>' % content)
-                for cell, p in zip(cells[num_columns+1:], painters[num_columns+1:]):
-                    html.write('<p class="ui-li-desc">')
-                    paint_header(view, p)
-                    html.write(': <span class="%s">%s</span></p>\n' % cell)
-        html.write('</li>\n')
-    html.write('</ul>')
+        html.open_li()
+        rendered_cells = [ cell.render(row) for cell in cells ]
+        if rendered_cells: # First cell (assumedly state) is left
+            rendered_class, rendered_content = rendered_cells[0]
+            html.open_p(class_=["ui-li-aside", "ui-li-desc", rendered_class])
+            html.write(rendered_content)
+            html.close_p()
+
+            if len(rendered_cells) > 1:
+                content = " &middot; ".join([ rendered_cell[1] for rendered_cell
+                                              in rendered_cells[1:num_columns+1]])
+                html.h3(HTML(content))
+
+                for rendered_cell, cell in zip(rendered_cells[num_columns+1:],
+                                               cells[num_columns+1:]):
+                    rendered_class, rendered_content = rendered_cell
+                    html.open_p(class_="ui-li-desc")
+                    cell.paint_as_header()
+                    html.write(': ')
+                    html.open_span(class_=rendered_class)
+                    html.write(rendered_content)
+                    html.close_span()
+                    html.close_p()
+
+        html.close_li()
+    html.close_ul()
     html.javascript('$("ul.mobilelist a").attr("data-ajax", "false");')
 
 multisite_layouts["mobilelist"] = {
@@ -800,35 +809,33 @@ multisite_layouts["mobilelist"] = {
     "checkboxes" : False,
 }
 
-def render_mobile_dataset(rows, view, group_painters, painters, num_columns, show_checkboxes):
+def render_mobile_dataset(rows, view, group_cells, cells, num_columns, show_checkboxes):
     if not html.mobile:
         html.show_error(_("This view can only be used in mobile mode."))
         return
 
-    multisite_painter_options["ts_format"]["value"] = "both"
+    painter_options.set("ts_format", "both")
 
     for row in rows:
-        # html.write('<div data-role="collapsible" data-content-theme="d">')
-        # html.write('<h3>Header</h3><p>')
-        html.write('<table class=dataset>')
-        for p in painters:
-            tdclass, content = prepare_paint(p, row)
-            # Omit empty cells
-            if content:
-                painter, link = p[0:2]
-                if len(p) >= 5 and p[4]:
-                    title = p[4] # Use custom title
-                else:
-                    title = painter["title"]
-                html.write('<tr class=header>')
-                html.write('<th>%s</th></tr>\n' % title)
-                html.write('<tr class=data>')
-                paint(p, row)
-                html.write('</tr>\n')
-        html.write('</table>')
-        # html.write('</p></div>')
-    html.javascript('$("table.dataset tr.data td").addClass("ui-shadow").not(".state").addClass("nonstatus");\n'
-                    '$("table.dataset tr.data a").attr("data-ajax", "false");\n')
+        html.open_table(class_="dataset")
+        for cell in cells:
+            tdclass, content = cell.render(row)
+            if not content:
+                continue # Omit empty cells
+
+            html.open_tr(class_="header")
+            html.open_th()
+            html.write(cell.title())
+            html.close_th()
+            html.close_tr()
+
+            html.open_tr(class_="data")
+            cell.paint(row)
+            html.close_tr()
+
+        html.close_table()
+    html.javascript('$("table.dataset > tbody > tr.data > td").addClass("ui-shadow").not(".state").addClass("nonstatus");\n'
+                    '$("table.dataset > tbody > tr.data a").attr("data-ajax", "false");\n')
 
 
 multisite_layouts["mobiledataset"] = {

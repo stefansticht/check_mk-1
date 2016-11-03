@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -37,11 +37,13 @@ declare_user_attribute(
     permission = "general.see_all"
 )
 
+# TODO: Remove this with 1.5.0/1.6.0
 declare_user_attribute(
     "force_authuser_webservice",
     Checkbox(
-        title = _("Visibility of Hosts/Services (Webservice)"),
-        label = _("Export only hosts and services the user is a contact for"),
+        title = _("Hosts/Service visibility (Webservice, Deprecated)"),
+        label = _("Export only hosts and services the user is a contact for. "
+                  "<b>Please don't use this option anymore, it is deprecated.</b>"),
         help = _("When this option is checked, then the Multisite webservice "
                  "will only export hosts and services that the user is a contact for - "
                  "even if he has the permission for seeing all objects."),
@@ -74,4 +76,3 @@ declare_user_attribute(
               default_value = "dashboard.py",
               attrencode = True),
     domain = "multisite")
-

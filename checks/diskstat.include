@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -91,6 +91,9 @@ def inventory_diskstat_generic(info):
 
 def check_diskstat_line(this_time, item, params, line, mode='sectors'):
     average_range = params.get("average")
+    if average_range == 0:
+        average_range = None # disable averaging when 0 is set
+
     perfdata = []
     infos = []
     status = 0
@@ -305,6 +308,8 @@ def diskstat_select_disk(disks, item):
             # "average_write_wait"         : 0.0,
             # "average_write_request_size" : 0.0,
             # "queue_length"               : 0.0,
+            # "read_ql"                    : 0.0,
+            # "write_ql"                   : 0.0,
         }
 
         if disks:
@@ -357,6 +362,8 @@ def diskstat_select_disk(disks, item):
 #       'write_ios'                  : 1.6153846153846154,
 #       'write_throughput'           : 65536.0,
 #       'queue_length'               : 0.0,
+#       'read_ql'                    : 0.0,
+#       'write_ql'                   : 0.0,
 # }}
 def check_diskstat_dict(item, params, disks):
     # Take care of previously discovered services
@@ -369,6 +376,7 @@ def check_diskstat_dict(item, params, disks):
     disk = diskstat_select_disk(disks, item)
     if not disk:
         return
+
 
     # Averaging
     # Note: this check uses a simple method of averaging: As soon as averaging
@@ -411,7 +419,7 @@ def check_diskstat_dict(item, params, disks):
             wait = disk["average_" + what]
             state, text, extraperf = check_levels(wait, what, params.get(what),
                                                   unit = "ms", scale = 0.001, statemarkers=False)
-            yield state, "Average %s: %.2f ms %s" % (what.title().replace("_", " "), wait * 1000, text), extraperf
+            yield state, "Average %s: %.2f ms%s" % (what.title().replace("_", " "), wait * 1000, text), extraperf
 
     # Average disk latency
     if "latency" in disk:
@@ -419,6 +427,16 @@ def check_diskstat_dict(item, params, disks):
         state, text, extraperf = check_levels(latency, "disk_latency", params.get("latency"),
                                               unit = "ms", scale = 0.001, statemarkers=False)
         yield state, "Latency: %.2f ms%s" % (latency * 1000.0, text), extraperf
+
+    # Queue lengths
+    for what, plugin_text in [ ("queue_length", "Queue Length"),
+                               ("read_ql",      "Read Queue Length"),
+                               ("write_ql",     "Write Queue Length") ]:
+        if what in disk:
+            ql = disk[what]
+            state, levels_text, extraperf = check_levels(ql, what, params.get(what),
+                                                         statemarkers=False)
+            yield state, "Average %s: %.2f%s" % (plugin_text, ql, levels_text), extraperf
 
     # All the other metrics are currently not output in the plugin output - simply because
     # of their amount. They are present as performance data and will shown in graphs.

@@ -17,30 +17,31 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "HostSpecialDoubleColumn.h"
+#include <ctime>
 #include "nagios.h"
-#include "logger.h"
-#include "time.h"
 
-extern int      interval_length;
+extern int interval_length;
 
-double HostSpecialDoubleColumn::getValue(void *data)
-{
+double HostSpecialDoubleColumn::getValue(void *data) {
     data = shiftPointer(data);
-    if (!data) return 0;
+    if (data == nullptr) {
+        return 0;
+    }
 
-    host *hst  = (host *)data;
+    host *hst = static_cast<host *>(data);
 
     switch (_type) {
-        case HSDC_STALENESS:
-        {
-            return (time(0) - hst->last_check) / ((hst->check_interval == 0 ? 1 : hst->check_interval) * interval_length);
+        case HSDC_STALENESS: {
+            return (time(nullptr) - hst->last_check) /
+                   ((hst->check_interval == 0 ? 1 : hst->check_interval) *
+                    interval_length);
         }
     }
-    return -1; // Never reached
+    return -1;  // Never reached
 }

@@ -18,7 +18,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -30,23 +30,20 @@
 # Author: Lars Michelsen <lm@mathias-kettner.de>
 #
 
-function getAllPsuFiles($path) {
-  $files = array();
-  if($h = opendir($path)) {
-		while(($file = readdir($h)) !== false) {
-      if(preg_match('/^PSU_[0-9]+_output\.rrd$/', $file, $aRet))
-        $files[] = $aRet[0];
-    }
-		natcasesort($files);
-    closedir($h);
-  }
-  return $files;
-}
-
 $colors = array("008CFF", "6FBEFF", "2F7EBF", "00589F");
 
 $path  = dirname($RRDFILE[1]);
-$files = getAllPsuFiles($path);
+
+# get all psu files
+$files = array();
+if($h = opendir($path)) {
+    while(($file = readdir($h)) !== false) {
+    if(preg_match('/^PSU_[0-9]+_output\.rrd$/', $file, $aRet))
+      $files[] = $aRet[0];
+  }
+  natcasesort($files);
+  closedir($h);
+}
 
 $opt[0] = "-l 0 --vertical-label \"Watt\" --title \"HP Blade Enclosure - PSU Power Usage\" ";
 $def[0] = '';

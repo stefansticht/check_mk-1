@@ -17,37 +17,46 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "StatsColumn.h"
+#include <string>
 #include "Column.h"
-#include "Filter.h"
 #include "CountAggregator.h"
-#include "IntAggregator.h"
 #include "DoubleAggregator.h"
+#include "DoubleColumn.h"
+#include "Filter.h"
+#include "IntAggregator.h"
+#include "IntColumn.h"
 #include "PerfdataAggregator.h"
+#include "StringColumn.h"
 #include "strutil.h"
 
-StatsColumn::~StatsColumn()
-{
-    if (_filter)
+StatsColumn::~StatsColumn() {
+    if (_filter != nullptr) {
         delete _filter;
+    }
 }
 
-
-Aggregator *StatsColumn::createAggregator()
-{
-    if (_operation == STATS_OP_COUNT)
+Aggregator *StatsColumn::createAggregator() {
+    if (_operation == StatsOperation::count) {
         return new CountAggregator(_filter);
-    else if (_column->type() == COLTYPE_INT || _column->type() == COLTYPE_TIME)
-        return new IntAggregator((IntColumn *)_column, _operation);
-    else if (_column->type() == COLTYPE_DOUBLE)
-        return new DoubleAggregator((DoubleColumn *)_column, _operation);
-    else if (_column->type() == COLTYPE_STRING and ends_with(_column->name(), "perf_data"))
-        return new PerfdataAggregator((StringColumn *)_column, _operation);
-    else  // unaggregateble column
-        return new CountAggregator(_filter);
+    }
+    if (_column->type() == ColumnType::int_ ||
+        _column->type() == ColumnType::time) {
+        return new IntAggregator(_operation, static_cast<IntColumn *>(_column));
+    }
+    if (_column->type() == ColumnType::double_) {
+        return new DoubleAggregator(_operation,
+                                    static_cast<DoubleColumn *>(_column));
+    }
+    if (_column->type() == ColumnType::string and
+        (ends_with(_column->name().c_str(), "perf_data") != 0)) {
+        return new PerfdataAggregator(_operation,
+                                      static_cast<StringColumn *>(_column));
+    }  // unaggregateble column
+    return new CountAggregator(_filter);
 }

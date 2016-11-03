@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -47,7 +47,7 @@ def check_filer_disks(disks, params):
     prefaild_parity_disk_count   = 0
 
     for disk in disks:
-        total_capacity += disk["capacity"]
+        total_capacity += disk.get("capacity", 0)
         for what in state.keys():
             if disk['state'] == what:
                 state[what].append(disk)
@@ -75,7 +75,7 @@ def check_filer_disks(disks, params):
         if len(total_disks) > 0:
             info_text = "%s disks" % len(total_disks)
             if len(prefailed_disks) > 0:
-                info_text += " (%d prefailed)" % (prefailed)
+                info_text += " (%d prefailed)" % (prefailed_disks)
             yield 0, info_text
             info_texts = []
             for disk in prefailed_disks:
@@ -97,7 +97,7 @@ def check_filer_disks(disks, params):
             elif ratio >= warn:
                 return_state = 1
             if return_state:
-                yield return_state, "Too many %s disks (levels at %.1f%%/%.1f%%)" % (disk_state, warn, crit)
+                yield return_state, "Too many %s disks (warn/crit at %.1f%%/%.1f%%)" % (disk_state, warn, crit)
 
 
 

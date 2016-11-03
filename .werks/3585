@@ -1,0 +1,122 @@
+Title: Implemented API for exporting the full host inventory
+Level: 2
+Component: inv
+Class: feature
+Compatible: compat
+State: unknown
+Version: 1.4.0i1
+Date: 1464704941
+
+The HW/SW inventory data can now be exported using a webservice. This webservice
+outputs the raw structured inventory data of a host.
+
+The URL to this webservice is:
+
+C+:
+http://[MONITORING-SERVER]/[SITE]/check_mk/host_inv_api.py?host=[HOST]&output_format=json
+C-:
+
+You choose one of these output formats: <tt>json</tt>, <tt>xml</tt>, <tt>python</tt>.
+
+The data provided by this webservice looks as follows:
+
+C+:
+{
+    "result": {
+        "hardware": {
+            "memory": {
+                "total_ram_usable": 16697331712,
+                "total_swap": 17049841664,
+                "total_vmalloc": 35184372087808
+            }
+        },
+        "networking": {
+            "hostname": "Klappspaten"
+        }
+    },
+    "result_code": 0
+}
+C-:
+
+The data below the key <tt>result</tt> is the HW/SW inventory data.
+
+In case an error occurs during processing of the request, for example a host can not be found,
+the <tt>result_code</tt> is set to 1 and the result contains the error message:
+
+C+:
+{"result": "Found no inventory data for this host.", "result_code": 1}
+C-:
+
+
+You can also request data of multiple hosts at once. In this case, you need to specify your request like this:
+
+C+:
+http://[MONITORING-SERVER]/[SITE]/check_mk/host_inv_api.py?request={"hosts": ["host1", "host2"]}&output_format=json
+C-:
+
+You will then get an answer that is similar to the answer above. With the difference that the top level dictionary
+uses the host names as keys and the values are the inventory tree of this host.
+
+C+:
+{
+    "result": {
+        "gestern": {
+            "hardware": {
+                "memory": {
+                    "total_ram_usable": 16697307136,
+                    "total_swap": 17049841664,
+                    "total_vmalloc": 35184372087808
+                }
+            },
+            "networking": {
+                "hostname": "Klappspaten"
+            }
+        },
+        "heute": {
+            "hardware": {
+                "memory": {
+                    "total_ram_usable": 16697307136,
+                    "total_swap": 17049841664,
+                    "total_vmalloc": 35184372087808
+                }
+            },
+            "networking": {
+                "hostname": "Klappspaten"
+            }
+        },
+        "slave": {}
+    },
+    "result_code": 0
+}
+C-:
+
+Another difference in this mode: When a host has no inventory data, the host has an empty dictionary as value
+instead of providing an error result.
+
+
+If you want to only have a subset of inventory data, you can specify a list of <i>inventory paths</i> which are then
+used to filter the tree. Only hosts that have those paths will show the trees.
+
+For example, if you only want to see the total and swap memory information of a single host, you can use the following URL:
+
+C+:
+http://[MONITORING-SERVER]/[SITE]/check_mk/host_inv_api.py?host=[HOST]&request={"paths": [".hardware.memory.total_ram_usable", ".hardware.memory.total_swap"]}&output_format=json
+C-:
+
+You will get back only the requested data:
+
+C+:
+{
+    "result": {
+        "": {
+            "hardware": {
+                "memory": {
+                    "total_ram_usable": 16697307136,
+                    "total_swap": 17049841664
+                }
+            }
+        }
+    },
+    "result_code": 0
+}
+C-:

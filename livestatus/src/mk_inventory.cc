@@ -17,38 +17,17 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <unistd.h>
-#include <stdio.h>
+#include "mk_inventory.h"
 #include <sys/stat.h>
 
-#include "mk_inventory.h"
+using std::string;
 
-#ifdef CMC
-#include <Config.h>
-#define MK_INVENTORY_PATH g_config->_mk_inventory_path
-#else
-extern char g_mk_inventory_path[];
-#define MK_INVENTORY_PATH g_mk_inventory_path
-#endif
-
-int mk_inventory_last(const char *host)
-{
-    char path[4096];
-    snprintf(path, sizeof(path), "%s/%s", MK_INVENTORY_PATH, host);
+int mk_inventory_last(const string &path) {
     struct stat st;
-    if (0 != stat(path, &st))
-        return 0;
-    else
-        return st.st_mtime;
-}
-
-int mk_inventory_last_of_all()
-{
-    // Check_MK Inventory touches the file ".last" after each inventory
-    return mk_inventory_last(".last");
+    return stat(path.c_str(), &st) != 0 ? 0 : st.st_mtime;
 }

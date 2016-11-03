@@ -19,13 +19,27 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+
+# Example output from agent:
+# <<<jolokia_metrics>>>
+# 8080 NonHeapMemoryUsage 101078952
+# 8080 NonHeapMemoryMax 184549376
+# 8080 HeapMemoryUsage 2362781664
+# 8080 HeapMemoryMax 9544663040
+# 8080 ThreadCount 78
+# 8080 DeamonThreadCount 72
+# 8080 PeakThreadCount 191
+# 8080 TotalStartedThreadCount 941
+# 8080 Uptime 572011375
+# 8080,java.lang:name=PS_MarkSweep,type=GarbageCollector CollectionCount 0
+
 # MB warn, crit
-#jolokia_metrics_mem_default_levels = (2000, 3000) #
+# jolokia_metrics_mem_default_levels = (2000, 3000)
 
 # Number of threads warn, crit
 jolokia_metrics_threads_default_levels  = (80, 100)
@@ -53,57 +67,71 @@ jolokia_metrics_tp_default_levels = {
 
 def jolokia_metrics_parse(info):
     parsed = {}
-    for inst, var, value in info:
-        app, servlet, gc, tp = None, None, None, None
+    for line in info:
+        if line[1] == "ERROR":
+            parsed[line[0]] = None # error
+            continue
+
+        inst, var, value = line
+        module  = None
+        attributes = {}
+        positional = []
+
+        # app, servlet, gc, tp = None, None, None, None
         if ',' in inst:
             parts = inst.split(',')
-            if "GarbageCollector" in inst:
-                part1 = inst.split(',java.lang:name=')
-                inst = part1[0]
-                part2 = part1[1].split(',type=')
-                gc = part2[0]
-            elif "ThreadPool" in inst:
-                if "Catalina" in inst:
-                    part1 = inst.split(',Catalina:name=')
-                elif "Standalone" in inst:
-                    part1 = inst.split(',Standalone:name=')
+            inst = parts[0]
+
+            for part in parts[1:]:
+                if ":" in part:
+                    module, part = part.split(":")
+                if "=" in part:
+                    key, val = part.split("=")
+                    attributes[key] = val
                 else:
-                    continue
-                inst = part1[0]
-                part2 = part1[1].split(',type=')
-                tp = part2[0].replace('"','')
-            elif len(parts) == 3:
-                inst, app, servlet = parts
-            else:
-                inst, app = parts
+                    positional.append(part)
 
         parsed.setdefault(inst, {})
-        if servlet:
-            parsed[inst].setdefault('apps', {})
-            parsed[inst]['apps'].setdefault(app, {})
-            parsed[inst]['apps'][app].setdefault('servlets', {})
-            parsed[inst]['apps'][app]['servlets'].setdefault(servlet, {})
-            parsed[inst]['apps'][app]['servlets'][servlet][var] = value
-        elif app:
-            parsed[inst].setdefault('apps', {})
-            parsed[inst]['apps'].setdefault(app, {})
-            parsed[inst]['apps'][app][var] = value
-        elif gc:
-            parsed[inst].setdefault('gc', {})
-            parsed[inst]['gc'].setdefault(gc, {})
-            parsed[inst]['gc'][gc][var] = value
-        elif tp:
-            parsed[inst].setdefault('tp', {})
-            parsed[inst]['tp'].setdefault(tp, {})
-            parsed[inst]['tp'][tp][var] = value
+
+        if 'type' in attributes:
+            bean_name = attributes['name']
+            bean_type = attributes['type']
+            # backwards compatibility
+            bean_type = {
+                "GarbageCollector": "gc",
+                "ThreadPool": "tp"
+            }.get(bean_type, bean_type)
+            # maybe do this for all types?
+            if bean_type == "tp":
+                bean_name = bean_name.replace('"', '')
+
+            parsed[inst].setdefault(bean_type, {}).setdefault(bean_name, {})
+            parsed[inst][bean_type][bean_name][var] = value
+            for attr_key, attr_value in attributes.iteritems():
+                if attr_key not in set(['name', 'type']):
+                    parsed[inst][bean_type][bean_name][attr_key] = attr_value
         else:
-            parsed[inst][var] = value
+            if len(positional) > 0:
+                app = positional[0]
+                parsed[inst].setdefault('apps', {}).setdefault(app, {})
+                if len(positional) > 1:
+                    servlet = positional[1]
+                    parsed[inst]['apps'][app].setdefault('servlets', {}).setdefault(servlet, {})
+                    parsed[inst]['apps'][app]['servlets'][servlet][var] = value
+                else:
+                    parsed[inst]['apps'][app][var] = value
+            else:
+                parsed[inst][var] = value
     return parsed
+
 
 
 # This bisects the app server and its values
 def jolokia_metrics_app(info, (inst, app)):
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(inst, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
+
     if not inst in parsed \
        or not app in parsed[inst].get('apps', {}):
         return None
@@ -118,6 +146,9 @@ def jolokia_metrics_serv(info, (inst, app, serv)):
 
 def jolokia_metrics_gc(info, (inst, typ, gc)):
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(inst, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
+
     if not inst in parsed \
        or not gc in parsed[inst].get('gc', {}):
         return None
@@ -125,6 +156,9 @@ def jolokia_metrics_gc(info, (inst, typ, gc)):
 
 def jolokia_metrics_tp(info, (inst, typ, tp)):
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(inst, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
+
     if not inst in parsed \
        or not tp in parsed[inst].get('tp', {}):
         return None
@@ -132,6 +166,7 @@ def jolokia_metrics_tp(info, (inst, typ, tp)):
 
 def inventory_jolokia_metrics(info, what):
     parsed = jolokia_metrics_parse(info)
+
     levels = None
 
     if what == 'mem':
@@ -140,7 +175,14 @@ def inventory_jolokia_metrics(info, what):
         levels = 'jolokia_metrics_threads_default_levels'
 
     for instance, data in parsed.items():
+        if data == None:
+            continue # No connection to agent currently
+
         if what == 'uptime' and "Uptime" not in data:
+            continue
+        if what == 'mem' and ("HeapMemoryUsage" not in data or "NonHeapMemoryUsage" not in data
+                              or "HeapMemoryMax" not in data or "NonHeapMemoryMax" not in data):
+            # don't add memory check if we don't have the necessary data
             continue
         yield instance, levels
 
@@ -176,6 +218,9 @@ def inventory_jolokia_metrics_apps(info, what):
     # higher than the rest.
     if what == 'bea_app_sess':
         for inst, vals in parsed.iteritems():
+            if vals == None:
+                continue # no data from agent
+
             for app, appstate in vals.get('apps', {}).items():
                 if 'servlets' in appstate:
                     for nk in needed_key:
@@ -185,6 +230,9 @@ def inventory_jolokia_metrics_apps(info, what):
                                 continue
     # This does the same for tomcat
     for inst, vals in parsed.iteritems():
+        if vals == None:
+            continue # no data from agent
+
         for app, appstate in vals.get('apps', {}).items():
             for nk in needed_key:
                 if nk in appstate:
@@ -201,6 +249,8 @@ def inventory_jolokia_metrics_serv(info, what):
         levels = 'jolokia_metrics_serv_req_default_levels'
         needed_key = "Requests"
     for inst, vals in parsed.iteritems():
+        if vals == None:
+            continue # no data from agent
         for app, val in vals.get('apps', {}).iteritems():
             for serv, servinfo in val.get('servlets', {}).items():
                 if needed_key in servinfo:
@@ -214,6 +264,8 @@ def inventory_jolokia_metrics_gc(info, what):
     if what == 'gc':
         needed_key = ["CollectionCount", "CollectionTime"]
     for inst, vals in parsed.iteritems():
+        if vals == None:
+            continue # no data from agent
         for gc, val in vals.get('gc', {}).iteritems():
             inv.append(("%s GC %s" % (inst ,gc) , levels))
     return inv
@@ -225,25 +277,20 @@ def inventory_jolokia_metrics_tp(info, what):
     if what == 'tp':
         needed_key = ["currentThreadsBusy", "currentThreadCount", "maxThreads"]
     for inst, vals in parsed.iteritems():
-        for tp, val in vals.get('tp', {}).iteritems():
-            inv.append(("%s ThreadPool %s" % (inst ,tp) , levels))
-    return inv
-
-def inventory_jolokia_metrics_tp(info, what):
-    inv = []
-    parsed = jolokia_metrics_parse(info)
-    levels = 'jolokia_metrics_tp_default_levels'
-    if what == 'tp':
-        needed_key = ["currentThreadsBusy", "currentThreadCount", "maxThreads"]
-    for inst, vals in parsed.iteritems():
+        if vals == None:
+            continue # no data from agent
         for tp, val in vals.get('tp', {}).iteritems():
             inv.append(("%s ThreadPool %s" % (inst ,tp) , levels))
     return inv
 
 def check_jolokia_metrics_mem(item, params, info):
     parsed = jolokia_metrics_parse(info)
+
+    if parsed.get(item, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
+
     if item not in parsed:
-        return (3, "data not found in agent output")
+        return
 
     # convert old parameter version ( warn, crit )
     # represented levels of total heap
@@ -259,6 +306,11 @@ def check_jolokia_metrics_mem(item, params, info):
 
     d = parsed[item]
     mb = 1024 * 1024.0
+
+    if "HeapMemoryUsage" not in d or "NonHeapMemoryUsage" not in d\
+        or "HeapMemoryMax" not in d or "NonHeapMemoryMax" not in d:
+            return 3, "data in agent output incomplete"
+
     heap = saveint(d["HeapMemoryUsage"]) / mb
     heapmax = saveint(d.get("HeapMemoryMax",-1)) / mb
     nonheap = saveint(d["NonHeapMemoryUsage"]) / mb
@@ -332,6 +384,8 @@ def check_jolokia_metrics_mem(item, params, info):
 def check_jolokia_metrics_threads(item, params, info):
     warn, crit = params
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(item, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
     if item not in parsed:
         return (3, "data not found in agent output")
     d = parsed[item]
@@ -346,12 +400,15 @@ def check_jolokia_metrics_threads(item, params, info):
             continue # The keys might be optional (saw jboss only sending ThreadCount)
 
         val = int(d[key])
+        status_info = ""
         if key == 'ThreadCount':
             # Thread count might lead to a warn/crit state
             if val >= crit:
                 status = 2
+                status_info = "(!!) (Levels at %d/%d)" % (warn, crit)
             elif val >= warn:
                 status = 1
+                status_info = "(!) (Levels at %d/%d)" % (warn, crit)
 
             # Calculate the thread increase rate
             try:
@@ -362,7 +419,7 @@ def check_jolokia_metrics_threads(item, params, info):
                 wrapped = True
 
         perfdata.append((key, val))
-        output.append('%s: %d' % (key, val))
+        output.append('%s: %d%s' % (key, val, status_info))
     # Only process the perfdata when no wrap occured
     if wrapped:
         return (status, ', '.join(output))
@@ -371,6 +428,8 @@ def check_jolokia_metrics_threads(item, params, info):
 
 def check_jolokia_metrics_uptime(item, params, info):
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(item, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
     if item in parsed:
         uptime = int(parsed[item]['Uptime']) / 1000
         return check_uptime_seconds(params, uptime)
@@ -696,7 +755,6 @@ check_info["jolokia_metrics.app_state"] = {
     "service_description" : "JVM %s State",
     "check_function"      : check_jolokia_metrics_app_state,
     "inventory_function"  : lambda i: inventory_jolokia_metrics_apps(i, "app_state"),
-    "has_perfdata"        : False,
 }
 
 check_info["jolokia_metrics.app_sess"] = {
@@ -762,19 +820,21 @@ jolokia_metrics_perm_gen_default_levels = { "perm" : ( 80.0, 100.0 ) }
 def inventory_jolokia_metrics_perm_gen(info):
     parsed = jolokia_metrics_parse(info)
     for instance, values in parsed.items():
-        if "PermGenUsage" in values:
+        if values and "PermGenUsage" in values:
             yield instance, "jolokia_metrics_perm_gen_default_levels"
 
 def check_jolokia_metrics_perm_gen(item, params, info):
     parsed = jolokia_metrics_parse(info)
+    if parsed.get(item, "") == None:
+        raise MKCounterWrapped("No information from Jolokia agent")
     values = parsed.get(item)
     if values:
         warn, crit = params['perm']
         usage_bytes = int(values['PermGenUsage'])
         size_bytes = int(values['PermGenMax'])
         usage_perc = 100.0 / size_bytes * usage_bytes
-        warn_bytes = usage_bytes / 100.0 * warn
-        crit_bytes = usage_bytes / 100.0 * crit
+        warn_bytes = size_bytes / 100.0 * warn
+        crit_bytes = size_bytes / 100.0 * crit
         perfdata = [("mem_perm_used", usage_bytes, warn_bytes, crit_bytes, 0, size_bytes)]
         state = 0
         if usage_perc >= crit:
@@ -782,7 +842,7 @@ def check_jolokia_metrics_perm_gen(item, params, info):
         elif usage_perc >= warn:
             state = 1
         if state != 0:
-            levels = "(Warn/Crit at %2.f %%/ %.2f %%)" % ( warn, crit )
+            levels = "(warn/crit at %2.f/%.2f %%)" % ( warn, crit )
         else:
             levels = ""
         return state, "Usage: %.2f %% (%s of %s used) %s" % \
@@ -797,4 +857,94 @@ check_info["jolokia_metrics.perm_gen"] = {
     "has_perfdata"        : True,
 }
 
+
+jolokia_metrics_cache_hits_default_levels = {}
+
+def inventory_jolokia_metrics_cache(key, metrics, info):
+    parsed = jolokia_metrics_parse(info)
+    metrics_set = set(metrics)
+    for inst, vals in parsed.iteritems():
+        for cache, cache_vars in vals.get("CacheStatistics", {}).iteritems():
+            if metrics_set.intersection(cache_vars) == metrics_set:
+                if key is None:
+                    yield "%s %s" % (inst, cache), None
+                else:
+                    yield "%s %s" % (inst, cache), "jolokia_metrics_%s_default_levels" % key
+
+
+def check_jolokia_metrics_cache(metrics, totals, item, params, info):
+    type_map = {
+        "CacheHitPercentage"    : (float, 100.0, "%.1f%%"),
+        "InMemoryHitPercentage" : (float, 100.0, "%.1f%%"),
+        "OnDiskHitPercentage"   : (float, 100.0, "%.1f%%"),
+        "OffHeapHitPercentage"  : (float, 100.0, "%.1f%%"),
+    }
+
+    parsed = jolokia_metrics_parse(info)
+    try:
+        inst, cache = item.split(" ")
+
+        # we display the "metrics" first, totals after, but to "fix" metrics based on zero-totals
+        # we need to go over the totals once
+        totals_zero = len(totals) > 0
+        for total in totals:
+            val = int(parsed[inst]["CacheStatistics"][cache][total])
+            if val != 0:
+                totals_zero = False
+                break
+
+        for metric in metrics:
+            type_, scale, format = type_map.get(metric, (int, 1,"%d"))
+
+            val = type_(parsed[inst]["CacheStatistics"][cache][metric]) * scale
+            if isinstance(val, float) and val == 0.0:
+                # what a hack! we assume the float is based on the totals (all of them) and if they
+                # were all 0, so this float is 0/0, we want to display it as 1 as to not cause
+                # an alert
+                val = 1.0 * scale
+            yield 0, ("%s: " + format) % (metric, val), [(metric, val)]
+
+        for total in totals:
+            type_, scale, format = type_map.get(total, (int, 1,"%d"))
+            val = type_(parsed[inst]["CacheStatistics"][cache][total]) * scale
+            yield 0, ("%s: " + format) % (total, val), []
+    except KeyError, e:
+        # some element of the item was missing
+        pass
+
+
+check_info["jolokia_metrics.cache_hits"] = {
+    "service_description" : "JVM %s Cache Usage",
+    "check_function"      : lambda item, params, parsed: check_jolokia_metrics_cache(["CacheHitPercentage", "ObjectCount"], ["CacheHits", "CacheMisses"], item, params, parsed),
+    "inventory_function"  : lambda info: inventory_jolokia_metrics_cache("cache_hits", ["CacheHitPercentage", "ObjectCount", "CacheHits", "CacheMisses"], info),
+    "has_perfdata"        : True,
+}
+
+check_info["jolokia_metrics.in_memory"] = {
+    "service_description" : "JVM %s In Memory",
+    "check_function"      : lambda item, params, parsed: check_jolokia_metrics_cache(["InMemoryHitPercentage", "MemoryStoreObjectCount"], ["InMemoryHits", "InMemoryMisses"], item, params, parsed),
+    "inventory_function"  : lambda info: inventory_jolokia_metrics_cache("cache_hits", ["InMemoryHitPercentage", "MemoryStoreObjectCount", "InMemoryHits", "InMemoryMisses"], info),
+    "has_perfdata"        : True,
+}
+
+check_info["jolokia_metrics.on_disk"] = {
+    "service_description" : "JVM %s On Disk",
+    "check_function"      : lambda item, params, parsed: check_jolokia_metrics_cache(["OnDiskHitPercentage", "DiskStoreObjectCount"], ["OnDiskHits", "OnDiskMisses"], item, params, parsed),
+    "inventory_function"  : lambda info: inventory_jolokia_metrics_cache("cache_hits", ["OnDiskHitPercentage", "DiskStoreObjectCount", "OnDiskHits", "OnDiskMisses"], info),
+    "has_perfdata"        : True,
+}
+
+check_info["jolokia_metrics.off_heap"] = {
+    "service_description" : "JVM %s Off Heap",
+    "check_function"      : lambda item, params, parsed: check_jolokia_metrics_cache(["OffHeapHitPercentage", "OffHeapStoreObjectCount"], ["OffHeapHits", "OffHeapMisses"], item, params, parsed),
+    "inventory_function"  : lambda info: inventory_jolokia_metrics_cache("cache_hits", ["OffHeapHitPercentage", "OffHeapStoreObjectCount", "OffHeapHits", "OffHeapMisses"], info),
+    "has_perfdata"        : True,
+}
+
+check_info["jolokia_metrics.writer"] = {
+    "service_description" : "JVM %s Cache Writer",
+    "check_function"      : lambda item, params, parsed: check_jolokia_metrics_cache(["WriterQueueLength", "WriterMaxQueueSize"], [], item, params, parsed),
+    "inventory_function"  : lambda info: inventory_jolokia_metrics_cache("cache_hits", ["WriterQueueLength", "WriterMaxQueueSize"], info),
+    "has_perfdata"        : True,
+}
 

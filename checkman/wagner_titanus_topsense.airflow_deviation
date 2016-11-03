@@ -18,36 +18,3 @@ inventory:
 item:
  The ID of the detector.
 
-perfdata:
- One value: The airflow deviation in percent, together with it's upper
- levels for warning and critical.
-
-examples:
- # set other default levels
- wagner_titanus_topsense_airflow_deviation_default_values = (-30.0, -10.0, 10.0, 30.0)
-
- # check detector 1 with default levels
- checks += [
-     ("ras", "wagner_titanus_topsense.airflow_deviation", '1', wagner_titanus_topsense_airflow_deviation_default_values)
- ]
-
- # check detector 1 with individual levels
- checks += [
-     ( "ras", "wagner_titanus_topsense.airflow_deviation", '1', (-40.0, -30.0, 30.0, 40.0) )
- ]
-
-[parameters]
-parameters (tuple): Containing the four numbers lower_crit, lower_warn, upper_warn, upper_crit.
-    If the airflow deviation in percent from the set point
-    is lower or equal lower_crit, the check returns {CRIT}.
-    If the airflow deviation in percent from the set point
-    is lower or equal lower_warn, the check returns {WARN}.
-    If the airflow deviation in percent from the set point
-    is higher or equal upper_warn, the check returns {WARN}.
-    If the airflow deviation in percent from the set point
-    is higher or equal upper_crit, the check returns {CRIT}.
-
-[configuration]
-wagner_titanus_topsense_airflow_deviation_default_values(float, float, float, float):
-    Default values for lower_crit, lower_warn, upper_warn, upper_crit,
-    preset to (-20.0, -20.0, 20.0, 20.0)

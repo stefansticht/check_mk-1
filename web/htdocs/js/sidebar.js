@@ -24,7 +24,7 @@
 
 var g_content_loc   = null;
 
-var sidebar_folded = false;
+var g_sidebar_folded = false;
 
 //
 // Sidebar styling and scrolling stuff
@@ -81,11 +81,17 @@ function registerEdgeListeners(obj) {
             continue;
 
         if (window.addEventListener)
-            edges[i].addEventListener("mousemove", stop_snapin_dragging, false);
+            edges[i].addEventListener("mousemove", on_mouse_leave, false);
         else
-            edges[i].onmousemove = stop_snapin_dragging;
+            edges[i].onmousemove = on_mouse_leave;
     }
     edges = null;
+}
+
+function on_mouse_leave(e) {
+    if (typeof(mkSearchClose) != "undefined")
+        mkSearchClose();
+    return stop_snapin_dragging(e);
 }
 
 function stop_snapin_dragging(e) {
@@ -390,7 +396,7 @@ function update_content_location() {
 }
 
 function debug(s) {
-  window.parent.frames[1].document.write(s+'<br />');
+    window.parent.frames[1].document.write(s+'<br />');
 }
 
 
@@ -398,31 +404,34 @@ function debug(s) {
 // but without scrolling. The height of the header and footer divs need
 // to be treated here.
 var g_just_resizing = 0;
-function setSidebarHeight() {
-  var oHeader  = document.getElementById('side_header');
-  var oContent = document.getElementById('side_content');
-  var oFooter  = document.getElementById('side_footer');
-  var height   = pageHeight();
+function set_sidebar_size() {
+    var oHeader  = document.getElementById('side_header');
+    var oContent = document.getElementById('side_content');
+    var oFooter  = document.getElementById('side_footer');
+    var height   = pageHeight();
 
-  // Resize sidebar frame on Chrome (and other webkit browsers)
-  if (isWebkit()) {
-      var oldcols = parent.document.body.cols.split(",");
-      var oldwidth = parseInt(oldcols[0]);
-      var width = oHeader.clientWidth;
-      var target_width = oldwidth * 280.0 / width;
-      var newcols = target_width.toString() + ",*";
-      parent.document.body.cols = newcols;
-  }
+    // Resize sidebar frame on Chrome (and other webkit browsers).
+    if (isWebkit()) {
+        var oldcols = parent.document.body.cols.split(",");
+        var oldwidth = parseInt(oldcols[0]);
+        var width = parent.frames[0].pageWidth();
+        // Note: previously this was "var width = oHeader.clientWidth;" and worked
+        // fine. It stopped working - probably with new Chrome versions. We do not
+        // know yet if the new way also works on old Chrome versions.
+        var target_width = parseInt(oldwidth * sidebar_width() / width);
+        var newcols = target_width.toString() + ",*";
+        parent.document.body.cols = newcols;
+    }
 
-  // Don't handle zero heights
-  if (height == 0)
-    return;
+    // Don't handle zero heights
+    if (height == 0)
+      return;
 
-  oContent.style.height = (height - oHeader.clientHeight - oFooter.clientHeight + 4) + 'px';
+    oContent.style.height = (height - oHeader.clientHeight - oFooter.clientHeight + 4) + 'px';
 
-  oFooter = null;
-  oContent = null;
-  oHeader = null;
+    oFooter = null;
+    oContent = null;
+    oHeader = null;
 }
 
 var scrolling = true;
@@ -450,12 +459,12 @@ function startDragScroll(event) {
   if (!event)
     event = window.event;
 
-  if (sidebar_folded) {
-      unfoldSidebar();
+  if (g_sidebar_folded) {
+      unfold_sidebar();
       return false;
   }
-  else if (!sidebar_folded && event.clientX < 10) {
-      foldSidebar();
+  else if (!g_sidebar_folded && event.clientX < 10) {
+      fold_sidebar();
       return false;
   }
 
@@ -520,29 +529,34 @@ function dragScroll(event) {
   return false;
 }
 
-function foldSidebar()
+function sidebar_width()
 {
-    sidebar_folded = true;
+    if (g_sidebar_folded)
+        return 10;
+    else
+        return 280;
+}
+
+function fold_sidebar()
+{
+    g_sidebar_folded = true;
     document.getElementById('check_mk_sidebar').style.position = "relative";
     document.getElementById('check_mk_sidebar').style.left = "-265px";
-    if (isWebkit()) {
-        var oldcols = parent.document.body.cols.split(",");
-        var oldwidth = parseInt(oldcols[0]);
-        var new_width = 10.0 / 280.0 * oldwidth;
-        parent.document.body.cols = new_width.toString() + ",*";
-    }
-    else
-        parent.document.body.cols = "10,*";
+    document.getElementById('side_footer').style.display = "none";
+    document.getElementById('side_version').style.display = "none";
+    parent.document.body.cols = sidebar_width() + ",*";
     get_url('sidebar_fold.py?fold=yes');
 }
 
 
-function unfoldSidebar()
+function unfold_sidebar()
 {
+    g_sidebar_folded = false;
     document.getElementById('check_mk_sidebar').style.position = "";
     document.getElementById('check_mk_sidebar').style.left = "0";
-    parent.document.body.cols = "280,*";
-    sidebar_folded = false;
+    document.getElementById('side_footer').style.display = "";
+    document.getElementById('side_version').style.display = "";
+    parent.document.body.cols = sidebar_width() + ",*";
     get_url('sidebar_fold.py?fold=');
 }
 
@@ -605,29 +619,44 @@ sidebar_restart_time = null;
 // Configures the number of seconds to reload all snapins which request it
 sidebar_update_interval = null;
 
+// Removes the snapin from the current sidebar and informs the server for persistance
+function remove_sidebar_snapin(oLink, url)
+{
+    var container = oLink.parentNode.parentNode.parentNode;
+    var id = container.id.replace("snapin_container_", "");
+
+    call_ajax(url, {
+        handler_data     : "snapin_" + id,
+        response_handler : function (id, _unused) {
+            remove_snapin(id);
+        },
+        method           : "GET"
+    });
+}
+
+
 // Removes a snapin from the sidebar without reloading anything
-function removeSnapin(id, code) {
-  var container = document.getElementById(id).parentNode;
-  var myparent = container.parentNode;
-  myparent.removeChild(container);
+function remove_snapin(id)
+{
+    var container = document.getElementById(id).parentNode;
+    var myparent = container.parentNode;
+    myparent.removeChild(container);
 
-  // remove this snapin from the refresh list, if it is contained
-  for (var i in refresh_snapins) {
-      var name    = refresh_snapins[i][0];
-      if (id == "snapin_" + name) {
-          refresh_snapins.splice(i, 1);
-          break;
-      }
-  }
+    // remove this snapin from the refresh list, if it is contained
+    for (var i in refresh_snapins) {
+        var name    = refresh_snapins[i][0];
+        if (id == "snapin_" + name) {
+            refresh_snapins.splice(i, 1);
+            break;
+        }
+    }
 
-  // reload main frame if it is just displaying the "add snapin" page
-  var href = encodeURIComponent(parent.frames[1].location);
-  if (href.indexOf("sidebar_add_snapin.py") > -1)
-      parent.frames[1].location.reload();
-
-  href = null;
-  container = null;
-  myparent = null;
+    // reload main frame if it is currently displaying the "add snapin" page
+    if (parent.frames[1]) {
+        var href = encodeURIComponent(parent.frames[1].location);
+        if (href.indexOf("sidebar_add_snapin.py") > -1)
+            parent.frames[1].location.reload();
+    }
 }
 
 
@@ -646,8 +675,6 @@ function toggle_sidebar_snapin(oH2, url) {
             var oContent = child;
         else if (child.tagName == 'DIV' && (child.className == 'head open' || child.className == "head closed"))
             var oHead = child;
-        else if (child.tagName == 'DIV' && child.className == 'foot')
-            var oFoot = child;
     }
     var oImgMini = oHead.childNodes[0].childNodes[0].childNodes[0];
 
@@ -655,21 +682,18 @@ function toggle_sidebar_snapin(oH2, url) {
     var closed = oContent.style.display == "none";
     if (closed) {
         oContent.style.display = "block";
-        oFoot.style.display = "block";
         oHead.className = "head open";
-        oImgMini.src = "images/button_minisnapin_lo.png";
+        oImgMini.src = "images/button_minisnapin.png";
     }
     else {
         oContent.style.display = "none";
-        oFoot.style.display = "none";
         oHead.className = "head closed";
-        oImgMini.src = "images/button_maxisnapin_lo.png";
+        oImgMini.src = "images/button_maxisnapin.png";
     }
     /* make this persistent -> save */
     get_url(url + (closed ? "open" : "closed"));
     oContent = null;
     oHead = null;
-    oFoot = null;
     childs = null;
 }
 
@@ -752,13 +776,6 @@ function sidebar_scheduler() {
         g_seconds_to_update = sidebar_update_interval;
 
     setTimeout(function(){sidebar_scheduler();}, 1000);
-}
-
-function addBookmark() {
-    href = parent.frames[1].location;
-    title = parent.frames[1].document.title;
-    get_url("add_bookmark.py?title=" + encodeURIComponent(title)
-            + "&href=" + encodeURIComponent(href), updateContents, "snapin_bookmarks");
 }
 
 /************************************************
@@ -998,7 +1015,7 @@ function read_message() {
     if (!c)
         return;
 
-    // extract message from teh message container
+    // extract message from the message container
     var hints = get_hint_messages(c);
     var msg = hints[0];
     c.removeChild(msg);

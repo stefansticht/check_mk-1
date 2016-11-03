@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -60,7 +60,9 @@
 # may(<USER_NAME>, <PERMISSION>)
 # Returns true/false wether or not the user is permitted
 
-g_auth_base_dir = defaults.var_dir + '/wato/auth'
+import cmk.paths
+
+g_auth_base_dir = cmk.paths.var_dir + '/wato/auth'
 
 def format_php(data, lvl = 1):
     s = ''
@@ -235,12 +237,13 @@ function permitted_maps($username) {
 
     release_lock(lockfile)
 
+
 def create_auth_file(callee, users):
     make_nagios_directory(g_auth_base_dir)
 
     if config.export_folder_permissions:
         import wato # HACK: cleanup!
-        folder_permissions = wato.get_folder_permissions_of_users(users)
+        folder_permissions = get_folder_permissions_of_users(users)
     else:
         folder_permissions = {}
 
@@ -252,6 +255,31 @@ def create_auth_file(callee, users):
 
     create_php_file(callee, users, config.get_role_permissions(), groups, folder_permissions)
 
+
+def get_folder_permissions_of_users(users):
+    users = load_users()
+    import wato
+
+    permissions = {}
+    for username in users.iterkeys():
+        perms = {}
+        for folder_path, folder in wato.Folder.all_folders().iteritems():
+            readable = folder.user_may(username, "read")
+            writable = folder.user_may(username, "write")
+
+            if readable or writable:
+                perms[folder_path] = {}
+                if readable:
+                    perms[folder_path]['read'] = True
+                if writable:
+                    perms[folder_path]['write'] = True
+
+        if perms:
+            permissions[username] = perms
+    return permissions
+
+
+# TODO: Should we not execute this hook also when folders are modified?
 hooks.register('users-saved',         lambda users: create_auth_file("users-saved", users))
 hooks.register('roles-saved',         lambda x: create_auth_file("roles-saved", load_users()))
 hooks.register('contactgroups-saved', lambda x: create_auth_file("contactgroups-saved", load_users()))

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,19 +25,28 @@
 #ifndef CountAggregator_h
 #define CountAggregator_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
 #include "Aggregator.h"
-#include "StatsColumn.h"
-
 class Filter;
+class RowRenderer;
 
-class CountAggregator : public Aggregator
-{
-    Filter *_filter;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class CountAggregator : public Aggregator {
 public:
-    CountAggregator(Filter *f) : Aggregator(STATS_OP_COUNT), _filter(f) {}
-    void consume(void *data, Query *);
-    void output(Query *);
+    explicit CountAggregator(Filter *filter)
+        : Aggregator(StatsOperation::count), _filter(filter), _count(0) {}
+    void consume(void *row, contact *auth_user, int timezone_offset) override;
+    void output(RowRenderer &r) override;
+
+private:
+    Filter *const _filter;
+    std::uint32_t _count;
 };
 
-#endif // CountAggregator_h
-
+#endif  // CountAggregator_h

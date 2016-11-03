@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -68,7 +68,7 @@ factory_settings["netscaler_health_fan_default_levels"] = {
 
 def inventory_netscaler_health_fan(info):
     for name, value in info:
-        if name.endswith("Speed"):
+        if name.endswith("Speed") and value != "0":
            yield name[:-5], {}
 
 def check_netscaler_health_fan(item, params, info):
@@ -77,13 +77,14 @@ def check_netscaler_health_fan(item, params, info):
             return check_fan(int(value), params)
 
 check_info["netscaler_health.fan"] = {
-    "check_function"          : check_netscaler_health_fan,
     "inventory_function"      : inventory_netscaler_health_fan,
+    "check_function"          : check_netscaler_health_fan,
     "service_description"     : "FAN %s",
-    "group"                   : "hw_fans",
     "snmp_info"               : netscaler_health_info,
     "snmp_scan_function"      : netscaler_health_scan,
+    "has_perfdata"            : True,
     "default_levels_variable" : "netscaler_health_fan_default_levels",
+    "group"                   : "hw_fans",
     "includes"                : [ "fan.include" ],
 }
 #.
@@ -109,7 +110,7 @@ def check_netscaler_health_temp(item, params, info):
     for name, value in info:
         if name[:-11] == item and name.endswith("Temperature"):
             temp = int(value)
-            return check_temperature(temp, params)
+            return check_temperature(temp, params, "netscaler_health_%s" % item)
 
 check_info["netscaler_health.temp"] = {
     "check_function"          : check_netscaler_health_temp,

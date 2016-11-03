@@ -17,28 +17,20 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "OffsetStringColumn.h"
-#include "logger.h"
 
-char *OffsetStringColumn::getValue(void *data)
-{
-    if (!data)
-        return (char *)"";
+using std::string;
 
-    char *p = (char *)shiftPointer(data);
-    if (p) {
-        const char *s = *(char **)(p + _offset);
-        if (s)
-            return (char *)s;
-        else
-            return (char *)"";
+string OffsetStringColumn::getValue(void *data) const {
+    char *p = reinterpret_cast<char *>(shiftPointer(data));
+    if (p == nullptr) {
+        return "";
     }
-    else
-        return (char *)"";
+    const char *s = *reinterpret_cast<char **>(p + _offset);
+    return s == nullptr ? "" : s;
 }
-

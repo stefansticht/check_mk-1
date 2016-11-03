@@ -19,15 +19,5 @@ description:
 item:
  Number of the PSU (as string, not int).
 
-perfdata:
- It contains the current power usage in watts in the {output} value.
-
-examples:
- checks += [
-  # Manually configured check:
-  # Hostname, checkname, item-id, params
-  ( "examplehost", "hp_blade_psu", "1", None)
- ]
-
 inventory:
  All PSUs with the present state "present" are automatically inventorized.

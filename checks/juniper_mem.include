@@ -19,17 +19,17 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 juniper_mem_default_levels = ( 80.0, 90.0 )
 
-def inventory_juniper_mem(info):
+def inventory_juniper_mem_generic(info):
     return [ ( None, "juniper_mem_default_levels" ) ]
 
-def check_juniper_mem(_no_item, params, info):
+def check_juniper_mem_generic(_no_item, params, info):
     usage_kb, mem_size_kb = map(int, info[0]) # Kilobyte
     mem_size = mem_size_kb * 1024
     usage = usage_kb * 1024

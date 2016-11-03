@@ -19,12 +19,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import inventory
+import cmk.defines as defines
 
 # Try to magically compare two software versions.
 # Currently we only assume the format A.B.C.D....
@@ -36,17 +37,11 @@ def try_int(x):
     except:
         return x
 
-def cmp_version(a, b):
-    if a == None or b == None:
-        return cmp(a, b)
-    aa = map(try_int, a.split("."))
-    bb = map(try_int, b.split("."))
-    return cmp(aa, bb)
 
 class FilterInvtableText(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        Filter.__init__(self, varname, title, infoname + "s", [varname], [])
+        Filter.__init__(self, varname, title, infoname, [varname], [])
 
     def display(self):
         htmlvar = self.htmlvars[0]
@@ -67,27 +62,37 @@ class FilterInvtableText(Filter):
                 newrows.append(row)
         return newrows
 
+
+
 # Filter for choosing a range in which an age lies
 class FilterInvtableAge(Filter):
-    def __init__(self, infoname, name, title):
+    def __init__(self, infoname, name, title, only_days=False):
         name = infoname + "_" + name
-        Filter.__init__(self, name, title, infoname + "s", [name + "_from", name + "_to"], [])
+        Filter.__init__(self, name, title, infoname, [name + "_from", name + "_to"], [])
 
     def display(self):
         html.write("<table><tr><td style='vertical-align: middle;'>")
         html.write("%s:" % _("from"))
-        html.write("</td><td>")
-        Age().render_input(self.name + "_from", 0)
+        html.close_td()
+        html.open_td()
+        Age(display=["days"]).render_input(self.name + "_from", 0)
         html.write("</td></tr><tr><td style='vertical-align: middle;'>")
         html.write("%s:" % _("to"))
-        html.write("</td><td>")
-        Age().render_input(self.name + "_to", 0)
+        html.close_td()
+        html.open_td()
+        Age(display=["days"]).render_input(self.name + "_to", 0)
         html.write("</tr></table>")
+
 
     def double_height(self):
         return True
 
+
     def filter_table(self, rows):
+        return self.filter_table_with_conversion(rows, lambda age: age)
+
+
+    def filter_table_with_conversion(self, rows, conv):
         from_value = Age().from_html_vars(self.name + "_from")
         to_value = Age().from_html_vars(self.name + "_to")
 
@@ -98,13 +103,25 @@ class FilterInvtableAge(Filter):
         for row in rows:
             value = row.get(self.name, None)
             if value != None:
-                if from_value and value < from_value:
+                age = conv(value)
+                if from_value and age < from_value:
                     continue
 
-                if to_value and value > to_value:
+                if to_value and age > to_value:
                     continue
                 newrows.append(row)
         return newrows
+
+
+
+class FilterInvtableTimestampAsAge(FilterInvtableAge):
+    def __init__(self, infoname, name, title, only_days=True):
+        FilterInvtableAge.__init__(self, infoname, name, title, only_days)
+
+
+    def filter_table(self, rows):
+        now = time.time()
+        return self.filter_table_with_conversion(rows, lambda timestamp: now - timestamp)
 
 
 
@@ -112,7 +129,7 @@ class FilterInvtableAge(Filter):
 class FilterInvtableIDRange(Filter):
     def __init__(self, infoname, name, title):
         name = infoname + "_" + name
-        Filter.__init__(self, name, title, infoname + "s", [name + "_from", name + "_to"], [])
+        Filter.__init__(self, name, title, infoname, [name + "_from", name + "_to"], [])
 
     def display(self):
         html.write(_("from:") + " ")
@@ -143,16 +160,18 @@ class FilterInvtableIDRange(Filter):
 class FilterInvtableOperStatus(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        varnames = [ varname + "_" + str(x) for x in interface_oper_states ]
-        Filter.__init__(self, varname, title, infoname + "s", varnames, [])
+        varnames = [ varname + "_" + str(x) for x in defines.interface_oper_states() ]
+        Filter.__init__(self, varname, title, infoname, varnames, [])
 
     def display(self):
         html.begin_checkbox_group()
-        for state, state_name in sorted(interface_oper_states.items()):
+        for state, state_name in sorted(defines.interface_oper_states().items()):
+            if state >= 8:
+                continue # skip artificial state 8 (degraded) and 9 (admin down)
             varname = self.name + "_" + str(state)
             html.checkbox(varname, True, label=state_name)
-            if state == 4:
-                html.write("<br>")
+            if state in (4, 7):
+                html.br()
         html.end_checkbox_group()
 
     def double_height(self):
@@ -179,10 +198,10 @@ class FilterInvtableOperStatus(Filter):
 class FilterInvtableAdminStatus(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        Filter.__init__(self, varname, title, infoname + "s", [ varname ], [])
+        Filter.__init__(self, varname, title, infoname, [ varname ], [])
 
     def display(self):
-        html.begin_radio_group(horizontal = True)
+        html.begin_radio_group(horizontal=True)
         for value, text in [("1", _("up")), ("2", _("down")), ("-1", _("(ignore)"))]:
             html.radiobutton(self.name, value, value == "-1", text + " &nbsp; ")
         html.end_radio_group()
@@ -202,10 +221,10 @@ class FilterInvtableAdminStatus(Filter):
 class FilterInvtableAvailable(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        Filter.__init__(self, varname, title, infoname + "s", [ varname ], [])
+        Filter.__init__(self, varname, title, infoname, [ varname ], [])
 
     def display(self):
-        html.begin_radio_group(horizontal = True)
+        html.begin_radio_group(horizontal=True)
         for value, text in [("no", _("used")), ("yes", _("free")), ("", _("(ignore)"))]:
             html.radiobutton(self.name, value, value == "", text + " &nbsp; ")
         html.end_radio_group()
@@ -228,7 +247,7 @@ class FilterInvtableAvailable(Filter):
 class FilterInvtableInterfaceType(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        Filter.__init__(self, varname, title, infoname + "s", [ varname ], [])
+        Filter.__init__(self, varname, title, infoname, [ varname ], [])
 
     def double_height(self):
         return True
@@ -236,7 +255,7 @@ class FilterInvtableInterfaceType(Filter):
     def valuespec(self):
         return DualListChoice(
             choices = interface_port_type_choices,
-            autoheight = False,
+            rows = 4,
             enlarge_active = True,
             custom_order = True)
 
@@ -250,7 +269,7 @@ class FilterInvtableInterfaceType(Filter):
     def display(self):
         html.write('<div class=multigroup>')
         self.valuespec().render_input(self.name, self.selection())
-        html.write('</div>')
+        html.close_div()
 
     def filter_table(self, rows):
         current = self.selection()
@@ -266,15 +285,15 @@ class FilterInvtableInterfaceType(Filter):
 class FilterInvtableVersion(Filter):
     def __init__(self, infoname, name, title):
         varname = infoname + "_" + name
-        Filter.__init__(self, varname, title, infoname + "s", [varname + "_from", varname + "_to"], [])
+        Filter.__init__(self, varname, title, infoname, [varname + "_from", varname + "_to"], [])
 
     def display(self):
         htmlvar = self.htmlvars[0]
         html.write(_("Min.&nbsp;Version:"))
-        html.text_input(self.htmlvars[0], size = 9)
+        html.text_input(self.htmlvars[0], size=9)
         html.write(" &nbsp; ")
         html.write(_("Max.&nbsp;Version:"))
-        html.text_input(self.htmlvars[1], size = 9)
+        html.text_input(self.htmlvars[1], size=9)
 
     def filter_table(self, rows):
         from_version = html.var(self.htmlvars[0])
@@ -416,22 +435,22 @@ class FilterInvHasSoftwarePackage(Filter):
 
     def display(self):
         html.text_input(self._varprefix + "name")
-        html.write("<br>")
+        html.br()
         html.begin_radio_group(horizontal=True)
         html.radiobutton(self._varprefix + "match", "exact", True, label=_("exact match"))
         html.radiobutton(self._varprefix + "match", "regex", False, label=_("regular expression, substring match"))
         html.end_radio_group()
-        html.write("<br>")
+        html.br()
         html.write(_("Min.&nbsp;Version:"))
-        html.text_input(self._varprefix + "version_from", size = 9)
+        html.text_input(self._varprefix + "version_from", size=9)
         html.write(" &nbsp; ")
         html.write(_("Max.&nbsp;Vers.:"))
-        html.text_input(self._varprefix + "version_to", size = 9)
-        html.write("<br>")
+        html.text_input(self._varprefix + "version_to", size=9)
+        html.br()
         html.checkbox(self._varprefix + "negate", False, label=_("Negate: find hosts <b>not</b> having this package"))
 
     def filter_table(self, rows):
-        name = html.var_utf8(self._varprefix + "name")
+        name = html.get_unicode_input(self._varprefix + "name")
         if not name:
             return rows
 

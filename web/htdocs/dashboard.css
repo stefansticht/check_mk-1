@@ -33,7 +33,7 @@ body.main {
 }
 
 body.main table.header {
-    padding: 5px 5px 10px 5px;
+    padding: 10px;
 }
 
 div#dashboard {
@@ -64,11 +64,19 @@ div.dashlet div.dashlet_inner {
     background-color: #cbd6da;
 }
 
+div.dashlet div.dashlet_inner.err {
+    color: #000;
+}
+
+div.dashlet div.dashlet_inner.err div {
+    padding: 10px;
+}
+
 div.dashlet iframe {
     border-style: none;
 }
 
-div.dashlet div.title {
+div.dashlet > div.title {
     position: absolute;
     background-color: rgba(0, 0, 0, 0.3);
     /* IE < 9 */

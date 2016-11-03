@@ -17,82 +17,99 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <nagios.h>
-
-#include "logger.h"
 #include "HostFileColumn.h"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
+#include <ostream>
+#include <utility>
+#include "Logger.h"
 
 #ifdef CMC
 #include "Host.h"
+#else
+#include "nagios.h"
 #endif
 
+using std::make_unique;
+using std::string;
+using std::unique_ptr;
+using std::vector;
 
-HostFileColumn::HostFileColumn(string name, string description, const char *base_dir,
-               const char *suffix, int indirect_offset)
-    : BlobColumn(name, description, indirect_offset)
-    , _base_dir(base_dir)
-    , _suffix(suffix)
-{
-}
+HostFileColumn::HostFileColumn(string name, string description,
+                               std::string base_dir, std::string suffix,
+                               int indirect_offset, int extra_offset)
+    : BlobColumn(name, description, indirect_offset, extra_offset)
+    , _base_dir(move(base_dir))
+    , _suffix(move(suffix)) {}
 
-// returns a buffer to be freed afterwards!! Return 0
-// in size of a missing file
-char *HostFileColumn::getBlob(void *data, int *size)
-{
-    *size = 0;
-    if (!_base_dir[0])
-        return 0; // Path is not configured
+unique_ptr<vector<char>> HostFileColumn::getBlob(void *data) {
+    if (_base_dir.empty()) {
+        return nullptr;  // Path is not configured
+    }
 
     data = shiftPointer(data);
-    if (!data) return 0;
+    if (data == nullptr) {
+        return nullptr;
+    }
 
 #ifdef CMC
-    Host *hst = (Host *)data;
-    const char *host_name = hst->_name;
+    string host_name = static_cast<Host *>(data)->_name;
 #else
-    host *hst = (host *)data;
-    const char *host_name = hst->name;
+    string host_name = static_cast<host *>(data)->name;
 #endif
 
-    char path[4096];
-    snprintf(path, sizeof(path), "%s/%s%s", _base_dir.c_str(), host_name, _suffix.c_str());
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        return 0;
+    string path = _base_dir + "/" + host_name + _suffix;
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd == -1) {
+        // It is OK when inventory/logwatch files do not exist.
+        if (errno != ENOENT) {
+            generic_error ge("cannot open " + path);
+            Warning(logger()) << ge;
+        }
+        return nullptr;
     }
 
-    *size = lseek(fd, 0, SEEK_END);
-    if (*size < 0) {
-        close(fd);
-        *size = 0;
-        logger(LG_WARN, "Cannot seek to end of file %s", path);
-        return 0;
+    struct stat st;
+    if (fstat(fd, &st) == -1) {
+        generic_error ge("cannot stat " + path);
+        Warning(logger()) << ge;
+        return nullptr;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        Warning(logger()) << path << " is not a regular file";
+        return nullptr;
     }
 
-    lseek(fd, 0, SEEK_SET);
-    char *buffer = (char *)malloc(*size);
-    if (!buffer) {
-        close(fd);
-        return 0;
+    size_t bytes_to_read = st.st_size;
+    unique_ptr<vector<char>> result = make_unique<vector<char>>(bytes_to_read);
+    char *buffer = &(*result)[0];
+    while (bytes_to_read > 0) {
+        ssize_t bytes_read = read(fd, buffer, bytes_to_read);
+        if (bytes_read == -1) {
+            if (errno != EINTR) {
+                generic_error ge("could not read " + path);
+                Warning(logger()) << ge;
+                close(fd);
+                return nullptr;
+            }
+        } else if (bytes_read == 0) {
+            Warning(logger()) << "premature EOF reading " << path;
+            close(fd);
+            return nullptr;
+        } else {
+            bytes_to_read -= bytes_read;
+            buffer += bytes_read;
+        }
     }
 
-    int read_bytes = read(fd, buffer, *size);
     close(fd);
-    if (read_bytes != *size) {
-        logger(LG_WARN, "Cannot read %d from %s", *size, path);
-        free(buffer);
-        return 0;
-    }
-
-    return buffer;
+    return result;
 }

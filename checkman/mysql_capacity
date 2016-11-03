@@ -25,18 +25,3 @@ inventory:
  The check generates one item per Database found.
  Internal MySQL databases are ignored.
 
-perfdata:
-  The current size of the database, and {WARN} and {CRIT} levels if they
-  are set.
-
-examples:
-  # Configure a WARN / CRIT level of 100GB / 200GB for all systems.
-  check_parameters += [
-    ((100000, 300000), ALL_HOSTS, [ "MySQL DB.*Size" ]),
-  ]
-
-[parameters]
-warn(int): warning level for the database size in MB
-crit(int): critical level for the dataase size in MB
-
-

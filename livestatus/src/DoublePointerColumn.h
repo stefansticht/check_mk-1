@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,16 +25,19 @@
 #ifndef DoublePointerColumn_h
 #define DoublePointerColumn_h
 
+#include "config.h"  // IWYU pragma: keep
 #include "DoubleColumn.h"
 
-class DoublePointerColumn : public DoubleColumn
-{
+class DoublePointerColumn : public DoubleColumn {
     double *_number;
+
 public:
-    DoublePointerColumn(string name, string description, double *number)
-        : DoubleColumn(name, description, -1), _number(number) {}
+    DoublePointerColumn(const std::string &name, const std::string &description,
+                        double *number, int indirect_offset = -1,
+                        int extra_offset = -1)
+        : DoubleColumn(name, description, indirect_offset, extra_offset)
+        , _number(number) {}
     double getValue(void *) { return *_number; }
 };
 
-
-#endif // DoublePointerColumn_h
+#endif  // DoublePointerColumn_h

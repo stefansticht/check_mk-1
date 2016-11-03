@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,17 +25,24 @@
 #ifndef NullColumn_h
 #define NullColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Column.h"
+class RowRenderer;
 
-class NullColumn : public Column
-{
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class NullColumn : public Column {
 public:
-    NullColumn(string name, string description) :
-        Column(name, description, -1) {}
-    int type() { return COLTYPE_NULL; }
-    void output(void *data, Query *);
+    NullColumn(const std::string &name, const std::string &description,
+               int indirect_offset = -1, int extra_offset = -1)
+        : Column(name, description, indirect_offset, extra_offset) {}
+    ColumnType type() override { return ColumnType::null; }
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
 };
 
-#endif // NullColumn_h
+#endif  // NullColumn_h

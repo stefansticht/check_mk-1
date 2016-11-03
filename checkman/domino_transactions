@@ -9,16 +9,3 @@ description:
  minute on a Lotus Domino Server.  Warning and critical upper limits can be
  set.
 
-perfdata:
- The number of transactions per minute
-
-[parameters]
-parameters(tuple): parameters is a tuple of two values
-
- {warn}: (int) The warning level
-
- {crit}: (int) The critical level
-
-[configuration]
-domino_transactions_default_levels (tuple): This variable is preset to { (30000,35000) }
-

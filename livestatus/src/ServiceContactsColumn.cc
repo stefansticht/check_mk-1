@@ -17,18 +17,41 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include "nagios.h"
 #include "ServiceContactsColumn.h"
+#include "ListColumn.h"
+#include "nagios.h"
 
+using std::make_unique;
+using std::string;
+using std::unique_ptr;
 
-bool ServiceContactsColumn::isNagiosMember(void *svc, void *ctc)
-{
-    return is_contact_for_service((service *)svc, (contact *)ctc);
+namespace {
+class ContainsContact : public ListColumn::Contains {
+public:
+    explicit ContainsContact(contact *element) : _element(element) {}
+
+    bool operator()(void *row) override {
+        service *svc = static_cast<service *>(row);
+        return is_contact_for_service(svc, _element) != 0;
+    }
+
+private:
+    contact *const _element;
+};
+}  // namespace
+
+unique_ptr<ListColumn::Contains> ServiceContactsColumn::makeContains(
+    const string &name) {
+    return make_unique<ContainsContact>(
+        find_contact(const_cast<char *>(name.c_str())));
 }
 
-
+unique_ptr<ListColumn::Contains> ServiceContactsColumn::containsContact(
+    contact *ctc) {
+    return make_unique<ContainsContact>(ctc);
+}

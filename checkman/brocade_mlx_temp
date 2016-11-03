@@ -14,31 +14,6 @@ description:
 item:
  The description of the module together with its ID as provided by SNMP.
 
-examples:
- # set default levels to 30°C and 40°C:
- brocade_mlx_temperature_default_levels = (30, 40)
-
- # Check sensors of Switch Fabric module 0 on a box called my-mlx-device with
- # default levels
- checks += [
-   ("my-mlx-device", "brocade_mlx.temperature", 'Switch Fabric Module 35', brocade_mlx_temperature_default_levels)
- ]
-
- # or use individual levels for warn and crit
- checks += [
-   ("my-mlx-device", "brocade_mlx.temperature", 'Switch Fabric Module 35', (40, 50)
- ]
-
-perfdata:
- one value per sensor is returned: The temperature in °C, together with warn and crit levels
-
 inventory:
  Finds one item per module
 
-[parameters]
-warn(int): {WARN} state is triggered, if at least one temperature is higher than this.
-crit(int): {CRIT} state is triggered, if at least one temperature is higher than this.
-
-[configuration]
-brocade_mlx_temperature_default_levels(int, int): The standard levels for {WARN}
-    and {CRIT}. Defaults are (50, 60)

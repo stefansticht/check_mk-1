@@ -19,10 +19,12 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+import cmk.paths
 
 def paint_wiki_notes(row):
     host = row["host_name"]
@@ -33,9 +35,9 @@ def paint_wiki_notes(row):
     svc = svc.replace(' ','_')
     svc = svc.lower()
     host = host.lower()
-    filename = defaults.omd_root + '/var/dokuwiki/data/pages/docu/%s/%s.txt' % (host, svc)
+    filename = cmk.paths.omd_root + '/var/dokuwiki/data/pages/docu/%s/%s.txt' % (host, svc)
     if not os.path.isfile(filename):
-        filename = defaults.omd_root + '/var/dokuwiki/data/pages/docu/default/%s.txt' % (svc,)
+        filename = cmk.paths.omd_root + '/var/dokuwiki/data/pages/docu/default/%s.txt' % (svc,)
    
     text = u"<a href='../wiki/doku.php?id=docu:default:%s'>Edit Default Instructions</a> - " %  svc
     text += u"<a href='../wiki/doku.php?id=docu:%s:%s'>Edit Host Instructions</a> <hr> " % (host, svc)

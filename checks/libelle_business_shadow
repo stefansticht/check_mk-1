@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -295,7 +295,6 @@ check_info["libelle_business_shadow.info"] = {
     "check_function"        : check_libelle_business_shadow_info,
     "inventory_function"    : inventory_libelle_business_shadow_info,
     "service_description"   : "Libelle Business Shadow Info",
-    "has_perfdata"          : False,
 }
 
 #.
@@ -332,7 +331,6 @@ check_info["libelle_business_shadow.status"] = {
     "check_function"        : check_libelle_business_shadow_status,
     "inventory_function"    : inventory_libelle_business_shadow_status,
     "service_description"   : "Libelle Business Shadow Status",
-    "has_perfdata"          : False,
 }
 
 #.
@@ -370,7 +368,6 @@ check_info["libelle_business_shadow.process"] = {
     "check_function"        : check_libelle_business_shadow_process,
     "inventory_function"    : inventory_libelle_business_shadow_process,
     "service_description"   : "Libelle Business Shadow Process",
-    "has_perfdata"          : False,
 }
 
 #.

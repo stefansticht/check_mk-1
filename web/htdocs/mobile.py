@@ -19,14 +19,14 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import re
 from lib import *
-import views, config, visuals
+import views, config, visuals, metrics
 
 # These regexes are taken from the public domain code of Matt Sullivan
 # http://sullerton.com/2011/03/django-mobile-browser-detection-middleware/
@@ -49,13 +49,27 @@ def mobile_html_head(title, ready_code=""):
   <link rel="stylesheet" type="text/css" href="jquery/jquery.mobile-1.0.css">
   <link rel="stylesheet" type="text/css" href="check_mk.css">
   <link rel="stylesheet" type="text/css" href="status.css">
-  <link rel="stylesheet" type="text/css" href="mobile.css">
-  <link rel="apple-touch-icon" href="images/ios_logo.png"/>
+  <link rel="stylesheet" type="text/css" href="mobile.css">""" % title)
+
+    if metrics.cmk_graphs_possible():
+        html.write('  <link rel="stylesheet" type="text/css" href="graphs.css">\n')
+
+    html.write("""<link rel="apple-touch-icon" href="images/ios_logo.png"/>
   <script type='text/javascript' src='jquery/jquery-1.6.4.min.js'></script>
   <script type='text/javascript' src='js/mobile.js'></script>
   <script type='text/javascript' src='jquery/jquery.mobile-1.0.min.js'></script>
-  <script type='text/javascript' src='js/checkmk.js'></script>
-  <script type='text/javascript'>
+  <script type='text/javascript' src='js/checkmk.js'></script>\n""")
+
+    if metrics.cmk_graphs_possible():
+        html.write(" <script type='text/javascript' src='js/graphs.js'></script>\n")
+
+    # Never allow the mobile page to be opened in a frameset. Redirect top page to the current content page.
+    # This will result in a full screen mobile interface page.
+    html.javascript('''if(top != self) {
+    window.top.location.href = location;
+}''')
+
+    html.write("""<script type='text/javascript'>
       $(document).ready(function() { %s });
       $(document).ready(function() {
           $("a").click(function (event) {
@@ -66,7 +80,7 @@ def mobile_html_head(title, ready_code=""):
   </script>
 </head>
 <body class=mobile>
-""" % (title, ready_code))
+""" % (ready_code))
 
 def mobile_html_foot():
     html.write("</body></html>\n")
@@ -154,7 +168,7 @@ def page_login():
     mobile_html_head(title)
     jqm_page_header(title, id="login")
     html.write('<div id="loginhead">%s</div>' %
-      _("Welcome to Check_MK Multisite Mobile. Please Login."))
+      _("Welcome to Check_MK Mobile."))
 
     html.begin_form("login", method = 'POST', add_transid = False)
     # Keep information about original target URL
@@ -170,12 +184,12 @@ def page_login():
     html.set_focus("_username")
     html.end_form()
     html.write('<div id="loginfoot">')
-    html.write('<img class="logomk" src="images/logo_mk.png">')
-    html.write('<div class="copyright">%s</div>' % _("Copyright Mathias Kettner 2012"))
+    html.write('<img class="logomk" src="images/logo_cmk_small.png">')
+    html.write('<div class="copyright">%s</div>' %
+      _("&copy; <a target=\"_blank\" href=\"http://mathias-kettner.de\">Mathias Kettner</a>"))
     html.write('</div>')
     jqm_page_footer()
     mobile_html_foot()
-    return 0 # apache.OK
 
 
 def page_index():
@@ -189,6 +203,7 @@ def page_index():
             url = "mobile_view.py?view_name=%s" % view_name
             count = ""
             if not view.get("mustsearch"):
+                views.prepare_painter_options(view_name)
 	        count = views.show_view(view, only_count = True)
                 count = '<span class="ui-li-count">%d</span>' % count
             items.append((view.get("topic"), url, '%s %s' % (view.get("linktitle", view["title"]), count)))
@@ -218,6 +233,8 @@ def page_view():
     title = views.view_title(view)
     mobile_html_head(title)
 
+    views.prepare_painter_options(view_name)
+
     try:
 	views.show_view(view, show_heading = False, show_buttons = False,
 			show_footer = False, render_function = render_view)
@@ -230,7 +247,7 @@ def page_view():
     mobile_html_foot()
 
 def render_view(view, rows, datasource, group_painters, painters,
-                display_options, painter_options, show_heading, show_buttons,
+                show_heading, show_buttons,
                 show_checkboxes, layout, num_columns, show_filters, show_footer,
                 browser_reload):
 
@@ -246,7 +263,7 @@ def render_view(view, rows, datasource, group_painters, painters,
     title = views.view_title(view)
     navbar = [ ( "data",     _("Results"), "grid", 'results_button'),
                ( "filter",   _("Filter"),   "search", False )]
-    if config.may("general.act"):
+    if config.user.may("general.act"):
         navbar.append(( "commands", _("Commands"), "gear", False ))
 
     # Should we show a page with context links?
@@ -264,15 +281,15 @@ def render_view(view, rows, datasource, group_painters, painters,
 
     elif page == "commands":
             # Page: Commands
-	    if config.may("general.act"):
+	    if config.user.may("general.act"):
 		jqm_page_header(_("Commands"), left_button=home, id="commands")
 		show_commands = True
 		if html.has_var("_do_actions"):
 		    try:
 			show_commands = do_commands(view, datasource["infos"][0], rows)
 		    except MKUserError, e:
-			html.show_error(e.message)
-			html.add_user_error(e.varname, e.message)
+			html.show_error(e)
+			html.add_user_error(e.varname, e)
 			show_commands = True
 		if show_commands:
 		    show_command_form(view, datasource, rows)
@@ -291,7 +308,7 @@ def render_view(view, rows, datasource, group_painters, painters,
 		  layout["render"](rows, view, group_painters, painters, num_columns,
 				  show_checkboxes and not html.do_actions())
 	      except Exception, e:
-		  html.write(_("Error showing view: %s" % e))
+		  html.write(_("Error showing view: %s") % e)
 	  html.write("</div>")
 	  jqm_page_navfooter(navbar, 'data', page_id)
 
@@ -343,7 +360,7 @@ def show_command_form(view, datasource, rows):
     one_shown = False
     html.write('<div data-role="collapsible-set">\n')
     for command in views.multisite_commands:
-       if what in command["tables"] and config.may(command["permission"]):
+       if what in command["tables"] and config.user.may(command["permission"]):
             html.write('<div class="command_group" data-role="collapsible">\n')
             html.write("<h3>%s</h3>" % command["title"])
             html.write('<p>\n')
@@ -358,8 +375,9 @@ def show_command_form(view, datasource, rows):
 def do_commands(view, what, rows):
     command = None
     title, executor = views.core_command(what, rows[0], 0, len(rows))[1:3] # just get the title
-    r = html.confirm(_("Do you really want to %(title)s the %(count)d %(what)ss?") %
-            { "title" : title, "count" : len(rows), "what" : _(what + "s"), })
+    title_what = _("hosts") if what == "host" else _("services")
+    r = html.confirm(_("Do you really want to %(title)s the %(count)d %(what)s?") %
+            { "title" : title, "count" : len(rows), "what" : title_what, })
     if r != True:
         return r == None # Show commands on negative answer
 

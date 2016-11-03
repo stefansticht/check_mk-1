@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -100,9 +100,18 @@ def cmp_site_host(r1, r2):
            cmp_num_split("host_name", r1, r2)
 
 multisite_sorters["site_host"] = {
-    "title"   : _("Host"),
+    "title"   : _("Host site and name"),
     "columns" : ["site", "host_name" ],
     "cmp"     : cmp_site_host
+}
+
+def cmp_host_name(r1, r2):
+    return cmp_num_split("host_name", r1, r2)
+
+multisite_sorters["host_name"] = {
+    "title"   : _("Host name"),
+    "columns" : ["host_name" ],
+    "cmp"     : cmp_host_name,
 }
 
 def cmp_site_alias(r1, r2):
@@ -167,55 +176,55 @@ declare_1to1_sorter("svc_staleness",              cmp_simple_number)
 declare_1to1_sorter("svc_servicelevel",           cmp_simple_number)
 
 def cmp_perfdata_nth_value(r1, r2, n):
-    return cmp(savefloat(get_perfdata_nth_value(r1, n)), savefloat(get_perfdata_nth_value(r2, n)))
+    return cmp(savefloat(get_perfdata_nth_value(r1, n, True)), savefloat(get_perfdata_nth_value(r2, n, True)))
 
 multisite_sorters['svc_perf_val01'] = {
-    "title"   : _("Service performance data - value number %02d" % 1),
+    "title"   : _("Service performance data - value number %02d") % 1,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 0),
 }
 multisite_sorters['svc_perf_val02'] = {
-    "title"   : _("Service performance data - value number %02d" % 2),
+    "title"   : _("Service performance data - value number %02d") % 2,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 1),
 }
 multisite_sorters['svc_perf_val03'] = {
-    "title"   : _("Service performance data - value number %02d" % 3),
+    "title"   : _("Service performance data - value number %02d") % 3,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 2),
 }
 multisite_sorters['svc_perf_val04'] = {
-    "title"   : _("Service performance data - value number %02d" % 4),
+    "title"   : _("Service performance data - value number %02d") % 4,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 3),
 }
 multisite_sorters['svc_perf_val05'] = {
-    "title"   : _("Service performance data - value number %02d" % 5),
+    "title"   : _("Service performance data - value number %02d") % 5,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 4),
 }
 multisite_sorters['svc_perf_val06'] = {
-    "title"   : _("Service performance data - value number %02d" % 6),
+    "title"   : _("Service performance data - value number %02d") % 6,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 5),
 }
 multisite_sorters['svc_perf_val07'] = {
-    "title"   : _("Service performance data - value number %02d" % 7),
+    "title"   : _("Service performance data - value number %02d") % 7,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 6),
 }
 multisite_sorters['svc_perf_val08'] = {
-    "title"   : _("Service performance data - value number %02d" % 8),
+    "title"   : _("Service performance data - value number %02d") % 8,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 7),
 }
 multisite_sorters['svc_perf_val09'] = {
-    "title"   : _("Service performance data - value number %02d" % 9),
+    "title"   : _("Service performance data - value number %02d") % 9,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 8),
 }
 multisite_sorters['svc_perf_val10'] = {
-    "title"   : _("Service performance data - value number %02d" % 10),
+    "title"   : _("Service performance data - value number %02d") % 10,
     "columns" : [ 'service_perf_data' ],
     "cmp"     : lambda r1, r2: cmp_perfdata_nth_value(r1, r2, 9),
 }
@@ -224,6 +233,7 @@ multisite_sorters['svc_perf_val10'] = {
 # Host
 declare_1to1_sorter("alias",                  cmp_num_split)
 declare_1to1_sorter("host_address",           cmp_ip_address)
+declare_1to1_sorter("host_address_family",    cmp_simple_number)
 declare_1to1_sorter("host_plugin_output",     cmp_simple_string)
 declare_1to1_sorter("host_perf_data",         cmp_simple_string)
 declare_1to1_sorter("host_check_command",     cmp_simple_string)
@@ -254,6 +264,30 @@ declare_1to1_sorter("host_group_memberlist",  cmp_string_list)
 declare_1to1_sorter("host_contacts",          cmp_string_list)
 declare_1to1_sorter("host_contact_groups",    cmp_string_list)
 declare_1to1_sorter("host_servicelevel",      cmp_simple_number)
+
+
+def cmp_host_ipv4_address(r1, r2):
+    def get_address(row):
+        custom_vars = dict(zip(row["host_custom_variable_names"],
+                               row["host_custom_variable_values"]))
+        return custom_vars.get("ADDRESS_4", "")
+
+    def split_ip(ip):
+        try:
+            return tuple(int(part) for part in ip.split('.'))
+        except:
+            return ip
+
+    v1, v2 = split_ip(get_address(r1)), split_ip(get_address(r2))
+    return cmp(v1, v2)
+
+
+multisite_sorters["host_ipv4_address"] = {
+    "title"   : _("Host IPv4 address"),
+    "cmp"     : cmp_host_ipv4_address,
+    "columns" : [ "host_custom_variable_names", "host_custom_variable_values"],
+}
+
 
 def cmp_host_problems(r1, r2):
     return cmp(r1["host_num_services"] - r1["host_num_services_ok"] - r1["host_num_services_pending"],

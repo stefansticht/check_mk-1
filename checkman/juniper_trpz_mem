@@ -9,10 +9,3 @@ description:
 inventory:
  One service will be created
 
-perfdata:
- usage: The current usage in Byte
-
-[parameters]
-warning (int): The percentage of memory usage that triggers a warning level.
-critical (int): The percentage of memory usage that triggers a critical level.
-

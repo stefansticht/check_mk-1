@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,34 @@
 #ifndef DoubleAggregator_h
 #define DoubleAggregator_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
 #include "Aggregator.h"
 class DoubleColumn;
+class RowRenderer;
 
-class DoubleAggregator : public Aggregator
-{
-    DoubleColumn *_column;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class DoubleAggregator : public Aggregator {
+public:
+    DoubleAggregator(StatsOperation operation, DoubleColumn *column)
+        : Aggregator(operation)
+        , _column(column)
+        , _count(0)
+        , _aggr(0)
+        , _sumq(0) {}
+    void consume(void *row, contact *contact, int timezone_offset) override;
+    void output(RowRenderer &r) override;
+
+private:
+    DoubleColumn *const _column;
+    std::uint32_t _count;
     double _aggr;
     double _sumq;
-public:
-    DoubleAggregator(DoubleColumn *c, int o) :
-        Aggregator(o), _column(c), _aggr(0), _sumq(0) {}
-    void consume(void *data, Query *);
-    void output(Query *);
 };
 
-#endif // DoubleAggregator_h
-
+#endif  // DoubleAggregator_h

@@ -19,11 +19,12 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+import cmk.paths
 
 #   .--Global Settings-----------------------------------------------------.
 #   |  ____ _       _           _   ____       _   _   _                   |
@@ -37,7 +38,7 @@
 #   '----------------------------------------------------------------------'
 
 group = _("User Interface")
-g_configvar_order[group] = 20
+configvar_order()[group] = 20
 
 register_configvar(group,
     "debug",
@@ -298,6 +299,7 @@ register_configvar(group,
                     allow_empty = False,
                     custom_order = True,
                     choices = virtual_host_tree_choices,
+                    rows = 10,
                 )
             ]
         ),
@@ -397,7 +399,7 @@ register_configvar(group,
                 "to change the precompilation to be executed on demand. BI only precompiles the "
                 "aggregations which are really requested by the users."
              ),
-             default_value = False),
+             default_value = True),
     domain = "multisite")
 
 register_configvar(group,
@@ -405,10 +407,10 @@ register_configvar(group,
     Checkbox(
         title = _("Enable BI compilation diagnostics"),
         label = _("Activate logging of BI compilations"),
-        help = _("If this option is enabled, Check_MK BI will create a log details "
+        help = _("If this option is enabled, Check_MK BI will create a log with details "
                  "about compiling BI aggregations. This includes statistics and "
                  "details for each executed compilation. The logs are written to "
-                 "<tt>%s</tt>") % site_neutral_path(defaults.log_dir + "/web.log"),
+                 "<tt>%s</tt>") % site_neutral_path(cmk.paths.log_dir + "/web.log"),
         default_value = False,
     ),
     domain = "multisite"
@@ -463,7 +465,7 @@ register_configvar(group,
                         title = _("Translations"),
                         elements = [
                             ( l or "en", TextUnicode(title = a, size = 32) )
-                              for (l,a) in get_languages()
+                              for (l,a) in i18n.get_languages()
                         ],
                         columns = 2,
                     ),
@@ -472,7 +474,7 @@ register_configvar(group,
             title = _("Custom localizations"),
             movable = False,
             totext = _("%d translations"),
-            default_value = sorted(default_user_localizations.items()),
+            default_value = sorted(config.user_localizations.items()),
         ),
         forth = lambda d: sorted(d.items()),
         back = lambda l: dict(l),
@@ -494,16 +496,32 @@ register_configvar(group,
                                 allow_empty = False
                             )),
                             ('title', TextUnicode(title = _('Title'))),
-                            ('url', TextAscii(
-                                title = _('Action URL'),
-                                help = _('This URL is opened when clicking on the action / icon. You '
-                                         'can use some macros within the URL which are dynamically '
-                                         'replaced for each object. These are:<br>'
-                                         '<ul><li>$HOSTNAME$: Contains the name of the host</li>'
-                                         '<li>$SERVICEDESC$: Contains the service description '
-                                         '(in case this is a service)</li>'
-                                         '<li>$HOSTADDRESS$: Contains the network address of the host</li></ul>'),
-                                size = 80,
+                            ('url', Transform(
+                                Tuple(
+                                    title = _('Action'),
+                                    elements = [
+                                        TextAscii(
+                                            title = _('URL'),
+                                            help = _('This URL is opened when clicking on the action / icon. You '
+                                                     'can use some macros within the URL which are dynamically '
+                                                     'replaced for each object. These are:<br>'
+                                                     '<ul><li>$HOSTNAME$: Contains the name of the host</li>'
+                                                     '<li>$SERVICEDESC$: Contains the service description '
+                                                     '(in case this is a service)</li>'
+                                                     '<li>$HOSTADDRESS$: Contains the network address of the host</li></ul>'),
+                                            size = 80,
+                                        ),
+                                        DropdownChoice(
+                                            title = _("Open in"),
+                                            choices = [
+                                                ("_blank",  _("Load in a new window / tab")),
+                                                ("_self",   _("Load in current content area (keep sidebar)")),
+                                                ("_top",    _("Load as new page (hide sidebar)")),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                forth = lambda x: type(x) != tuple and (x, "_self") or x,
                             )),
                             ('toplevel', FixedValue(True,
                                 title = _('Show in column'),
@@ -536,6 +554,51 @@ register_configvar(group,
     ),
     domain = "multisite",
 )
+
+register_configvar(group,
+    "user_downtime_timeranges",
+    ListOf(
+        Dictionary(
+            elements = [
+                ('title', TextUnicode(title = _('Title'))),
+                ('end', Alternative(
+                    title = _("To"),
+                    elements = [
+                        Age(
+                            title = _("Duration"),
+                            display = [ "minutes", "hours", "days" ]
+                        ),
+                        DropdownChoice(
+                            title = _("Until"),
+                            choices = [
+                                ('next_day', _("Start of next day")),
+                                ('next_week', _("Start of next week")),
+                                ('next_month', _("Start of next month")),
+                                ('next_year', _("Start of next year")),
+                            ],
+                            default_value = "next_day"
+                        )
+                    ],
+                    style = "dropdown",
+                    default_value = 24 *60 * 60,
+                ))
+            ],
+            optional_keys = [],
+        ),
+        title = _("Custom Downtime Timeranges"),
+        movable = True,
+        totext = _("%d timeranges"),
+        default_value = [
+            {'title': _("2 hours"),    'end': 2 * 60 * 60},
+            {'title': _("Today"),      'end': 'next_day'},
+            {'title': _("This week"),  'end': 'next_week'},
+            {'title': _("This month"), 'end': 'next_month'},
+            {'title': _("This year"),  'end': 'next_year'},
+        ]
+    ),
+    domain = "multisite",
+)
+
 
 def get_builtin_icons():
     import views
@@ -590,10 +653,45 @@ register_configvar(group,
     domain = "multisite",
 )
 
+
+register_configvar(group,
+    "service_view_grouping",
+    ListOf(
+        Dictionary(
+            elements = [
+                ('title', TextUnicode(
+                    title = _('Title to show for the group'),
+                )),
+                ('pattern', RegExpUnicode(
+                    title = _('Grouping expression'),
+                    help = _('This regular expression is used to match the services to be put '
+                             'into this group. This is a prefix match regular expression.'),
+                    mode = RegExpUnicode.prefix,
+                )),
+                ('min_items', Integer(
+                    title = _('Minimum number of items to create a group'),
+                    help = _('When less than these items are found for a group, the services '
+                             'are not shown grouped together.'),
+                    min_value = 2,
+                    default_value = 2,
+                )),
+            ],
+            optional_keys = [],
+        ),
+        title = _("Grouping of services in table views"),
+        help = _("You can use this option to make the service table views fold services matching "
+                 "the given patterns into groups. Only services in state <i>OK</i> will be folded "
+                 "together. Groups of only one service will not be rendered. If multiple patterns "
+                 "match a service, the service will be added to the first matching group."),
+        add_label = _("Add new grouping definition"),
+    ),
+    domain = "multisite",
+)
+
 # Helper that retrieves the list of hostgroups via Livestatus
 # use alias by default but fallback to name if no alias defined
 def list_hostgroups():
-    groups = dict(html.live.query("GET hostgroups\nCache: reload\nColumns: name alias\n"))
+    groups = dict(sites.live().query("GET hostgroups\nCache: reload\nColumns: name alias\n"))
     return [ (name, groups[name] or name) for name in groups.keys() ]
 
 register_configvar(group,
@@ -626,7 +724,7 @@ register_configvar(group,
 #   '----------------------------------------------------------------------'
 
 group = _("Administration Tool (WATO)")
-g_configvar_order[group] = 25
+configvar_order()[group] = 25
 
 register_configvar(group,
     "wato_max_snapshots",
@@ -740,28 +838,7 @@ register_configvar(group,
 #   '----------------------------------------------------------------------'
 
 group = _("User Management")
-g_configvar_order[group] = 40
-
-register_configvar(group,
-    "userdb_automatic_sync",
-    ListChoice(
-        title = _('Automatic User Synchronization'),
-        help  = _('By default the users are synchronized automatically in several situations. '
-                  'The sync is started when opening the "Users" page in configuration and '
-                  'during each page rendering. Each connector can then specify if it wants to perform '
-                  'any actions. For example the LDAP connector will start the sync once the cached user '
-                  'information are too old.'),
-        default_value = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ],
-        choices       = [
-            ('page',                      _('During regular page processing')),
-            ('wato_users',                _('When opening the users\' configuration page')),
-            ('wato_pre_activate_changes', _('Before activating the changed configuration')),
-            ('wato_snapshot_pushed',      _('On a remote site, when it receives a new configuration')),
-        ],
-        allow_empty   = True,
-    ),
-    domain = "multisite",
-)
+configvar_order()[group] = 40
 
 register_configvar(group,
     "lock_on_logon_failures",
@@ -774,8 +851,12 @@ register_configvar(group,
         none_value = False,
         title = _("Lock user accounts after N logon failures"),
         label = _("Activate automatic locking of user accounts"),
-        help = _("This options enables automatic locking of user account after "
-                 "N logon failures. One successful login resets the failure counter.")
+        help = _("This options enables automatic locking of user accounts after "
+                 "the configured number of consecutive invalid login attempts. "
+                 "Once the account is locked only an admin user can unlock it. "
+                 "Beware: Also the admin users will be locked that way. You need "
+                 "to manually edit <tt>etc/htpasswd</tt> and remove the <tt>!</tt> "
+                 "in case you are locked out completely."),
     ),
     domain = "multisite"
 )
@@ -783,7 +864,7 @@ register_configvar(group,
 register_configvar(group,
     "password_policy",
     Dictionary(
-        title = _('htpasswd: Password Policy'),
+        title = _('Password policy for local accounts'),
         help  = _('You can define some rules to which each user password ahers. By default '
                   'all passwords are accepted, even ones which are made of only a single character, '
                   'which is obviously a bad idea. Using this option you can enforce your users '
@@ -810,10 +891,55 @@ register_configvar(group,
                 title = _("Maximum age of passwords"),
                 minvalue = 1,
                 display = ["days"],
+                default_value = 365 * 86400,
             )),
         ],
     ),
     domain = "multisite",
+)
+
+register_configvar(group,
+    "user_idle_timeout",
+    Optional(
+        Age(
+            title = None,
+            display = [ "minutes", "hours", "days" ],
+            minvalue = 60,
+            default_value = 3600,
+        ),
+        title = _("Login session idle timeout"),
+        label = _("Enable a login session idle timeout"),
+        help = _("Normally a user login session is valid until the password is changed or "
+                 "the user is locked. By enabling this option, you can apply a time limit "
+                 "to login sessions which is applied when the user stops interacting with "
+                 "the GUI for a given amount of time. When a user is exceeding the configured "
+                 "maximum idle time, the user will be logged out and redirected to the login "
+                 "screen to renew the login session. This setting can be overriden for each "
+                 "user individually in the profile of the users."),
+    ),
+    domain = "multisite"
+)
+
+register_configvar(group,
+    "single_user_session",
+    Optional(
+        Age(
+            title = None,
+            display = [ "minutes", "hours" ],
+            label = _("Session timeout:"),
+            minvalue = 30,
+            default_value = 60,
+        ),
+        title = _("Limit login to single session at a time"),
+        label = _("Users can only login from one client at a time"),
+        help = _("Normally a user can login to the GUI from unlimited number of clients at "
+                 "the same time. If you want to enforce your users to be able to login only once "
+                 " (from one client which means device and browser), you can enable this option. "
+                 "When the user logs out or is inactive for the configured amount of time, the "
+                 "session is invalidated automatically and the user has to log in again from the "
+                 "current or another device."),
+    ),
+    domain = "multisite"
 )
 
 def list_roles():
@@ -829,7 +955,7 @@ def list_contactgroups():
 register_configvar(group,
     "default_user_profile",
     Dictionary(
-        title = _("Default User Profile"),
+        title = _("Default user profile"),
         help  = _("With this option you can specify the attributes a user which is created during "
                   "its initial login gets added. For example, the default is to add the role \"user\" "
                   "to all automatically created users."),
@@ -892,7 +1018,7 @@ register_configvar(group,
 #   '----------------------------------------------------------------------'
 
 group = _("Execution of checks")
-g_configvar_order[group] = 10
+configvar_order()[group] = 10
 
 
 register_configvar(group,
@@ -928,6 +1054,26 @@ register_configvar(group,
             ( "ibm_svc_systemstats.iops",         _("IBM SVC / V7000: IO operations/sec for Drives/MDisks/VDisks in Total")),
             ( "ibm_svc_systemstats.disk_latency", _("IBM SVC / V7000: Latency for Drives/MDisks/VDisks in Total")),
             ( "ibm_svc_systemstats.cache",        _("IBM SVC / V7000: Cache Usage in Total")),
+            ( "casa_cpu_temp",                    _("Casa module: CPU temperature")),
+            ( "cmciii.temp",                      _("Rittal CMC-III Units: Temperatures")),
+            ( "cmciii.psm_current",               _("Rittal CMC-III Units: Current")),
+            ( "cmciii_lcp_airin",                 _("Rittal CMC-III LCP: Air In and Temperature")),
+            ( "cmciii_lcp_airout",                _("Rittal CMC-III LCP: Air Out Temperature")),
+            ( "cmciii_lcp_water",                 _("Rittal CMC-III LCP: Water In/Out Temperature")),
+            ( "etherbox.temp",                    _("Etherbox / MessPC: Sensor Temperature")),
+            ( "liebert_bat_temp",                 _("Liebert UPS Device: Temperature sensor")),
+            ( "nvidia.temp",                      _("Temperatures of NVIDIA graphics card")),
+            ( "ups_bat_temp",                     _("Generic UPS Device: Temperature sensor")),
+            ( "innovaphone_temp",                 _("Innovaphone Gateway: Current Temperature")),
+            ( "enterasys_temp",                   _("Enterasys Switch: Temperature")),
+            ( "raritan_emx",                      _("Raritan EMX Rack: Temperature")),
+            ( "raritan_pdu_inlet",                _("Raritan PDU: Input Phases")),
+            ( "mknotifyd",                        _("Notification Spooler")),
+            ( "mknotifyd.connection",             _("Notification Spooler Connection")),
+            ( "postfix_mailq",                    _("Postfix: Mail Queue")),
+            ( "nullmailer_mailq",                 _("Nullmailer: Mail Queue")),
+            ( "barracuda_mailqueues",             _("Barracuda: Mail Queue")),
+            ( "qmail_stats",                      _("Qmail: Mail Queue")),
         ],
         render_orientation = "vertical",
     ),
@@ -1075,7 +1221,7 @@ register_configvar(group,
 )
 
 group = _("Service discovery")
-g_configvar_order[group] = 4
+configvar_order()[group] = 4
 
 register_configvar(group,
     "inventory_check_interval",
@@ -1084,10 +1230,15 @@ register_configvar(group,
                 unit = _("minutes"),
                 min_value = 1,
                 default_value = 720),
-        title = _("Enable regular service discovery checks"),
+        title = _("Enable regular service discovery checks (deprecated)"),
         help = _("If enabled, Check_MK will create one additional service per host "
                  "that does a regular check, if the service discovery would find new services "
-                 "currently un-monitored.")),
+                 "currently un-monitored. <b>Note:</b> This option is deprecated and has been "
+                 "replaced by the rule set <a href='%s'>Periodic Service Discovery</a>, "
+                 "which allows a per-host configuration and additional features such as "
+                 "automatic rediscovery. Rules in that rule set will override the global "
+                 "settings done here.") % "wato.py?mode=edit_ruleset&varname=periodic_discovery",
+    ),
     need_restart = True)
 
 register_configvar(group,
@@ -1202,7 +1353,8 @@ register_rule(group,
                  "note, that this setting only applies to active checks (those with the "
                  "%s reschedule button). If you want to change the check interval of "
                  "the Check_MK service only, specify <tt><b>Check_MK$</b></tt> in the list "
-                 "of services.") % '<img class="icon docu" src="images/icon_reload.gif">'),
+                 "of services.") % html.render_icon("reload"),
+    ),
     itemtype = "service")
 
 register_rule(group,
@@ -1338,6 +1490,8 @@ register_rule(
                 size = 45,
                 allow_empty = False,
                 attrencode = True,
+                help = _("You can use the macro <tt>$HOSTNAME$</tt> here. It will be replaced "
+                         "with the name of the current host."),
             )),
           ( "custom",     _("Use a custom check plugin..."), PluginCommandLine() ),
         ],
@@ -1449,49 +1603,58 @@ register_rule(group,
 
 register_rule(group,
     "extra_host_conf:first_notification_delay",
-    Integer(
-        minvalue = 0,
-        default_value = 60,
-        label = _("Delay:"),
-        unit = _("minutes"),
-        title = _("Delay host notifications"),
-        help = _("This setting delays notifications about host problems by the "
-                 "specified amount of time. If the host is up again within that "
-                 "time, no notification will be sent out."),
+    Transform(
+        Float(
+            minvalue = 0.0,
+            default_value = 60.0,
+            label = _("Delay:"),
+            unit = _("minutes"),
+            title = _("Delay host notifications"),
+            help = _("This setting delays notifications about host problems by the "
+                     "specified amount of time. If the host is up again within that "
+                     "time, no notification will be sent out."),
+        ),
+        forth = lambda x: float(x),
     ),
-    factory_default = 0,
+    factory_default = 0.0,
 )
 
 register_rule(group,
     "extra_service_conf:first_notification_delay",
-    Integer(
-        minvalue = 0,
-        default_value = 60,
-        label = _("Delay:"),
-        unit = _("minutes"),
-        title = _("Delay service notifications"),
-        help = _("This setting delays notifications about service problems by the "
-                 "specified amount of time. If the service is OK again within that "
-                 "time, no notification will be sent out."),
+    Transform(
+        Float(
+            minvalue = 0.0,
+            default_value = 60.0,
+            label = _("Delay:"),
+            unit = _("minutes"),
+            title = _("Delay service notifications"),
+            help = _("This setting delays notifications about service problems by the "
+                     "specified amount of time. If the service is OK again within that "
+                     "time, no notification will be sent out."),
+        ),
+        forth = lambda x: float(x),
     ),
-    factory_default = 0,
+    factory_default = 0.0,
     itemtype = "service")
 
 register_rule(group,
     "extra_host_conf:notification_interval",
     Optional(
-        Integer(
-            minvalue = 1,
-            default_value = 120,
-            label = _("Interval:"),
-            unit = _("minutes")),
+        Transform(
+            Float(
+                minvalue = 0.05,
+                default_value = 120.0,
+                label = _("Interval:"),
+                unit = _("minutes")),
+            forth = lambda x: float(x),
+        ),
         title = _("Periodic notifications during host problems"),
         help = _("If you enable periodic notifications, then during a problem state "
                "of the host notifications will be sent out in regular intervals "
                "until the problem is acknowledged."),
         label = _("Enable periodic notifications"),
         none_label = _("disabled"),
-        none_value = 0,
+        none_value = 0.0,
         )
     )
 
@@ -1500,18 +1663,21 @@ register_rule(group,
 register_rule(group,
     "extra_service_conf:notification_interval",
     Optional(
-        Integer(
-            minvalue = 1,
-            default_value = 120,
-            label = _("Interval:"),
-            unit = _("minutes")),
+        Transform(
+            Float(
+                minvalue = 0.05,
+                default_value = 120.0,
+                label = _("Interval:"),
+                unit = _("minutes")),
+            forth = lambda x: float(x),
+        ),
         title = _("Periodic notifications during service problems"),
         help = _("If you enable periodic notifications, then during a problem state "
                "of the service notifications will be sent out in regular intervals "
                "until the problem is acknowledged."),
         label = _("Enable periodic notifications"),
         none_label = _("disabled"),
-        none_value = 0,
+        none_value = 0.0,
         ),
 
     itemtype = "service")
@@ -1595,7 +1761,7 @@ register_rule(group,
     "ignored_services",
     title = _("Disabled services"),
     help = _("Services that are declared as <u>disabled</u> by this rule set will not be added "
-             "to a host during inventory (automatic service detection). Services that already "
+             "to a host during discovery (automatic service detection). Services that already "
              "exist will continued to be monitored but be marked as obsolete in the service "
              "list of a host."),
     itemtype = "service")
@@ -1620,6 +1786,149 @@ register_rule(group,
              "to the cluster.<br><br>Please make sure that you re-inventorize the "
              "cluster and the physical nodes after changing this ruleset."),
     itemtype = "service")
+
+
+register_rule(group,
+    "periodic_discovery",
+    Alternative(
+        title = _("Periodic service discovery"),
+        style = "dropdown",
+        default_value = {
+            "check_interval"          : 2 * 60,
+            "severity_unmonitored"    : 1,
+            "severity_vanished"       : 0,
+            "inventory_check_do_scan" : True,
+        },
+        elements = [
+            FixedValue(
+                None,
+                title = _("Do not perform periodic service discovery check"),
+                totext = _("no discovery check"),
+            ),
+            Dictionary(
+                title = _("Perform periodic service discovery check"),
+                help = _("If enabled, Check_MK will create one additional service per host "
+                        "that does a periodic check, if the service discovery would find new services "
+                        "that are currently not monitored."),
+                elements = [
+                    ( "check_interval",
+                        Transform(
+                            Age(
+                                minvalue=1,
+                                display = [ "days", "hours", "minutes" ]
+                            ),
+                            forth = lambda v: int(v * 60),
+                            back = lambda v: float(v) / 60.0,
+                            title = _("Perform service discovery every"),
+                        ),
+                    ),
+                    ( "severity_unmonitored",
+                      DropdownChoice(
+                         title = _("Severity of unmonitored services"),
+                         help = _("Please select which alarm state the service discovery check services "
+                                  "shall assume in case that un-monitored services are found."),
+                         choices = [
+                             (0, _("OK - do not alert, just display")),
+                             (1, _("Warning") ),
+                             (2, _("Critical") ),
+                             (3, _("Unknown") ),
+                         ],
+                    )),
+                    ( "severity_vanished",
+                      DropdownChoice(
+                         title = _("Severity of vanished services"),
+                         help = _("Please select which alarm state the service discovery check services "
+                                  "shall assume in case that non-existing services are being monitored."),
+                         choices = [
+                             (0, _("OK - do not alert, just display")),
+                             (1, _("Warning") ),
+                             (2, _("Critical") ),
+                             (3, _("Unknown") ),
+                         ],
+                    )),
+                    ( "inventory_check_do_scan",
+                      DropdownChoice(
+                         title = _("Service discovery check for SNMP devices"),
+                         choices = [
+                             ( True, _("Perform full SNMP scan always, detect new check types") ),
+                             ( False, _("Just rely on existing check files, detect new items only") )
+                         ]
+                    )),
+                    ( "inventory_rediscovery",
+                      Dictionary(
+                         title = _("Automatically update service configuration"),
+                         help = _("If active the check will not only notify about un-monitored services, "
+                                  "it will also automatically add/remove them as neccessary."),
+                         elements = [
+                             ( "mode",
+                               DropdownChoice(
+                                    title = _("Mode"),
+                                    choices = [
+                                        (0, _("Add unmonitored services")),
+                                        (1, _("Remove vanished services")),
+                                        (2, _("Add unmonitored & remove vanished services")),
+                                        (3, _("Refresh all services (tabula rasa)"))
+                                    ],
+                                    orientation = "vertical",
+                                    default_value = 0,
+                             )),
+                             ( "group_time",
+                                Age(
+                                    title = _("Group discovery and activation for up to"),
+                                    help = _("A delay can be configured here so that multiple "
+                                             "discoveries can be activated in one go. This avoids frequent core "
+                                             "restarts in situations with frequent services changes."),
+                                    default_value = 15 * 60,
+                                    display = [ "hours", "minutes" ]
+                             )),
+                             ( "excluded_time",
+                               TimeofdayRanges(
+                                   title = _("Never do discovery or activate changes in the following time ranges"),
+                                   help = _("This avoids automatic changes during these times so "
+                                            "that the automatic system doesn't interfere with "
+                                            "user activity."),
+                                   count = 3,
+                             )),
+                             ("activation",
+                              DropdownChoice(
+                                  title = _("Automatic activation"),
+                                  choices = [
+                                      ( True,  _("Automatically activate changes") ),
+                                      ( False, _("Do not activate changes") ),
+                                  ],
+                                  default_value = True,
+                                  help = _("Here you can have the changes activated whenever services "
+                                           "have been added or removed."),
+                              )),
+                             ( "service_whitelist",
+                              ListOfStrings(
+                                  title = _("Activate only services matching"),
+                                  allow_empty = False,
+                                  help = _("Set service names or regular expression patterns here to "
+                                           "allow only matching services to be activated automatically. "
+                                           "If you set both this and \'Don't activate services matching\', "
+                                           "both rules have to apply for a service to be activated."),
+                              )),
+                             ( "service_blacklist",
+                              ListOfStrings(
+                                  title = _("Don't activate services matching"),
+                                  allow_empty = False,
+                                  help = _("Set service names or regular expression patterns here to "
+                                           "prevent matching services from being activated automatically. "
+                                           "If you set both this and \'Activate only services matching\', "
+                                           "both rules have to apply for a service to be activated."),
+                              )),
+                         ],
+                         optional_keys = ["service_whitelist", "service_blacklist"],
+                     )),
+                ],
+                optional_keys = ["inventory_rediscovery"],
+            )
+        ]
+    )
+)
+
+
 group = "monconf/" + _("Various")
 
 register_rule(group,
@@ -1675,9 +1984,7 @@ register_rule(group,
             title = _("Icon image for hosts in status GUI"),
             help = _("You can assign icons to hosts for the status GUI. "
                      "Put your images into <tt>%s</tt>. ") %
-                    ( defaults.omd_root
-                       and defaults.omd_root + "/local/share/check_mk/web/htdocs/images/icons"
-                       or defaults.web_dir + "/htdocs/images/icons" ),
+                    ( cmk.paths.omd_root + "/local/share/check_mk/web/htdocs/images/icons"),
         ),
         forth = lambda v: v and (v.endswith('.png') and v[:-4]) or v,
     ))
@@ -1690,9 +1997,7 @@ register_rule(group,
             title = _("Icon image for services in status GUI"),
             help = _("You can assign icons to services for the status GUI. "
                      "Put your images into <tt>%s</tt>. ") %
-                    ( defaults.omd_root
-                       and defaults.omd_root + "/local/share/check_mk/web/htdocs/images/icons"
-                       or defaults.web_dir + "/htdocs/images/icons" ),
+                    (cmk.paths.omd_root + "/local/share/check_mk/web/htdocs/images/icons"),
         ),
         forth = lambda v: v and (v.endswith('.png') and v[:-4]) or v,
     ),
@@ -1722,6 +2027,7 @@ register_rulegroup("agent", _("Access to Agents"),
    _("Settings concerning the connection to the Check_MK and SNMP agents"))
 
 group = "agent/" + _("General Settings")
+
 register_rule(group,
     "dyndns_hosts",
     title = _("Hosts with dynamic DNS lookup during monitoring"),
@@ -1730,85 +2036,32 @@ register_rule(group,
              "activate the changes. In some rare cases DNS lookups must be done each time "
              "a host is connected to, e.g. when the IP address of the host is dynamic "
              "and can change."))
-group = "agent/" + _("SNMP")
 
-_snmpv3_auth_elements = [
+register_rule(group,
+    "primary_address_family",
     DropdownChoice(
         choices = [
-            ( "md5", _("MD5") ),
-            ( "sha", _("SHA1") ),
+            ("ipv4", _("IPv4")),
+            ("ipv6", _("IPv6")),
         ],
-        title = _("Authentication protocol")
-    ),
-    TextAscii(
-        title = _("Security name"),
-        attrencode = True
-    ),
-    Password(
-        title = _("Authentication password"),
-        minlen = 8,
-    )
-]
+        title = _("Primary IP address family of dual-stack hosts"),
+        help = _("When you configure dual-stack host (IPv4 + IPv6) monitoring in Check_MK, "
+                 "normally IPv4 is used as primary address family to communicate with this "
+                 "host. The other family, IPv6, is just being pinged. You can use this rule "
+                 "to invert this behaviour to use IPv6 as primary address family.")))
+
+group = "agent/" + _("SNMP")
+
+
 
 register_rule(group,
     "snmp_communities",
-    Alternative(
-        elements = [
-            TextAscii(
-                title = _("SNMP community (SNMP Versions 1 and 2c)"),
-                allow_empty = False,
-                attrencode = True,
-            ),
-            Tuple(
-                title = _("Credentials for SNMPv3 without authentication and privacy (noAuthNoPriv)"),
-                elements = [
-                    FixedValue("noAuthNoPriv",
-                        title = _("Security Level"),
-                        totext = _("No authentication, no privacy"),
-                    ),
-                ]
-            ),
-            Tuple(
-                title = _("Credentials for SNMPv3 with authentication but without privacy (authNoPriv)"),
-                elements = [
-                    FixedValue("authNoPriv",
-                        title = _("Security Level"),
-                        totext = _("authentication but no privacy"),
-                    ),
-                ] + _snmpv3_auth_elements
-            ),
-            Tuple(
-                title = _("Credentials for SNMPv3 with authentication and privacy (authPriv)"),
-                elements = [
-                    FixedValue("authPriv",
-                        title = _("Security Level"),
-                        totext = _("authentication and encryption"),
-                    ),
-                ] + _snmpv3_auth_elements + [
-                    DropdownChoice(
-                        choices = [
-                            ( "DES", _("DES") ),
-                            ( "AES", _("AES") ),
-                        ],
-                        title = _("Privacy protocol")
-                    ),
-                    Password(
-                        title = _("Privacy pass phrase"),
-                        minlen = 8,
-                    ),
-                ]
-            ),
-        ],
-
-        match = lambda x: type(x) == tuple and ( \
-                          len(x) == 1 and 1 or \
-                          len(x) == 4 and 2 or 3) or 0,
-
-        style = "dropdown",
-        default_value = "public",
+    SNMPCredentials(
         title = _("SNMP credentials of monitored hosts"),
         help = _("By default Check_MK uses the community \"public\" to contact hosts via SNMP v1/v2. This rule "
-                 "can be used to customize the the credentials to be used when contacting hosts via SNMP.")))
+                 "can be used to customize the the credentials to be used when contacting hosts via SNMP."),
+    )
+)
 
 register_rule(group,
     "snmp_character_encodings",
@@ -1818,10 +2071,12 @@ register_rule(group,
                  " always assumes UTF-8 encoding. You can declare other "
                  " other encodings here"),
         choices = [
-           ("utf-8", _("UTF-8") ),
-           ("latin1" ,_("latin1")),
-           ]
-        )),
+           ("utf-8",  _("UTF-8") ),
+           ("latin1", _("latin1")),
+           ("cp437",  _("cp437")),
+        ]
+    )
+)
 
 register_rule(group,
     "bulkwalk_hosts",
@@ -1860,7 +2115,7 @@ register_rule(group,
         elements = [
             ( "timeout",
               Float(
-                  title = _("Timeout between retries"),
+                  title = _("Response timeout for a single query"),
                   help = _("After a request is sent to the remote SNMP agent we will wait up to this "
                            "number of seconds until assuming the answer get lost and retrying."),
                   default_value = 1,
@@ -1884,6 +2139,15 @@ register_rule(group,
     factory_default = { "timeout" : 1, "retries" : 5 },
     match = "dict")
 
+
+register_rule(group,
+    "non_inline_snmp_hosts",
+    title = _("Hosts not using Inline-SNMP"),
+    help = _("Check_MK has an efficient SNMP implementation called Inline SNMP which reduces the "
+             "load produced by SNMP monitoring on the monitoring host significantly. This option is "
+             "enabled by default for all SNMP hosts and it is a good idea to keep this default "
+             "setting. However, there are SNMP devices which have problems with this SNMP "
+             "implementation. You can use this rule to disable Inline SNMP for these hosts."))
 
 
 register_rule(group,
@@ -1917,6 +2181,42 @@ register_rule(group,
     title = _("TCP port for connection to Check_MK agent"),
     help = _("This variable allows to specify the TCP port to "
              "be used to connect to the agent on a per-host-basis. "),
+)
+
+register_rule(group,
+    "agent_encryption",
+    Dictionary(
+        elements = [
+            ( "passphrase", PasswordSpec(title = _("Encryption secret"), allow_empty = False, hidden = True) ),
+            ( "use_regular", RadioChoice(title = _("Encryption for Agent"),
+                    help = _("Choose if the agent agents encrypt packages. This controls whether "
+                             "baked agents encrypt their output and whether check_mk expects "
+                             "encrypted output. "
+                             "Please note: If you opt to enforce encryption, "
+                             "agents that don't support encryption will not work any more. "
+                             "Further note: This only affects regular agents, not special agents "
+                             "aka datasource programs."),
+                    default_value = "disable",
+                    choices = [
+                        ( "enforce", _("Enforce (drop unencrypted data)") ),
+                        ( "allow",   _("Enable  (accept encrypted and unencrypted data)") ),
+                        ( "disable", _("Disable (drop encrypted data)") )
+                    ])
+            ),
+            ( "use_realtime", RadioChoice(title = _("Encryption for Realtime Updates"),
+                    help = _("Choose if realtime updates are sent/expected encrypted"),
+                    default_value = "enforce",
+                    choices = [
+                        ( "enforce", _("Enforce (drop unencrypted data)") ),
+                        ( "allow",   _("Enable  (accept encrypted and unencrypted data)") ),
+                        ( "disable", _("Disable (drop encrypted data)") )
+                    ])
+            ),
+        ],
+        optional_keys = []
+    ),
+    title = _("Encryption"),
+    help = _("Control encryption of data sent from agent to host."),
 )
 
 register_rule(group,

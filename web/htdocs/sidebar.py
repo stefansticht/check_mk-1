@@ -19,14 +19,26 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import config, defaults, livestatus, views, pprint, os, copy, userdb, pagetypes
-import notify, urlparse
+import pprint
+import os
+import copy
+import urlparse
+import config, views, userdb, pagetypes
+import notify, werks
+import sites
 from lib import *
+import cmk.paths
+import cmk.store as store
+
+try:
+    import simplejson as json
+except ImportError:
+    import json
 
 # Constants to be used in snapins
 snapin_width = 230
@@ -37,9 +49,9 @@ loaded_with_language = False
 sidebar_snapins = {}
 search_plugins  = []
 
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     # Load all snapins
@@ -62,60 +74,63 @@ def load_plugins():
             snapin["description"],
             snapin["allowed"])
 
+
 # Helper functions to be used by snapins
-def link(text, url, target="main", onclick = None):
+def render_link(text, url, target="main", onclick = None):
     # Convert relative links into absolute links. We have three kinds
     # of possible links and we change only [3]
     # [1] protocol://hostname/url/link.py
     # [2] /absolute/link.py
     # [3] relative.py
     if not (":" in url[:10]) and not url.startswith("javascript") and url[0] != '/':
-        url = defaults.url_prefix + "check_mk/" + url
-    onclick = onclick and (' onclick="%s"' % html.attrencode(onclick)) or ''
-    return '<a onfocus="if (this.blur) this.blur();" target="%s" ' \
-           'class=link href="%s"%s>%s</a>' % \
-            (html.attrencode(target or ""), html.attrencode(url), onclick, html.attrencode(text))
+        url = config.url_prefix() + "check_mk/" + url
+    return html.render_a(text, href=url, class_="link", target=target or '',\
+                         onfocus = "if (this.blur) this.blur();",\
+                         onclick = onclick or None)
+
+
+def link(text, url, target="main", onclick = None):
+    return html.write(render_link(text, url, target=target, onclick=onclick))
+
 
 def simplelink(text, url, target="main"):
-    html.write(link(text, url, target) + "<br>\n")
+    link(text, url, target)
+    html.br()
+
 
 def bulletlink(text, url, target="main", onclick = None):
-    html.write("<li class=sidebar>" + link(text, url, target, onclick) + "</li>\n")
+    html.open_li(class_="sidebar")
+    link(text, url, target, onclick)
+    html.close_li()
+
 
 def iconlink(text, url, icon):
-    linktext = '<img class=iconlink src="images/icon_%s.png">%s' % \
-         (html.attrencode(icon), html.attrencode(text))
-    html.write('<a target=main class="iconlink link" href="%s">%s</a><br>' % \
-            (html.attrencode(url), linktext))
+    html.open_a(class_=["iconlink", "link"], target="main", href=url)
+    html.icon(icon=icon, help=None, cssclass="inline")
+    html.write_text(text)
+    html.close_a()
+    html.br()
+
+
+def nagioscgilink(text, target):
+    html.open_li(class_="sidebar")
+    html.a(text, class_="link", target="main", href="%snagios/cgi-bin/%s" % (html.url_prefix(), target))
+    html.close_li()
+
 
 def begin_footnote_links():
-    html.write("<div class=footnotelink>")
+    html.open_div(class_="footnotelink")
 
 def end_footnote_links():
-    html.write("</div>\n")
+    html.close_div()
 
 def footnotelinks(links):
     begin_footnote_links()
     for text, target in links:
-        html.write(link(text, target))
+        link(text, target)
     end_footnote_links()
 
-def iconbutton(what, url, target="side", handler="", name="", css_class = ""):
-    if target == "side":
-        onclick = "onclick=\"get_url('%s', %s, '%s')\"" % \
-                   (url, handler, name)
-        href = "#"
-        tg = ""
-    else:
-        onclick = ""
-        href = "%scheck_mk/%s" % (defaults.url_prefix, url)
-        tg = "target=%s" % target
-    css_class = css_class and " " + css_class or ""
-    html.write("<a href=\"%s\" %s %s><img class=\"iconbutton%s\" onmouseover=\"hilite_icon(this, 1)\" onmouseout=\"hilite_icon(this, 0)\" align=absmiddle src=\"%scheck_mk/images/button_%s_lo.png\"></a>\n " % (href, onclick, tg, css_class, defaults.url_prefix, what))
 
-def nagioscgilink(text, target):
-    html.write("<li class=sidebar><a target=\"main\" class=link href=\"%snagios/cgi-bin/%s\">%s</a></li>" % \
-            (defaults.url_prefix, target, html.attrencode(text)))
 
 def heading(text):
     html.write("<h3>%s</h3>\n" % html.attrencode(text))
@@ -124,18 +139,18 @@ def heading(text):
 # old format (just a snapin list) to the new format
 # (dictionary) on the fly
 def load_user_config():
-    path = config.user_confdir + "/sidebar.mk"
-    try:
-        user_config = eval(file(path).read())
-        if type(user_config) == list:
-            user_config = {
-                "snapins" : user_config,
-                "fold":     False,
-            }
-    except:
+    path = config.user.confdir + "/sidebar.mk"
+    user_config = store.load_data_from_file(path)
+    if user_config == None:
         user_config = {
             "snapins": config.sidebar,
             "fold":    False,
+        }
+
+    if type(user_config) == list:
+        user_config = {
+            "snapins" : user_config,
+            "fold":     False,
         }
 
     # Remove entries the user is not allowed for or which have state "off" (from legacy version)
@@ -144,21 +159,44 @@ def load_user_config():
           entry for entry in user_config["snapins"]
                 if entry[0] in sidebar_snapins
                    and entry[1] != "off"
-                   and config.may("sidesnap." + entry[0])]
+                   and config.user.may("sidesnap." + entry[0])]
 
     return user_config
 
+
 def save_user_config(user_config):
-    if config.may("general.configure_sidebar"):
-        config.save_user_file("sidebar", user_config)
+    if config.user.may("general.configure_sidebar"):
+        config.user.save_file("sidebar", user_config)
+
+
+def get_check_mk_edition_title():
+    version_link = os.readlink("%s/version" % cmk.paths.omd_root)
+    if version_link.endswith(".cee.demo"):
+        return "Enterprise (Demo)"
+    elif "cee" in version_link:
+        return "Enterprise"
+    else:
+        return "Raw"
+
 
 def sidebar_head():
     html.write('<div id="side_header">')
     html.write('<div id="side_fold"></div>')
-    html.write('<a title="%s" target="main" href="%s">'
-               '<div id="side_version">%s</div>'
-               '</a>'
-               '</div>\n' % (_("Go to main overview"), html.attrencode(config.user.get("start_url") or config.start_url), defaults.check_mk_version))
+    html.write('<a title="%s" target="main" href="%s">' %
+          (_("Go to main overview"),
+           html.attrencode(config.user.get_attribute("start_url") or config.start_url)))
+    html.write('<img id="side_bg" src="images/sidebar_top.png">')
+    html.write('<div id="side_version">'
+               '<a href="version.py" target="main" title=\"%s\">%s<br>%s' %
+        (_("Open release notes"), get_check_mk_edition_title(), cmk.__version__))
+    if werks.may_acknowledge():
+        num_unacknowledged_werks = werks.num_unacknowledged_incompatible_werks()
+        if num_unacknowledged_werks:
+            html.write("<span title=\"%s\" class=\"unack_werks\">%d</span>" %
+                (_("%d unacknowledged incompatible werks") % num_unacknowledged_werks, num_unacknowledged_werks))
+    html.write('</a></div>')
+    html.write('</a></div>\n')
+
 
 def render_messages():
     for msg in notify.get_gui_messages():
@@ -185,16 +223,16 @@ def ajax_message_read():
 
 def sidebar_foot():
     html.write('<div id="side_footer">')
-    if config.may("general.configure_sidebar"):
+    if config.user.may("general.configure_sidebar"):
         html.icon_button("sidebar_add_snapin.py", _("Add snapin to the sidebar"), "sidebar_addsnapin",
                          target="main")
     # editing the profile is not possible on remote sites which are sync targets
     # of a central WATO system
     if config.wato_enabled and \
-       (config.may("general.edit_profile") or config.may("general.change_password")):
+       (config.user.may("general.edit_profile") or config.user.may("general.change_password")):
         html.icon_button("user_profile.py", _("Edit your personal settings, change your password"),
             "sidebar_settings", target="main")
-    if config.may("general.logout") and not config.auth_by_http_header:
+    if config.user.may("general.logout") and not config.auth_by_http_header:
         html.icon_button("logout.py", _("Log out"), "sidebar_logout", target="_top")
 
     html.icon_button("return void();", _("You have pending messages."),
@@ -208,11 +246,11 @@ def sidebar_foot():
     html.write('</div>')
 
     if load_user_config()["fold"]:
-        html.final_javascript("foldSidebar();")
+        html.final_javascript("fold_sidebar();")
 
 # Standalone sidebar
 def page_side():
-    if not config.may("general.see_sidebar"):
+    if not config.user.may("general.see_sidebar"):
         return
     if config.sidebar_notify_interval is not None:
         interval = config.sidebar_notify_interval
@@ -222,10 +260,11 @@ def page_side():
     html.write('<body class="side')
     if config.screenshotmode:
         html.write(" screenshotmode")
-    html.write('" onload="initScrollPos(); setSidebarHeight(); init_messages(%s);" '
+    html.write('" onload="initScrollPos(); set_sidebar_size(); init_messages(%s);" '
                'onunload="storeScrollPos()">\n' % interval)
     html.write('<div id="check_mk_sidebar">\n')
 
+    # FIXME: Move this to the code where views are needed (snapins?)
     views.load_views()
     sidebar_head()
     user_config = load_user_config()
@@ -238,7 +277,7 @@ def page_side():
 
     html.write('<div id="side_content"%s>' % scrolling)
     for name, state in user_config["snapins"]:
-        if not name in sidebar_snapins or not config.may("sidesnap." + name):
+        if not name in sidebar_snapins or not config.user.may("sidesnap." + name):
             continue
         # Performs the initial rendering and might return an optional refresh url,
         # when the snapin contents are refreshed from an external source
@@ -257,11 +296,11 @@ def page_side():
         html.write("sidebar_restart_time = %s\n" % time.time())
     html.write("sidebar_update_interval = %0.2f;\n" % config.sidebar_update_interval)
     html.write("registerEdgeListeners();\n")
-    html.write("setSidebarHeight();\n")
-    html.write("refresh_snapins = %r;\n" % refresh_snapins)
-    html.write("restart_snapins = %r;\n" % restart_snapins)
+    html.write("set_sidebar_size();\n")
+    html.write("refresh_snapins = %s;\n" % json.dumps(refresh_snapins))
+    html.write("restart_snapins = %s;\n" % json.dumps(restart_snapins))
     html.write("sidebar_scheduler();\n")
-    html.write("window.onresize = function() { setSidebarHeight(); };\n")
+    html.write("window.onresize = function() { set_sidebar_size(); };\n")
     html.write("if (contentFrameAccessible()) { update_content_location(); };\n")
     html.write("</script>\n")
 
@@ -277,20 +316,22 @@ def render_snapin(name, state):
     render_snapin_styles(snapin)
 
     html.write("<div id=\"snapin_container_%s\" class=snapin>\n" % name)
-    if state == "closed":
-        style = ' style="display:none"'
-        headclass = "closed"
-        minimaxi = "maxi"
-    else:
+    # When not permitted to open/close snapins, the snapins are always opened
+    if state == "open" or not config.user.may("general.configure_sidebar"):
         style = ""
         headclass = "open"
         minimaxi = "mini"
+    else:
+        style = ' style="display:none"'
+        headclass = "closed"
+        minimaxi = "maxi"
+
     toggle_url = "sidebar_openclose.py?name=%s&state=" % name
 
     html.write('<div class="head %s" ' % headclass)
 
     # If the user may modify the sidebar then add code for dragging the snapin
-    if config.may("general.configure_sidebar"):
+    if config.user.may("general.configure_sidebar"):
         html.write("onmouseover=\"document.body.style.cursor='move';\" "
                    "onmouseout=\"document.body.style.cursor='';\" "
                    "onmousedown=\"snapinStartDrag(event)\" onmouseup=\"snapinStopDrag(event)\">")
@@ -298,23 +339,28 @@ def render_snapin(name, state):
         html.write(">")
 
 
-    # Icon for mini/maximizing, does not need permission
-    html.write('<div class="minisnapin">')
-    iconbutton(minimaxi + "snapin", None,
-               "side", "toggle_sidebar_snapin(this, '%s')" % toggle_url, 'snapin_'+name)
-    html.write('</div>')
+    if config.user.may("general.configure_sidebar"):
+        # Icon for mini/maximizing
+        html.write('<div class="minisnapin">')
+        html.icon_button(url=None, help=_("Toggle this snapin"), icon="%ssnapin" % minimaxi,
+                         onclick="toggle_sidebar_snapin(this, '%s')" % toggle_url)
+        html.write('</div>')
 
-    if config.may("general.configure_sidebar"):
         # Button for closing (removing) a snapin
         html.write('<div class="closesnapin">')
-        iconbutton("closesnapin", "sidebar_openclose.py?name=%s&state=off" % name,
-                   "side", "removeSnapin", 'snapin_'+name)
+        close_url = "sidebar_openclose.py?name=%s&state=off" % name
+        html.icon_button(url=None, help=_("Remove this snapin"), icon="closesnapin",
+                         onclick="remove_sidebar_snapin(this, '%s')" % close_url)
         html.write('</div>')
 
     # The heading. A click on the heading mini/maximizes the snapin
-    html.write("<b class=heading onclick=\"toggle_sidebar_snapin(this,'%s')\" "
-               "onmouseover=\"this.style.cursor='pointer'\" "
-               "onmouseout=\"this.style.cursor='auto'\">%s</b>" % (toggle_url, snapin["title"]))
+    if config.user.may("general.configure_sidebar"):
+        toggle_actions = " onclick=\"toggle_sidebar_snapin(this,'%s')\"" \
+                         " onmouseover=\"this.style.cursor='pointer'\"" \
+                         " onmouseout=\"this.style.cursor='auto'\"" % toggle_url
+    else:
+        toggle_actions = ""
+    html.write("<b class=heading%s>%s</b>" % (toggle_actions, snapin["title"]))
 
     # End of header
     html.write("</div>")
@@ -330,17 +376,14 @@ def render_snapin(name, state):
             html.write('<script>get_url("%s", updateContents, "snapin_%s")</script>' % (refresh_url, name))
     except Exception, e:
         snapin_exception(e)
-    html.write('</div><div class="foot"%s></div>\n' % style)
+    html.write('</div>\n')
     html.write('</div>')
     return refresh_url
 
 def snapin_exception(e):
-    if config.debug:
-        raise
-    else:
-        html.write("<div class=snapinexception>\n"
-                "<h2>%s</h2>\n"
-                "<p>%s</p></div>" % (_('Error'), e))
+    html.write("<div class=snapinexception>\n"
+            "<h2>%s</h2>\n"
+            "<p>%s</p></div>" % (_('Error'), e))
 
 def ajax_fold():
     config = load_user_config()
@@ -361,7 +404,7 @@ def ajax_openclose():
 
 def ajax_snapin():
     # Update online state of the user (if enabled)
-    userdb.update_user_access_time(config.user_id)
+    userdb.update_user_access_time(config.user.id)
 
     snapname = html.var("name")
     if snapname:
@@ -373,7 +416,7 @@ def ajax_snapin():
     snapin_code = []
     try:
         for snapname in snapnames:
-            if not config.may("sidesnap." + snapname):
+            if not config.user.may("sidesnap." + snapname):
                 continue
             snapin = sidebar_snapins.get(snapname)
 
@@ -383,7 +426,7 @@ def ajax_snapin():
             if not snapin.get('refresh') and snapin.get('restart'):
                 since = float(html.var('since', 0))
                 newest = since
-                for site in html.site_status.values():
+                for site in sites.states().values():
                     prog_start = site.get("program_start", 0)
                     if prog_start > newest:
                         newest = prog_start
@@ -395,6 +438,8 @@ def ajax_snapin():
             try:
                 snapin["render"]()
             except Exception, e:
+                if config.debug:
+                    raise
                 snapin_exception(e)
             snapin_code.append(html.drain())
 
@@ -407,7 +452,7 @@ def ajax_snapin():
         raise
 
 def move_snapin():
-    if not config.may("general.configure_sidebar"):
+    if not config.user.may("general.configure_sidebar"):
         return
 
     snapname_to_move = html.var("name")
@@ -439,7 +484,7 @@ def move_snapin():
     save_user_config(user_config)
 
 def page_add_snapin():
-    if not config.may("general.configure_sidebar"):
+    if not config.user.may("general.configure_sidebar"):
         raise MKGeneralException(_("You are not allowed to change the sidebar."))
 
     html.header(_("Available snapins"), stylesheets=["pages", "sidebar", "status"])
@@ -459,7 +504,7 @@ def page_add_snapin():
     for name in names:
         if name in used_snapins:
             continue
-        if not config.may("sidesnap." + name):
+        if not config.user.may("sidesnap." + name):
             continue # not allowed for this user
 
         snapin = sidebar_snapins[name]
@@ -494,7 +539,7 @@ def ajax_speedometer():
 
         # Get the current rates and the program start time. If there
         # are more than one site, we simply add the start times.
-        data = html.live.query_summed_stats("GET status\n"
+        data = sites.live().query_summed_stats("GET status\n"
                "Columns: service_checks_rate program_start")
         current_rate = data[0]
         program_start = data[1]
@@ -511,21 +556,21 @@ def ajax_speedometer():
             #
             # Manually added services without check_interval could be a problem, but
             # we have no control there.
-            scheduled_rate = html.live.query_summed_stats(
+            scheduled_rate = sites.live().query_summed_stats(
                         "GET services\n"
                         "Stats: suminv check_interval\n")[0] / 60.0
 
         percentage = 100.0 * current_rate / scheduled_rate;
         title = _("Scheduled service check rate: %.1f/s, current rate: %.1f/s, that is "
-                  "%.0f%% of the scheduled rate" %
-                  (scheduled_rate, current_rate, percentage))
+                  "%.0f%% of the scheduled rate") % \
+                  (scheduled_rate, current_rate, percentage)
 
     except Exception, e:
         scheduled_rate = 0
         program_start = 0
         percentage = 0
         last_perc = 0
-        title = _("No performance data: ") + str(e)
+        title = _("No performance data: %s") % e
 
     html.write(repr([scheduled_rate, program_start, percentage, last_perc, str(title)]))
 
@@ -551,126 +596,46 @@ def ajax_switch_masterstate():
 
     command = commands.get((column, state))
     if command:
-        html.live.command("[%d] %s" % (int(time.time()), command), site)
-        html.live.set_only_sites([site])
-        html.live.query("GET status\nWaitTrigger: program\nWaitTimeout: 10000\nWaitCondition: %s = %d\nColumns: %s\n" % \
+        sites.live().command("[%d] %s" % (int(time.time()), command), site)
+        sites.live().set_only_sites([site])
+        sites.live().query("GET status\nWaitTrigger: program\nWaitTimeout: 10000\nWaitCondition: %s = %d\nColumns: %s\n" % \
                (column, state, column))
-        html.live.set_only_sites()
+        sites.live().set_only_sites()
         render_master_control()
     else:
         html.write(_("Command %s/%d not found") % (html.attrencode(column), state))
 
-def ajax_del_bookmark():
-    try:
-        num = int(html.var("num"))
-    except ValueError:
-        raise MKGeneralException(_("Invalid bookmark id."))
-    bookmarks = load_bookmarks()
-    try:
-        del bookmarks[num]
-    except IndexError:
-        raise MKGeneralException(_("Unknown bookmark id: %d. This is probably a problem with reload or browser history. Please try again.") % html.attrencode(num))
-    save_bookmarks(bookmarks)
-    render_bookmarks()
-
-def ajax_add_bookmark():
-    title = html.var("title")
-    href = html.var("href")
-    if title and href:
-        bookmarks = load_bookmarks()
-        referer = html.req.headers_in.get("Referer")
-
-        if referer:
-            ref_p = urlparse.urlsplit(referer)
-            url_p = urlparse.urlsplit(href)
-
-            # If http/https or user, pw, host, port differ, don't try to shorten
-            # the URL to be linked. Simply use the full URI
-            if ref_p.scheme == url_p.scheme and ref_p.netloc == url_p.netloc:
-                # We try to remove http://hostname/some/path/check_mk from the
-                # URI. That keeps the configuration files (bookmarks) portable.
-                # Problem here: We have not access to our own URL, only to the
-                # path part. The trick: we use the Referrer-field from our
-                # request. That points to the sidebar.
-                referer = ref_p.path
-                href    = url_p.path
-                if url_p.query:
-                    href += '?' + url_p.query
-                removed = 0
-                while '/' in referer and referer.split('/')[0] == href.split('/')[0]:
-                    referer = referer.split('/', 1)[1]
-                    href = href.split('/', 1)[1]
-                    removed += 1
-
-                if removed == 1:
-                    # removed only the first "/". This should be an absolute path.
-                    href = '/' + href
-                elif '/' in referer:
-                    # there is at least one other directory layer in the path, make
-                    # the link relative to the sidebar.py's topdir. e.g. for pnp
-                    # links in OMD setups
-                    href = '../' + href
-
-        bookmarks.append((title, href))
-        save_bookmarks(bookmarks)
-    render_bookmarks()
-
-
-def page_edit_bookmark():
-    html.header(_("Edit Bookmark"))
-    try:
-        n = int(html.var("num"))
-    except ValueError:
-        raise MKGeneralException(_("Invalid bookmark id."))
-    bookmarks = load_bookmarks()
-    if n >= len(bookmarks):
-        raise MKGeneralException(_("Unknown bookmark id: %d. This is probably a problem with reload or browser history. Please try again.") % html.attrencode(n))
-
-    if html.var("save") and html.check_transaction():
-        title = html.var("title")
-        url = html.var("url")
-        bookmarks[n] = (title, url)
-        save_bookmarks(bookmarks)
-        html.reload_sidebar()
-
-    html.begin_form("edit_bookmark")
-    if html.var("save"):
-        title = html.var("title")
-        url = html.var("url")
-        bookmarks[n] = (title, url)
-        save_bookmarks(bookmarks)
-        html.reload_sidebar()
-    else:
-        title, url = bookmarks[n]
-        html.set_var("title", title)
-        html.set_var("url", url)
-
-    html.write("<table class=edit_bookmarks>")
-    html.write("<tr><td>%s</td><td>" % _('Title:'))
-    html.text_input("title", size = 50)
-    html.write("</td></tr><tr><td>%s:</td><td>" % _('URL'))
-    html.text_input("url", size = 50)
-    html.write("</td></tr><tr><td></td><td>")
-    html.button("save", _("Save"))
-    html.write("</td></tr></table>\n")
-    html.hidden_field("num", str(n))
-    html.end_form()
-
-    html.footer()
-
 def ajax_tag_tree():
     newconf = int(html.var("conf"))
-    tree_conf = config.load_user_file("virtual_host_tree", {"tree": 0, "cwd": {}})
+    tree_conf = config.user.load_file("virtual_host_tree", {"tree": 0, "cwd": {}})
     if type(tree_conf) == int:
         tree_conf = {"cwd":{}} # convert from old style
     tree_conf["tree"] = newconf
-    config.save_user_file("virtual_host_tree", tree_conf)
+    config.user.save_file("virtual_host_tree", tree_conf)
 
 def ajax_tag_tree_enter():
     path = html.var("path") and html.var("path").split("|") or []
-    tree_conf = config.load_user_file("virtual_host_tree", {"tree": 0, "cwd": {}})
+    tree_conf = config.user.load_file("virtual_host_tree", {"tree": 0, "cwd": {}})
     tree_conf["cwd"][tree_conf["tree"]] = path
-    config.save_user_file("virtual_host_tree", tree_conf)
+    config.user.save_file("virtual_host_tree", tree_conf)
+
+
+def ajax_switch_site():
+    # _site_switch=sitename1:on,sitename2:off,...
+    if not config.user.may("sidesnap.sitestatus"):
+        return
+
+    switch_var = html.var("_site_switch")
+    if switch_var:
+        for info in switch_var.split(","):
+            sitename, onoff = info.split(":")
+            if sitename not in config.sitenames():
+                continue
+
+            d = config.user.siteconf.get(sitename, {})
+            d["disabled"] = onoff != "on"
+            config.user.siteconf[sitename] = d
+        config.user.save_site_config()
 
 
 #.
@@ -716,7 +681,7 @@ def to_regex(s):
         re.compile(s)
     except re.error:
         raise MKGeneralException(_('You search statement is not valid. You need to provide a regular '
-            'expression (regex). For example you need to e use <tt>\\\\</tt> instead of <tt>\\</tt> '
+            'expression (regex). For example you need to use <tt>\\\\</tt> instead of <tt>\\</tt> '
             'if you like to search for a single backslash.'))
     return s
 
@@ -755,7 +720,14 @@ def plugin_matches_filters(plugin, used_filters):
                 return False
     return True
 
-def search_url_tmpl(used_filters, row, exact = True):
+def search_url_tmpl(used_filters, matched_instances):
+    exact = True
+    if matched_instances and len(matched_instances) == 1:
+        row = matched_instances[0]
+    else:
+        row = matched_instances and matched_instances[0] or None
+        exact = False
+
     if not row:
         def find_plugin(filters):
             for entry in search_plugins:
@@ -827,21 +799,27 @@ def search_url_tmpl(used_filters, row, exact = True):
             'site'   : site,
         }
 
+    # This little 'adjustment' adds an extra url parameter for an optional hostnameoralias filter in the target view.
+    # If this filter is not activated it won't have any impact. The search_url_templ function is currently not designed
+    # to handle matches of multiple filter types and probably requires a complete revision to support this.
+    if not exact and matched_instances:
+        found_plugins = set(map(lambda instances: instances[0]["id"], matched_instances))
+        # Only add this extra parameter if there are solely hosts and host_alias matches
+        if "hosts" in found_plugins or "host_alias" in found_plugins:
+            url_tmpl += "&hostnameoralias=%s" % used_filters[0][1]
+
     return url_tmpl
 
 
 def search_livestatus(used_filters):
-    try:
-        limit = config.quicksearch_dropdown_limit
-    except:
-        limit = 80
+    limit = config.quicksearch_dropdown_limit
 
     # We need to know which plugin lead to finding a particular host, so it
     # is neccessary to make one query for each plugin - sorry. For example
     # for the case, that a host can be found via alias or name.
     data = []
 
-    html.live.set_prepend_site(True)
+    sites.live().set_prepend_site(True)
     for plugin in search_plugins:
         if 'filter_func' not in plugin:
             continue
@@ -858,7 +836,7 @@ def search_livestatus(used_filters):
             #html.debug("<br>%s" % lq.replace("\n", "<br>"))
 
             lq_columns = [ "site" ] + lq_columns
-            for row in html.live.query(lq):
+            for row in sites.live().query(lq):
                 # Put result columns into a dict
                 row_dict = {}
                 for idx, col in enumerate(row):
@@ -880,7 +858,7 @@ def search_livestatus(used_filters):
                 row_options, row_data = row
                 data.append((plugin, row_options, row_data))
 
-    html.live.set_prepend_site(False)
+    sites.live().set_prepend_site(False)
 
     # Apply the limit once again (search_funcs of plugins could have added some results)
     data = data[:limit]
@@ -911,7 +889,8 @@ def search_livestatus(used_filters):
         data.sort(cmp = sort_fctn)
         return sorted_data
 
-    if len(used_filters) == 1 and used_filters[0][0] != "hosts":
+    search_types = list(set(map(lambda x: x[0], used_filters)))
+    if len(used_filters) > 1 and search_types != ["hosts"]:
         data = sort_data(data)
 
     return data
@@ -972,7 +951,7 @@ def render_search_results(used_filters, objects, format_func = format_result):
         # Find missing urls
         name = get_row_name(row)
         if "url" not in row_options:
-            row_options["url"] = search_url_tmpl(used_filters, row)
+            row_options["url"] = search_url_tmpl(used_filters, [row])
 
         obj_id = (row_options["url"], name)
         if obj_id not in unique:
@@ -995,17 +974,19 @@ def ajax_search():
     if not q:
         return
 
-    data, used_filters = process_search(q)
-    if not data:
-        return
-
     try:
+        data, used_filters = process_search(q)
+        if not data:
+            return
+
         render_search_results(used_filters, data)
+    except MKException, e:
+        html.show_error(e)
     except Exception, e:
-        html.write("error")
+        if config.debug:
+            raise
         import traceback
-        html.write(traceback.format_exc())
-        html.write(repr(e))
+        html.show_error(traceback.format_exc())
 
 
 def search_open():
@@ -1013,15 +994,9 @@ def search_open():
     if not q:
         return
 
-    data, used_filters = process_search(q)
+    matched_instances, used_filters = process_search(q)
     if not used_filters:
         return
 
-    if data and len(data) == 1:
-        url = search_url_tmpl(used_filters, data[0])
-    else:
-        url = search_url_tmpl(used_filters, data and data[0] or None, exact = False)
-
-    html.set_http_header('Location', url)
-    from mod_python import apache
-    raise apache.SERVER_RETURN, apache.HTTP_MOVED_TEMPORARILY
+    url = search_url_tmpl(used_filters, matched_instances)
+    html.http_redirect(url)

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,24 @@
 #ifndef ContactgroupsColumn_h
 #define ContactgroupsColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
 #include "ListColumn.h"
 #include "nagios.h"
+class RowRenderer;
 
-class ContactgroupsColumn : public ListColumn
-{
+class ContactgroupsColumn : public ListColumn {
     int _offset;
+
 public:
-    ContactgroupsColumn(string name, string description, int offset, int indirect_offset)
-        : ListColumn(name, description, indirect_offset), _offset(offset) {}
-    void output(void *, Query *);
-    void *getNagiosObject(char *name); // return pointer to contact group
-    bool isNagiosMember(void *data, void *nagobject);
-    bool isEmpty(void *data);
+    ContactgroupsColumn(const std::string &name, const std::string &description,
+                        int offset, int indirect_offset, int extra_offset = -1)
+        : ListColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset) {}
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    std::unique_ptr<Contains> makeContains(const std::string &name) override;
+    bool isEmpty(void *data) override;
 };
 
-
-
-#endif // ContactgroupsColumn_h
-
+#endif  // ContactgroupsColumn_h

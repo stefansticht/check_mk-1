@@ -19,24 +19,25 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import time
+import traceback
 from lib import *
-import defaults
+import cmk.paths
 
 loaded_with_language = False
 multisite_cronjobs = []
 
-lock_file = defaults.tmp_dir + "/cron.lastrun"
+lock_file = cmk.paths.tmp_dir + "/cron.lastrun"
 
 # Load all view plugins
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     global multisite_cronjobs
@@ -49,8 +50,10 @@ def load_plugins():
 # Page called by some external trigger (usually cron job in OMD site)
 # Note: this URL is being called *without* any login. We have no
 # user. Everyone can call this! We must not read any URL variables.
+#
+# There is no output written to the user in regular cases. Exceptions
+# are written to the web log.
 def page_run_cron():
-    now = time.time()
     # Prevent cron jobs from being run too often, also we need
     # locking in order to prevent overlapping runs
     if os.path.exists(lock_file):
@@ -61,4 +64,11 @@ def page_run_cron():
     aquire_lock(lock_file)
 
     for cron_job in multisite_cronjobs:
-        cron_job()
+        try:
+            cron_job()
+        except Exception:
+            html.write("An exception occured. Take a look at the web.log.\n")
+            logger(LOG_ERR, "Exception in cron_job [%s]:\n%s" %
+                             (cron_job.__name__, traceback.format_exc()))
+
+    html.write("OK\n")

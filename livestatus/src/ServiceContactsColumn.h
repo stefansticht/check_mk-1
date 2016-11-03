@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,18 +25,22 @@
 #ifndef ServiceContactsColumn_h
 #define ServiceContactsColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
+#include "Column.h"
 #include "ContactsColumn.h"
+#include "nagios.h"
 
-class ServiceContactsColumn : public ContactsColumn
-{
+class ServiceContactsColumn : public ContactsColumn {
 public:
-    ServiceContactsColumn(string name, string description, int indirect_offset)
-        : ContactsColumn(name, description, indirect_offset) {}
-    int type() { return COLTYPE_LIST; }
-    bool isNagiosMember(void *data, void *member);
+    ServiceContactsColumn(const std::string& name,
+                          const std::string& description, int indirect_offset,
+                          int extra_offset = -1)
+        : ContactsColumn(name, description, indirect_offset, extra_offset) {}
+    ColumnType type() override { return ColumnType::list; }
+    std::unique_ptr<Contains> makeContains(const std::string& name) override;
+    std::unique_ptr<Contains> containsContact(contact* ctc) override;
 };
 
-#endif // ServiceContactsColumn_h
-
+#endif  // ServiceContactsColumn_h

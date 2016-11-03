@@ -17,33 +17,37 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#ifndef _TimeperiodsCache_h
-#define _TimeperiodsCache_h
+#ifndef TimeperiodsCache_h
+#define TimeperiodsCache_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <ctime>
 #include <map>
+#include <mutex>
 #include "nagios.h"
+class Logger;
 
-class TimeperiodsCache
-{
-    time_t _cache_time;
-    typedef std::map<timeperiod *, bool> _cache_t;
-    _cache_t _cache;
-    pthread_mutex_t _cache_lock;
-
+class TimeperiodsCache {
 public:
-    TimeperiodsCache();
+    explicit TimeperiodsCache(Logger *logger);
     ~TimeperiodsCache();
     void update(time_t now);
     bool inTimeperiod(timeperiod *tp);
     bool inTimeperiod(const char *tpname);
     void logCurrentTimeperiods();
+
 private:
+    Logger *const _logger;
+    time_t _cache_time;
+    std::map<timeperiod *, bool> _cache;
+    std::mutex _cache_lock;
+
     void logTransition(char *name, int from, int to);
 };
 
-#endif // _TimeperiodsCache_h
+#endif  // TimeperiodsCache_h

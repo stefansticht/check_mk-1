@@ -19,12 +19,25 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import defaults, re, os
+import re
+import os
+
+try:
+    import simplejson as json
+except ImportError:
+    import json
+
+
+import config
+import sites
+import cmk.paths
+import cmk.store as store
+from lib import MKException, MKGeneralException, MKAuthException, MKUserError, lqencode
 
 # Load data of a host, cache it in the current HTTP request
 def host(hostname):
@@ -41,17 +54,14 @@ def host(hostname):
         return invdata
 
 def has_inventory(hostname):
-    path = defaults.var_dir + "/inventory/" + hostname
+    path = cmk.paths.var_dir + "/inventory/" + hostname
     return os.path.exists(path)
 
 def load_host(hostname):
     if '/' in hostname:
         return None # just for security reasons
-    path = defaults.var_dir + "/inventory/" + hostname
-    try:
-        return eval(file(path).read())
-    except:
-        return {}
+    path = cmk.paths.var_dir + "/inventory/" + hostname
+    return store.load_data_from_file(path, {})
 
 # Return a list of timestamps of all inventory snapshost
 # of a host.
@@ -59,13 +69,13 @@ def get_host_history(hostname):
     if '/' in hostname:
         return None # just for security reasons
 
-    path = defaults.var_dir + "/inventory/" + hostname
+    path = cmk.paths.var_dir + "/inventory/" + hostname
     try:
         history = [ int(os.stat(path).st_mtime) ]
     except:
         return [] # No inventory for this host
 
-    arcdir = defaults.var_dir + "/inventory_archive/" + hostname
+    arcdir = cmk.paths.var_dir + "/inventory_archive/" + hostname
     if os.path.exists(arcdir):
         for ts in os.listdir(arcdir):
             try:
@@ -98,18 +108,14 @@ def load_historic_host(hostname, timestamp):
     if '/' in hostname:
         return None # just for security reasons
 
-    path = defaults.var_dir + "/inventory/" + hostname
+    path = cmk.paths.var_dir + "/inventory/" + hostname
 
     # Try current tree
     if int(os.stat(path).st_mtime) == timestamp:
         return host(hostname)
 
-    try:
-        path = defaults.var_dir + "/inventory_archive/" + hostname + "/%d" % timestamp
-        return eval(file(path).read())
-    except:
-        return {}
-
+    path = cmk.paths.var_dir + "/inventory_archive/" + hostname + "/%d" % timestamp
+    return store.load_data_from_file(path, {})
 
 
 # Example for the paths:
@@ -125,6 +131,14 @@ def get(tree, path):
     path = path[1:]
 
     node = tree
+
+    # The root node of the tree MUST be dictionary
+    # This info is taken from the host_inventory column in a livestatus table
+    # Older versions, which do not know this column, report None as fallback value
+    # This workaround prevents the inevitable crash
+    if node == None:
+        node = {}
+
     current_what = "."
     while path not in ('.', ':', ''):
         parts = re.split("[:.]", path)
@@ -285,3 +299,123 @@ def count_items(tree):
         return sum(map(count_items, tree))
     else:
         return 1
+
+
+# The response is always a top level dict with two elements:
+# a) result_code - This is 0 for expected processing and 1 for an error
+# b) result      - In case of an error this is the error message, a UTF-8 encoded string.
+#                  In case of success this is a dictionary containing the host inventory.
+def page_host_inv_api():
+    try:
+        request = html.get_request()
+
+        # The user can either specify a single host or provide a list of host names. In case
+        # multiple hosts are handled, there is a top level dict added with "host > invdict" pairs
+        hosts = request.get("hosts")
+        if hosts:
+            result = {}
+            for host_name in hosts:
+                result[host_name] = inventory_of_host(host_name, request)
+
+        else:
+            host_name = request.get("host")
+            if host_name == None:
+                raise MKUserError("host", _("You need to provide a \"host\"."))
+
+            result = inventory_of_host(host_name, request)
+
+            if not result and not has_inventory(host_name):
+                raise MKGeneralException(_("Found no inventory data for this host."))
+
+        response = { "result_code": 0, "result": result }
+
+    except MKException, e:
+        response = { "result_code": 1, "result": "%s" % e }
+
+    except Exception, e:
+        if config.debug:
+            raise
+        response = { "result_code": 1, "result": "%s" % e }
+
+    if html.output_format == "json":
+        write_json(response)
+    elif html.output_format == "xml":
+        write_xml(response)
+    else:
+        write_python(response)
+
+
+def inventory_of_host(host_name, request):
+    if not may_see(host_name, site=request.get("site")):
+        raise MKAuthException(_("Sorry, you are not allowed to access the host %s.") % host_name)
+
+    host_inv = host(host_name)
+
+    if "paths" in request:
+        host_inv = filter_tree_by_paths(host_inv, request["paths"])
+
+    return host_inv
+
+
+def filter_tree_by_paths(tree, paths):
+    filtered = {}
+
+    for path in paths:
+        node = get(tree, path)
+
+        parts = path.split(".")
+        this_tree = filtered
+        while True:
+            key = parts.pop(0)
+            if parts:
+                this_tree = this_tree.setdefault(key, {})
+            else:
+                this_tree[key] = node
+                break
+
+    return filtered
+
+
+def may_see(host_name, site=None):
+    if config.user.may("general.see_all"):
+        return True
+
+
+    query = "GET hosts\nStats: state >= 0\nFilter: name = %s\n" % lqencode(host_name)
+
+    if site:
+        sites.live().set_only_sites([site])
+
+    result = sites.live().query_summed_stats(query, "ColumnHeaders: off\n")
+
+    if site:
+        sites.live().set_only_sites()
+
+    if not result:
+        return False
+    else:
+        return result[0] > 0
+
+
+def write_xml(response):
+    try:
+        import dicttoxml
+    except ImportError:
+        raise MKGeneralException(_("You need to have the \"dicttoxml\" python module installed to "
+                                   "be able to use the XML format."))
+
+    unformated_xml = dicttoxml.dicttoxml(response)
+
+    from xml.dom.minidom import parseString
+    dom = parseString(unformated_xml)
+
+    html.write(dom.toprettyxml())
+
+
+def write_json(response):
+    html.write(json.dumps(response,
+                          sort_keys=True, indent=4, separators=(',', ': ')))
+
+
+def write_python(response):
+    html.write(repr(response))

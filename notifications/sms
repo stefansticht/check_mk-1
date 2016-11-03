@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # SMS (using smstools)
 
 # +------------------------------------------------------------------+
@@ -20,7 +20,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -34,7 +34,7 @@ import os, sys
 
 send_path = None
 for binary in [ 'sendsms', 'smssend' ]:
-    if os.system('which %s >/dev/null' % binary) == 0:
+    if os.system('which %s >/dev/null 2>/dev/null' % binary) == 0:
         send_path = binary
 
 smsd_user = 'smsd'
@@ -87,16 +87,21 @@ elif notification_type == "CUSTOM":
     message += " " + os.environ['NOTIFY_NOTIFICATIONCOMMENT']
 
 recipient = os.environ['NOTIFY_CONTACTPAGER'].replace(" ", "")
+def quote_message(msg, max_length=None):
+    if max_length:
+        return "'" + msg.replace("'", "'\"'\"'")[:max_length-2] + "'"
+    else:
+        return "'" + msg.replace("'", "'\"'\"'") + "'"
 
 if send_path:
-    if os.system("%s %s '%s'" % (send_path, recipient, message[:160])) >> 8 != 0:
+    if os.system("%s %s %s" % (send_path, recipient, quote_message(message, 160))) >> 8 != 0:
         sys.exit(1)
 elif spool_dir:
     # On some distros, like debian, smstools does not ship with the sendsms/smssend helper
     # script. On this distro, simply drop the SMS in the outgoing spool directory.
     import tempfile, shutil
     fd, path = tempfile.mkstemp(prefix = 'cmk_sms_')
-    os.write(fd, 'To: %s\n\n%s' % (recipient, message))
+    os.write(fd, 'To: %s\n\n%s' % (recipient, quote_message(message)))
     os.close(fd)
     os.chmod(path, 0660)
     filename = path.split('/')[-1]

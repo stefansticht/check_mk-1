@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,33 @@
 #ifndef GlobalCountersColumn_h
 #define GlobalCountersColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Column.h"
-#include "global_counters.h"
+class RowRenderer;
 
-class GlobalCountersColumn : public Column
-{
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class GlobalCountersColumn : public Column {
     unsigned _counter_index;
     bool _do_average;
 
 public:
-    GlobalCountersColumn(string name, string description, unsigned counter_index, bool do_average)
-        : Column(name, description, -1), _counter_index(counter_index), _do_average(do_average) {}
-    int type() { return _do_average ? COLTYPE_DOUBLE : COLTYPE_INT; }
-    void output(void *, Query *);
-    Filter *createFilter(int operator_id __attribute__ ((__unused__)), char *value __attribute__ ((__unused__))) { return 0; }
+    GlobalCountersColumn(const std::string &name,
+                         const std::string &description, unsigned counter_index,
+                         bool do_average, int indirect_offset = -1,
+                         int extra_offset = -1)
+        : Column(name, description, indirect_offset, extra_offset)
+        , _counter_index(counter_index)
+        , _do_average(do_average) {}
+    ColumnType type() override {
+        return _do_average ? ColumnType::double_ : ColumnType::int_;
+    }
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
 };
 
-
-#endif // GlobalCountersColumn_h
-
+#endif  // GlobalCountersColumn_h

@@ -17,33 +17,29 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "auth.h"
 
-int is_authorized_for(contact *ctc, host *hst, service *svc) {
-    if (ctc == UNKNOWN_AUTH_USER)
-        return false;
-
-    if (svc) {
-        if (g_service_authorization == AUTH_STRICT) {
-            return is_contact_for_service(svc, ctc)
-                || is_escalated_contact_for_service(svc, ctc);
-        }
-        else { // AUTH_LOOSE
-            return  is_contact_for_host(hst, ctc)
-                || is_escalated_contact_for_host(hst, ctc)
-                || is_contact_for_service(svc, ctc)
-                || is_escalated_contact_for_service(svc, ctc);
-        }
-    }
-    // Entries for hosts
-    else {
-        return is_contact_for_host(hst, ctc)
-            || is_escalated_contact_for_host(hst, ctc);
-    }
+namespace {
+bool host_has_contact(host *hst, contact *ctc) {
+    return is_contact_for_host(hst, ctc) != 0 ||
+           is_escalated_contact_for_host(hst, ctc) != 0;
 }
 
+bool service_has_contact(host *hst, service *svc, contact *ctc) {
+    return is_contact_for_service(svc, ctc) != 0 ||
+           is_escalated_contact_for_service(svc, ctc) != 0 ||
+           (g_service_authorization == AUTH_LOOSE &&
+            host_has_contact(hst, ctc));
+}
+}  // namespace
+
+bool is_authorized_for(contact *ctc, host *hst, service *svc) {
+    return ctc != UNKNOWN_AUTH_USER &&
+           (svc == nullptr ? host_has_contact(hst, ctc)
+                           : service_has_contact(hst, svc, ctc));
+}

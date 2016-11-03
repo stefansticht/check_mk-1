@@ -19,10 +19,19 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+try:
+    import simplejson as json
+except ImportError:
+    import json
+
+import sites, notify, table
+import livestatus
+import notifications
 
 #   .--Overview------------------------------------------------------------.
 #   |              ___                       _                             |
@@ -36,20 +45,25 @@
 #   '----------------------------------------------------------------------'
 
 def dashlet_overview(nr, dashlet):
-    html.write(
-        '<table class=dashlet_overview>'
-        '<tr><td valign=top>'
-        '<a href="http://mathias-kettner.de/check_mk.html"><img style="margin-right: 30px;" src="images/check_mk.trans.120.png"></a>'
-        '</td>'
-        '<td><h2>Check_MK Multisite</h2>'
-        'Welcome to Check_MK Multisite. If you want to learn more about Multisite, please visit '
-        'our <a href="http://mathias-kettner.de/checkmk_multisite.html">online documentation</a>. '
-        'Multisite is part of <a href="http://mathias-kettner.de/check_mk.html">Check_MK</a> - an Open Source '
-        'project by <a href="http://mathias-kettner.de">Mathias Kettner</a>.'
-        '</td>'
-    )
 
-    html.write('</tr></table>')
+    html.open_table(class_="dashlet_overview")
+    html.open_tr()
+    html.open_td(valign="top")
+    html.open_a(href="http://mathias-kettner.de/check_mk.html")
+    html.img("images/check_mk.trans.120.png", style="margin-right: 30px;")
+    html.close_a()
+    html.close_td()
+
+    html.open_td()
+    html.h2("Check_MK Multisite")
+    html.write_html('Welcome to Check_MK Multisite. If you want to learn more about Multisite, please visit '
+                    'our <a href="http://mathias-kettner.de/checkmk_multisite.html">online documentation</a>. '
+                    'Multisite is part of <a href="http://mathias-kettner.de/check_mk.html">Check_MK</a> - an Open Source '
+                    'project by <a href="http://mathias-kettner.de">Mathias Kettner</a>.')
+    html.close_td()
+
+    html.close_tr()
+    html.close_table()
 
 dashlet_types["overview"] = {
     "title"       : _("Overview / Introduction"),
@@ -72,8 +86,9 @@ dashlet_types["overview"] = {
 #   '----------------------------------------------------------------------'
 
 def dashlet_mk_logo(nr, dashlet):
-    html.write('<a href="http://mathias-kettner.de/check_mk.html">'
-     '<img style="margin-right: 30px;" src="images/check_mk.trans.120.png"></a>')
+    html.open_a(href="http://mathias-kettner.de/check_mk.html")
+    html.img("images/check_mk.trans.120.png", style="margin-right: 30px;")
+    html.close_a()
 
 dashlet_types["mk_logo"] = {
     "title"       : _("Check_MK Logo"),
@@ -207,8 +222,13 @@ def render_statistics(pie_id, what, table, filter, dashlet):
     pie_left_aspect  = 0.5
     pie_right_aspect = 0.8
 
-    info = what == 'hosts' and 'host' or 'service'
-    use_filters = visuals.filters_of_visual(dashlet, [info])
+    if what == 'hosts':
+        info = 'host'
+        infos = [ info ]
+    else:
+        info = 'service'
+        infos = [ 'host', 'service' ]
+    use_filters = visuals.filters_of_visual(dashlet, infos)
     for filt in use_filters:
         if filt.available() and not isinstance(filt, visuals.FilterSite):
             filter += filt.filter(info)
@@ -220,38 +240,46 @@ def render_statistics(pie_id, what, table, filter, dashlet):
 
     site = dashlet['context'].get('siteopt', {}).get('site')
     if site:
-        html.live.set_only_sites([site])
-        result = html.live.query_row(query)
-        html.live.set_only_sites()
+        sites.live().set_only_sites([site])
+        result = sites.live().query_row(query)
+        sites.live().set_only_sites()
     else:
-        result = html.live.query_summed_stats(query)
+        result = sites.live().query_summed_stats(query)
 
     pies = zip(table, result)
     total = sum([x[1] for x in pies])
 
-    html.write("<div class=stats>")
-    html.write('<canvas class=pie width=%d height=%d id="%s_stats" style="float: left"></canvas>' %
-            (pie_diameter, pie_diameter, pie_id))
-    html.write('<img src="images/globe.png" class="globe">')
+    html.open_div(class_="stats")
+    html.canvas('', class_="pie", id_="%s_stats" % pie_id, width=pie_diameter, height=pie_diameter, style="float: left")
+    html.img("images/globe.png", class_="globe")
 
-    html.write('<table class="hoststats%s" style="float:left">' % (
-        len(pies) > 1 and " narrow" or ""))
+    html.open_table(class_=["hoststats"] + (["narrow"] if len(pies) > 0 else []), style="float:left")
+
     table_entries = pies
     while len(table_entries) < 6:
         table_entries = table_entries + [ (("", "#95BBCD", "", ""), "&nbsp;") ]
     table_entries.append(((_("Total"), "", "all%s" % what, ""), total))
-    for (name, color, viewurl, query), count in table_entries:
-        url = "view.py?view_name=" + viewurl + "&filled_in=filter&search=1&wato_folder="
-        for filter_name, url_params in dashlet['context'].items():
-            url += '&' + html.urlencode_vars(url_params.items())
-        html.write('<tr><th><a href="%s">%s</a></th>' % (url, name))
-        style = ''
-        if color:
-            style = ' style="background-color: %s"' % color
-        html.write('<td class=color%s>'
-                   '</td><td><a href="%s">%s</a></td></tr>' % (style, url, count))
 
-    html.write("</table>")
+    for (name, color, viewurl, query), count in table_entries:
+        url = "view.py?view_name=" + viewurl + "&filled_in=filter&search=1"
+        for filter_name, url_params in dashlet['context'].items():
+            if filter_name == "wato_folder" and html.has_var("wato_folder"):
+                url += "&wato_folder=" + html.var("wato_folder")
+
+            elif filter_name == "svcstate":
+                # The svcstate filter URL vars are controlled by dashlet
+                continue
+
+            else:
+                url += '&' + html.urlencode_vars(url_params.items())
+
+        html.open_tr()
+        html.th(html.render_a(name, href=url))
+        html.td('', class_="color", style="background-color: %s" % color if color else '')
+        html.td(html.render_a(count, href=url))
+        html.close_tr()
+
+    html.close_table()
 
     r = 0.0
     pie_parts = []
@@ -287,8 +315,8 @@ def render_statistics(pie_id, what, table, filter, dashlet):
                 remaining_part           -= part
                 remaining_separatorspace -= separator
 
+    html.close_div()
 
-    html.write("</div>")
     html.javascript("""
 function chart_pie(pie_id, x_scale, radius, color, right_side) {
     var context = document.getElementById(pie_id + "_stats").getContext('2d');
@@ -330,7 +358,12 @@ if (has_canvas_support()) {
 #   | Renders a single performance graph                                   |
 #   '----------------------------------------------------------------------'
 
-def make_pnp_url(dashlet, what):
+
+def dashlet_graph(nr, dashlet):
+    html.div('', id_="dashlet_graph_%d" % nr)
+
+
+def dashlet_graph_reload_js(nr, dashlet):
     host = dashlet['context'].get('host')
     if not host:
         raise MKUserError('host', _('Missing needed host parameter.'))
@@ -344,36 +377,45 @@ def make_pnp_url(dashlet, what):
     if html.has_var('site'):
         site = html.var('site')
     else:
-        html.live.set_prepend_site(True)
+        sites.live().set_prepend_site(True)
         query = "GET hosts\nFilter: name = %s\nColumns: name" % lqencode(host)
-        site = html.live.query_column(query)[0]
-        html.live.set_prepend_site(False)
+        try:
+            site = sites.live().query_column(query)[0]
+        except IndexError:
+            raise MKUserError("host", _("The host could not be found on any active site."))
+        sites.live().set_prepend_site(False)
 
-    if not site:
-        base_url = defaults.url_prefix
-    else:
-        base_url = html.site_status[site]["site"]["url_prefix"]
+    # New graphs which have been added via "add to visual" option don't have a timerange
+    # configured. So we assume the default timerange here by default.
+    timerange = dashlet.get('timerange', '1')
 
-    base_url += "pnp4nagios/index.php/"
-    var_part = "?host=%s&srv=%s&source=%d&view=%s&theme=multisite" % \
-            (pnp_cleanup(dashlet['context']['host']), pnp_cleanup(service),
-             dashlet['source'], dashlet['timerange'])
-    return base_url + what + var_part
+    graph_specification = ("template", {
+        "site"                : site,
+        "host_name"           : host,
+        "service_description" : service,
+        "graph_index"         : dashlet["source"] -1,
+    })
+    graph_render_options = {
+        "show_legend": dashlet.get("show_legend", False),
+        "show_service" : dashlet.get("show_service", True),
+    }
 
-def dashlet_pnpgraph(nr, dashlet):
-    html.write('<a href="%s" id="dashlet_graph_%d"></a>' % (make_pnp_url(dashlet, 'graph'), nr))
+    return "dashboard_render_graph(%d, %s, %s, '%s')" % \
+            (nr, json.dumps(graph_specification), json.dumps(graph_render_options), timerange)
+
 
 dashlet_types["pnpgraph"] = {
     "title"        : _("Performance Graph"),
     "sort_index"   : 20,
     "description"  : _("Displays a performance graph of a host or service."),
-    "render"       : dashlet_pnpgraph,
+    "render"       : dashlet_graph,
     "refresh"      : 60,
     "size"         : (60, 21),
     "allowed"      : config.builtin_role_ids,
     "infos"        : ["service", "host"],
     "single_infos" : ["service", "host"],
     "parameters"   : [
+        # Cleanup: switch to generic Timerange() valuespec!
         ("timerange", DropdownChoice(
             title = _('Timerange'),
             default_value = '1',
@@ -384,24 +426,84 @@ dashlet_types["pnpgraph"] = {
             ],
         )),
         ("source", Integer(
-            title = _('Source (n\'th Graph)'),
-            default_value = 0,
+            title = _('Source (n\'th graph)'),
+            default_value = 1,
+            minvalue = 1,
+        )),
+        ("show_legend", Checkbox(
+            title = _("Show Legend"),
+            label = _("Show the legend area of the graph"),
+            help = _("This option controls whether or not the legend below the graph "
+                     "area should be shown. This option is only used by the new Check_MK "
+                     "graphs which are only available in the Check_MK Enterprise Edition."),
+            default_value = False,
+        )),
+        ("show_service", Checkbox(
+            title = _("Show host/service name in title"),
+            label = _("Add the host/service to the graph title"),
+            default_value = True,
         )),
     ],
     "styles": """
 .dashlet.pnpgraph .dashlet_inner {
-    background-color: #fff;
+    background-color: #f8f4f0;
     color: #000;
     text-align: center;
 }
+.dashlet.pnpgraph .graph {
+    border: none;
+    box-shadow: none;
+}
+.dashlet.pnpgraph .container {
+    background-color: #f8f4f0;
+}
+.dashlet.pnpgraph div.title a {
+    color: #000;
+}
 """,
-    "on_resize"    : lambda nr, dashlet: 'dashboard_render_pnpgraph(%d, \'%s\');' %
-                                                 (nr, make_pnp_url(dashlet, 'image')),
+    "on_resize"    : dashlet_graph_reload_js,
     # execute this js handler instead of refreshing the dashlet by calling "render" again
-    "on_refresh"   : lambda nr, dashlet: 'dashboard_render_pnpgraph(%d, \'%s\');' %
-                                                 (nr, make_pnp_url(dashlet, 'image')),
+    "on_refresh"   : dashlet_graph_reload_js,
     "script": """
 var dashlet_offsets = {};
+function dashboard_render_graph(nr, graph_specification, graph_render_options, timerange)
+{
+    // Get the target size for the graph from the inner dashlet container
+    var inner = document.getElementById('dashlet_inner_' + nr);
+    var c_w = inner.clientWidth;
+    var c_h = inner.clientHeight;
+
+    var post_data = "spec=" + encodeURIComponent(JSON.stringify(graph_specification))
+                  + "&render=" + encodeURIComponent(JSON.stringify(graph_render_options))
+                  + "&timerange=" + encodeURIComponent(timerange)
+                  + "&width=" + c_w
+                  + "&height=" + c_h
+                  + "&id=" + nr;
+
+    call_ajax("graph_dashlet.py", {
+        post_data        : post_data,
+        method           : "POST",
+        response_handler : handle_dashboard_render_graph_response,
+        handler_data     : nr,
+    });
+}
+
+function handle_dashboard_render_graph_response(handler_data, response_body)
+{
+    var nr = handler_data;
+
+    // Fallback to PNP graph handling
+    if (response_body.indexOf('pnp4nagios') !== -1) {
+        var img_url = response_body;
+        dashboard_render_pnpgraph(nr, img_url);
+        return;
+    }
+
+    var container = document.getElementById('dashlet_graph_' + nr);
+    container.innerHTML = response_body;
+    executeJSbyObject(container);
+}
+
 function dashboard_render_pnpgraph(nr, img_url)
 {
     // Get the target size for the graph from the inner dashlet container
@@ -499,9 +601,11 @@ function load_graph_img(nr, img, img_url, c_w, c_h)
 #   '----------------------------------------------------------------------'
 
 def dashlet_nodata(nr, dashlet):
-    html.write("<div class=nodata><div class=msg>")
+    html.open_div(class_="nodata")
+    html.open_div(class_="msg")
     html.write(dashlet.get("text"))
-    html.write("</div></div>")
+    html.close_div()
+    html.close_div()
 
 dashlet_types["nodata"] = {
     "title"       : _("Static text"),
@@ -548,12 +652,19 @@ def dashlet_view(nr, dashlet):
     import bi # FIXME: Cleanup?
     bi.reset_cache_status() # needed for status icon
 
-    html.set_var('display_options', 'HRSIXL')
-    html.set_var('_display_options', 'HRSIXL')
+    is_reload = html.has_var("_reload")
+
+    display_options = "SIXL"
+    if not is_reload:
+        display_options += "HR"
+
+    html.set_var('display_options',  display_options)
+    html.set_var('_display_options', display_options)
     html.add_body_css_class('dashlet')
 
     import views # FIXME: HACK, clean this up somehow
     views.load_views()
+    views.prepare_painter_options()
     views.show_view(dashlet, True, True, True)
 
 def dashlet_view_add_url():
@@ -601,7 +712,16 @@ dashlet_types["view"] = {
 
 def dashlet_url(dashlet):
     if dashlet.get('show_in_iframe', True):
-        return dashlet['url']
+        try:
+            return dashlet['url']
+        except KeyError:
+            if "urlfunc" in dashlet:
+                raise MKUserError(None,
+                    _("You set the dashlet to use a dynamic URL rendering function. It seems "
+                      "that this function call failed. You may want to open the dashboard "
+                      "in debug mode to get more details."))
+            else:
+                raise
 
 def dashlet_url_validate(value, varprefix):
     if 'url' not in value and 'urlfunc' not in value:
@@ -692,26 +812,29 @@ body.side {
     %s
 }
 </style>''' % overflow)
-    html.write('<body class="side">\n')
-    html.write('<div id="check_mk_sidebar">\n')
-    html.write('<div id="side_content">\n')
-    html.write("<div id=\"snapin_container_%s\" class=snapin>\n" % dashlet['snapin'])
-    html.write("<div id=\"snapin_%s\" class=\"content\">\n" % (dashlet['snapin']))
+    html.open_body(class_="side")
+    html.open_div(id_="check_mk_sidebar")
+    html.open_div(id_="side_content")
+    html.open_div(id_="snapin_container_%s" % dashlet['snapin'], class_="snapin")
+    html.open_div(id_="snapin_%s" % dashlet['snapin'], class_="content")
     sidebar.render_snapin_styles(snapin)
     snapin['render']()
-    html.write('</div>\n')
-    html.write('</div>\n')
-    html.write('</div>\n')
-    html.write('</div>\n')
+    html.close_div()
+    html.close_div()
+    html.close_div()
+    html.close_div()
     html.body_end()
+
 
 def dashlet_snapin_get_snapins():
     import sidebar # FIXME: HACK, clean this up somehow
     return sorted([ (k, v['title']) for k, v in sidebar.sidebar_snapins.items() ], key=lambda x: x[1])
 
+
 def dashlet_snapin_title(dashlet):
     import sidebar # FIXME: HACK, clean this up somehow
     return sidebar.sidebar_snapins[dashlet['snapin']]['title']
+
 
 dashlet_types["snapin"] = {
     "title"          : _("Sidebar Snapin"),
@@ -726,8 +849,139 @@ dashlet_types["snapin"] = {
     "parameters"     : [
         ('snapin', DropdownChoice(
             title = _('Snapin'),
-            help = _('Choose the snapin you like to show.'),
+            help = _('Choose the snapin you would like to show.'),
             choices = dashlet_snapin_get_snapins,
         )),
     ],
+}
+
+
+#.
+#   .--Notify users--------------------------------------------------------.
+#   |        _   _       _   _  __                                         |
+#   |       | \ | | ___ | |_(_)/ _|_   _   _   _ ___  ___ _ __ ___         |
+#   |       |  \| |/ _ \| __| | |_| | | | | | | / __|/ _ \ '__/ __|        |
+#   |       | |\  | (_) | |_| |  _| |_| | | |_| \__ \  __/ |  \__ \        |
+#   |       |_| \_|\___/ \__|_|_|  \__, |  \__,_|___/\___|_|  |___/        |
+#   |                              |___/                                   |
+#   +----------------------------------------------------------------------+
+#   | Dashlet for notify user pop up messages                              |
+#   '----------------------------------------------------------------------'
+
+
+def ajax_delete_user_notification():
+    msg_id = html.var("id")
+    notify.delete_gui_message(msg_id)
+
+
+def dashlet_notify_users(nr, dashlet):
+
+    html.open_div(class_="notify_users")
+    table.begin("notify_users", sortable=False, searchable=False, omit_if_empty=True)
+
+
+
+    for entry in sorted(notify.get_gui_messages(), key=lambda e: e["time"], reverse=True):
+        if "dashlet" in entry["methods"]:
+            table.row()
+
+            msg_id   = entry["id"]
+            datetime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(entry['time']))
+            message  = entry["text"].replace("\n", " ")
+
+            table.cell(_("Actions"), css="buttons", sortable=False)
+            html.icon_button("", _("Delete"), "delete", onclick="delete_user_notification('%s', this);" % msg_id)
+
+            table.cell(_("Message"), html.attrencode(message))
+            table.cell(_("Date"),    datetime)
+
+    table.end()
+    html.javascript('function delete_user_notification(msg_id, btn) {'
+               'post_url("ajax_delete_user_notification.py", "id=" + msg_id);'
+               'var row = btn.parentNode.parentNode;'
+               'row.parentNode.removeChild(row);}')
+
+    html.close_div()
+
+dashlet_types["notify_users"] = {
+    "title"       : _("User notifications"),
+    "description" : _("Display GUI notifications sent to users."),
+    "render"      : dashlet_notify_users,
+    "sort_index"  : 75,
+    "allowed"     : config.builtin_role_ids,
+    "styles"      : ".notify_users { width: 100%; height: 100%; overflow: auto; }"
+}
+
+
+#.
+#   .--Failed Notifications------------------------------------------------.
+#   |                      _____     _ _          _                        |
+#   |                     |  ___|_ _(_) | ___  __| |                       |
+#   |                     | |_ / _` | | |/ _ \/ _` |                       |
+#   |                     |  _| (_| | | |  __/ (_| |                       |
+#   |                     |_|  \__,_|_|_|\___|\__,_|                       |
+#   |                                                                      |
+#   |       _   _       _   _  __ _           _   _                        |
+#   |      | \ | | ___ | |_(_)/ _(_) ___ __ _| |_(_) ___  _ __  ___        |
+#   |      |  \| |/ _ \| __| | |_| |/ __/ _` | __| |/ _ \| '_ \/ __|       |
+#   |      | |\  | (_) | |_| |  _| | (_| (_| | |_| | (_) | | | \__ \       |
+#   |      |_| \_|\___/ \__|_|_| |_|\___\__,_|\__|_|\___/|_| |_|___/       |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   | Dashlet notifying users in case of failure to send notifications     |
+#   '----------------------------------------------------------------------'
+
+def dashlet_failed_notifications(nr, dashlet):
+    notdata = notifications.load_failed_notifications(after=notifications.acknowledged_time(),
+                                                      stat_only=True)
+
+    if notdata is None:
+        failed_notifications = 0
+    else:
+        failed_notifications = notdata[0]
+
+    if failed_notifications > 0:
+        view_url = html.makeuri_contextless(
+            [("view_name", "failed_notifications")], filename="view.py")
+        content = '<a target="main" href="%s">%d failed notifications</a>' %\
+            (view_url, failed_notifications)
+
+        confirm_url = html.makeuri_contextless([], filename="clear_failed_notifications.py")
+        content = ('<a target="main" href="%s">'
+                    '<img src="images/button_closetimewarp.png" style="width:32px;height:32px;">'
+                    '</a>&nbsp;' % confirm_url) + content
+
+        html.open_div(class_="has_failed_notifications")
+        html.open_div(class_="failed_notifications_inner")
+        html.write(content)
+        html.close_div()
+        html.close_div()
+
+
+dashlet_types["notify_failed_notifications"] = {
+    "title"       : _("Failed Notifications"),
+    "description" : _("Display GUI notifications in case notification mechanism fails"),
+    "render"      : dashlet_failed_notifications,
+    "sort_index"  : 0,
+    "refresh"     : 60,
+    "selectable"  : False,
+    "styles"      : """
+.has_failed_notifications {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    font-weight: bold;
+    font-size: 14pt;
+
+    text-align: center;
+    background-color: #ff5500;
+}
+.failed_notifications_inner {
+    display:inline-block;
+    margin: auto;
+    position: absolute;
+    top:0; bottom:0; left:0; right:0;
+    height:32px;
+}
+    """
 }

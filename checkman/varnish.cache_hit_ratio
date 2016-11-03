@@ -1,0 +1,13 @@
+title: HTTP Accelerator Statistics via Varnishstat on Linux: Cache Hit Ratio
+agents: linux
+catalog: os/networking
+license: GPL
+distribution: check_mk
+description:
+ This check monitors the cache hit ratio of Varnish Server provided by 'varnishstat -1'.
+ The Linux Agent needs to be installed.
+
+ Default lower levels are set to 70, 60 percent. These levels are configurable.
+
+inventory:
+ One service is created.

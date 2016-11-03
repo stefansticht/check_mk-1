@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -59,6 +59,10 @@ def inventory_esx_vsphere_hostsystem_cpu(info):
 
 def check_esx_vsphere_hostsystem_cpu(item, params, info):
     data = esx_vsphere_hostsystem_convert(info)
+
+    if "summary.quickStats.overallCpuUsage" not in data:
+        return
+
     num_sockets = int(data['hardware.cpuInfo.numCpuPackages'][0])
     num_cores = int(data['hardware.cpuInfo.numCpuCores'][0])
     num_threads = int(data['hardware.cpuInfo.numCpuThreads'][0])
@@ -73,7 +77,7 @@ def check_esx_vsphere_hostsystem_cpu(item, params, info):
 
     # Convert legacy parameters
     this_time = time.time()
-    state, infotext, perfdata = check_cpu_util(usage, params)
+    state, infotext, perfdata = check_cpu_util(usage, params).next()
 
     infotext += ", %.2fGHz/%.2fGHz" % (used_mhz / 1024.0, total_mhz / 1024.0)
     infotext += ", %d sockets, %d cores/socket, %d threads" % (
@@ -122,9 +126,13 @@ def check_esx_vsphere_hostsystem_mem_cluster(item, params, info):
     level = total_memory_usage / total_memory_size * 100
     label = ""
     state = 0
+    warn_perf, crit_perf = None, None
     for count, levels in sorted_params:
         if nodes_count >= count:
             warn, crit = levels
+            warn_perf = warn * total_memory_size / 100
+            crit_perf = crit * total_memory_size / 100
+
             if level > crit:
                 state = 2
                 label = " (Levels at %d%%/%d%%)" % (warn, crit)
@@ -133,11 +141,11 @@ def check_esx_vsphere_hostsystem_mem_cluster(item, params, info):
                 label = " (Levels at %d%%/%d%%)" % (warn, crit)
             break
 
-
-    perf = [("usage", total_memory_usage, warn * total_memory_size / 100,
-                      crit * total_memory_size / 100, 0, total_memory_size)]
+    perf = [("usage", total_memory_usage, warn_perf, crit_perf, 0, total_memory_size),
+            ("mem_total", total_memory_size)]
     yield state, "%d%%%s used - %s/%s" % \
-    (level, label, get_bytes_human_readable(total_memory_usage), get_bytes_human_readable(total_memory_size)), perf
+            (level, label, get_bytes_human_readable(total_memory_usage),
+             get_bytes_human_readable(total_memory_size)), perf
 
 
 check_info['esx_vsphere_hostsystem.mem_usage_cluster'] = {
@@ -201,10 +209,10 @@ def check_esx_vsphere_hostsystem_cpu_util_cluster(item, params, info):
     sorted_params = sorted(params, reverse = True)
     for count, levels in sorted_params:
         if node_count >= count:
-            state, infotext, perfdata = check_cpu_util(usage, levels)
+            state, infotext, perfdata = check_cpu_util(usage, levels).next()
             break
     else:
-        state, infotext, perfdata = check_cpu_util(usage, None)
+        state, infotext, perfdata = check_cpu_util(usage, None).next()
 
     yield 0, "%d Nodes" % node_count
     yield 0, "%.2fGHz/%.2fGHz" % (sum_used / 1024.0, sum_total / 1024.0)
@@ -245,6 +253,10 @@ def inventory_esx_vsphere_hostsystem_mem(info):
 
 def check_esx_vsphere_hostsystem_mem(item, params, info):
     data = esx_vsphere_hostsystem_convert(info)
+
+    if "summary.quickStats.overallMemoryUsage" not in data:
+        return
+
     memory_usage = savefloat(data['summary.quickStats.overallMemoryUsage'][0]) * 1024 * 1024
     memory_size  = savefloat(data['hardware.memorySize'][0])
     level = memory_usage / memory_size * 100
@@ -261,7 +273,8 @@ def check_esx_vsphere_hostsystem_mem(item, params, info):
 
     message = "%d%%%s used - %s/%s" % \
     (level, label, get_bytes_human_readable(memory_usage), get_bytes_human_readable(memory_size))
-    perf = [("usage", memory_usage, warn * memory_size / 100, crit * memory_size / 100, 0, memory_size)]
+    perf = [("usage", memory_usage, warn * memory_size / 100, crit * memory_size / 100, 0, memory_size),
+            ("mem_total", memory_size)]
     return(state, message, perf)
 
 
@@ -292,6 +305,9 @@ def inventory_esx_vsphere_hostsystem_state(info):
 def check_esx_vsphere_hostsystem_state(_no_item, _no_params, info):
     data = esx_vsphere_hostsystem_convert(info)
     state = 0
+    if "overallStatus" not in data:
+        return
+
     overallStatus = str(data['overallStatus'][0])
     if overallStatus == "yellow":
         state = 1
@@ -333,6 +349,10 @@ def inventory_esx_vsphere_hostsystem_maintenance(info):
 def check_esx_vsphere_hostsystem_maintenance(_no_item, params, info):
     data = esx_vsphere_hostsystem_convert(info)
     target_state = params['target_state']
+
+    if "runtime.inMaintenanceMode" not in data:
+        return
+
     current_state = str(data['runtime.inMaintenanceMode'][0]).lower()
     state = 0
     if target_state != current_state:
@@ -359,13 +379,32 @@ check_info['esx_vsphere_hostsystem.maintenance'] = {
 #   |                                 |_|                                  |
 #   +----------------------------------------------------------------------+
 
+# 5.1
+# fc.20000024ff2e1b4c:21000024ff2e1b4c-fc.500a098088866d7e:500a098188866d7e-naa.60a9800044314f68553f436779684544 active
+# unknown.vmhba0-unknown.2:0-naa.6b8ca3a0facdc9001a2a27f8197dd718 active
+# 5.5
+# fc.20000024ff3708ec:21000024ff3708ec-fc.500a098088866d7e:500a098188866d7e-naa.60a9800044314f68553f436779684544 active
+# fc.500143802425a24d:500143802425a24c-fc.5001438024483280:5001438024483288-naa.5001438024483280 active
+# >= version 6.0
+# vmhba32:C0:T0:L0 active
 
 def esx_vsphere_multipath_convert(info):
     data = esx_vsphere_hostsystem_convert(info)
-    data = data['config.multipathState.path']
-    data = zip(data[::2], data[1::2])
     paths = {}
+    data = data.get('config.multipathState.path')
+    if not data:
+        return paths
+
+    data = zip(data[::2], data[1::2])
     for path, state in data:
+        # ESX 6.0 uses a different format, e.g "vmhba32:C0:T0:L0 active"
+        if len(path.split(":")) == 4:
+            real_path = ":".join(path.split(":")[:3])
+            paths.setdefault(real_path, [])
+            # Note: There is no path type information available in these esx paths
+            paths[real_path].append((state, None))
+            continue
+
         path_tokens = path.split('-')
         if "." not in path_tokens[-1]:
             continue # invalid format / unknown type
@@ -376,6 +415,7 @@ def esx_vsphere_multipath_convert(info):
             if hw_type != 'unknown':
                 paths.setdefault(path_id, [])
                 paths[path_id].append((state, "%s/%s" % (path_type, hw_type)))
+
     return paths
 
 def inventory_esx_vsphere_hostsystem_multipath(info):
@@ -421,7 +461,6 @@ def check_esx_vsphere_hostsystem_multipath(item, params, info):
                         else:
                             crit_min, warn_min, warn_max, crit_max = limits
 
-                        extra_info = ""
                         count = state_values[1]
                         if count < crit_min:
                             state = max(state, 2)
@@ -437,9 +476,14 @@ def check_esx_vsphere_hostsystem_multipath(item, params, info):
                             state_values[2] = "(!)(more than %d)" % warn_max
 
             # Output message
-            message = "Type %s" % path_type
+            message = ""
+            if path_type:
+                message += "Type %s, " % path_type
+
+            element_text = []
             for element in "active", "dead", "disabled", "standby", "unknown":
-                message += ", %d %s%s" % ( state_infos[element][1], element, state_infos[element][2] )
+                element_text.append("%d %s%s" % ( state_infos[element][1], element, state_infos[element][2]))
+            message += ", ".join(element_text)
             break
     else:
         return 3, "Path not found in agent output"

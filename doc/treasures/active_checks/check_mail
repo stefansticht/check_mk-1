@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# encoding: utf-8
+#!/usr/bin/env python
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -19,13 +19,14 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import sys, getopt, os, time, random, poplib, imaplib, email
 import traceback, socket, re
+import base64
 
 def parse_exception(e):
     e = str(e)
@@ -115,7 +116,7 @@ fetch_user       = None
 fetch_pass       = None
 fetch_ssl        = False
 conn_timeout     = 10
-cleanup_messages = False
+cleanup_messages = ""
 forward_ec       = False
 forward_facility = 16 # default to "mail" (2 << 3)
 forward_app      = None
@@ -207,14 +208,14 @@ def fetch_mails():
             num_messages = len(g_M.list()[1])
             for i in range(num_messages):
                 index = i+1
-                lines = g_M.retr(index, 0)[1]
-                mails[i] = email.message_from_string("".join(lines))
+                lines = g_M.retr(index)[1]
+                mails[i] = email.message_from_string("\n".join(lines))
         else:
             retcode, messages = g_M.search(None, 'NOT', 'DELETED')
             if retcode == 'OK' and messages[0].strip():
                 for num in messages[0].split(' '):
                     try:
-                        ty, data = g_M.fetch(num, '(RFC822)')
+                        data = g_M.fetch(num, '(RFC822)')[1]
                         mails[num] = email.message_from_string(data[0][1])
                     except Exception, e:
                         raise Exception('Failed to fetch mail %s (%s). Available messages: %r' % (num, parse_exception(e), messages))
@@ -296,14 +297,28 @@ def forward_to_ec(mails):
     cur_time = syslog_time()
     priority = 5 # OK
     for index, msg in mails.items():
-        subject = msg.get('Subject', 'None')
+        subject  = msg.get('Subject', 'None')
+        encoding = msg.get('Content-Transfer-Encoding', 'None')
         log_line = subject
         # Now add the body to the event
         if msg.is_multipart():
-            for payload in msg.get_payload():
-                log_line += '|' + payload.get_payload()[:body_limit]
+            # only care for the first text/plain element
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                disposition = str(part.get('Content-Disposition'))
+                encoding = part.get('Content-Transfer-Encoding', 'None')
+                if content_type == 'text/plain' and 'attachment' not in disposition:
+                    payload = part.get_payload()
+                    if encoding == "base64":
+                        payload = base64.b64decode(payload)
+                    log_line += '|' + payload[:body_limit]
+                    break
         else:
-            log_line += '|' + msg.get_payload()[:body_limit]
+            payload = msg.get_payload()
+            if encoding == "base64":
+                payload = base64.b64decode(payload)
+            log_line += '|' + payload[:body_limit]
+
         log_line = log_line.replace('\r\n', '\0')
         log_line = log_line.replace('\n', '\0')
 
@@ -346,7 +361,7 @@ def forward_to_ec(mails):
                     sock.send(message + "\n")
                 sock.close()
 
-            elif not forward_method.startswith('spool:'):
+            elif not forward_method.startswith('spool:'): # pylint: disable=no-member
                 # write into local event pipe
                 # Important: When the event daemon is stopped, then the pipe
                 # is *not* existing! This prevents us from hanging in such

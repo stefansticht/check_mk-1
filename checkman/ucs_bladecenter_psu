@@ -12,31 +12,6 @@ description:
 item:
  The chassis number combined with the module number, e.g. Chassis 1 Module 1
 
-perfdata:
- The averaged 3_3v and 12v values
-
 inventory:
  Creates on server per chassis module
-
-examples:
-  check_parameters += [
-    ({'3v3v': {'lower_levels': (2.5, 2.0), 'upper_levels': (4.0, 4.5)},
-      '12v':  {'lower_levels': (11.0, 10.0), 'upper_levels': (13.0, 14.0)}},
-       ALL_HOSTS, ALL_SERVICES),
-  ]
-
-[parameters]
-parameters(dict): This checks parameters are a dictionary with the
- following (optional) keys:
-
-  {"3v3v"}: levels
-
-  {"12v"}:  levels
-
-  whereas the levels are a dictionary of
-
-  {"lower_levels"}: A float tuple (warn, crit) containing the upper levels. No defaults.
-
-  {"upper_levels"}: A float tuple (warn, crit) containing the lower levels. No defaults.
-
 

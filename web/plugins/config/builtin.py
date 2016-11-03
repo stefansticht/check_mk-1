@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -71,6 +71,9 @@ sidebar_show_scrollbar = False
 
 # Enable regular checking for popup notifications
 sidebar_notify_interval = None
+
+# Maximum number of results to show in quicksearch dropdown
+quicksearch_dropdown_limit = 80
 
 #    _     _           _ _
 #   | |   (_)_ __ ___ (_) |_ ___
@@ -146,6 +149,9 @@ visible_views = None
 # Set this list in order to actively hide certain views
 hidden_views = None
 
+# Patterns to group services in table views together
+service_view_grouping = []
+
 # Custom user stylesheet to load (resides in htdocs/)
 custom_style_sheet = None
 
@@ -169,10 +175,6 @@ hide_languages = []
 
 # Default timestamp format to be used in multisite
 default_ts_format = 'mixed'
-
-# Default authentication type. Can be changed to e.g. "cookie" for
-# using the cookie auth
-auth_type = 'basic'
 
 # Show only most used buttons, set to None if you want
 # always all buttons to be shown
@@ -210,9 +212,14 @@ escape_plugin_output = True
 # Virtual host trees for the "Virtual Host Trees" snapin
 virtual_host_trees = []
 
+# Fall back to PNP4Nagios as graphing GUI even on CEE
+force_pnp_graphing = False
+
 # Target email address for "Crashed Check" page
 crash_report_target = "feedback@check-mk.org"
 
+# GUI Tests (see cmk-guitest)
+guitests_enabled = False
 
 #     _   _               ____  ____
 #    | | | |___  ___ _ __|  _ \| __ )
@@ -221,7 +228,10 @@ crash_report_target = "feedback@check-mk.org"
 #     \___/|___/\___|_|  |____/|____/
 #
 
-userdb_automatic_sync = [ 'wato_users', 'page', 'wato_pre_activate_changes', 'wato_snapshot_pushed' ]
+# This option can not be configured through WATO anymore. Config has been
+# moved to the sites configuration. This might have been configured in master/remote
+# in previous versions and is set on remote sites during WATO synchronization.
+userdb_automatic_sync = "master"
 
 # Holds dicts defining user connector instances and their properties
 user_connections = []
@@ -230,12 +240,40 @@ default_user_profile  = {
     'roles': ['user'],
 }
 lock_on_logon_failures = False
+user_idle_timeout      = None
+single_user_session    = None
 password_policy        = {}
 
-user_localizations = default_user_localizations
+user_localizations = {
+    u'Agent type':                          { "de": u"Art des Agenten", },
+    u'Business critical':                   { "de": u"Geschäftskritisch", },
+    u'Check_MK Agent (Server)':             { "de": u"Check_MK Agent (Server)", },
+    u'Criticality':                         { "de": u"Kritikalität", },
+    u'DMZ (low latency, secure access)':    { "de": u"DMZ (geringe Latenz, hohe Sicherheit", },
+    u'Do not monitor this host':            { "de": u"Diesen Host nicht überwachen", },
+    u'Dual: Check_MK Agent + SNMP':         { "de": u"Dual: Check_MK Agent + SNMP", },
+    u'Legacy SNMP device (using V1)':       { "de": u"Alte SNMP-Geräte (mit Version 1)", },
+    u'Local network (low latency)':         { "de": u"Lokales Netzwerk (geringe Latenz)", },
+    u'Networking Segment':                  { "de": u"Netzwerksegment", },
+    u'No Agent':                            { "de": u"Kein Agent", },
+    u'Productive system':                   { "de": u"Produktivsystem", },
+    u'Test system':                         { "de": u"Testsystem", },
+    u'WAN (high latency)':                  { "de": u"WAN (hohe Latenz)", },
+    u'monitor via Check_MK Agent':          { "de": u"Überwachung via Check_MK Agent", },
+    u'monitor via SNMP':                    { "de": u"Überwachung via SNMP", },
+    u'SNMP (Networking device, Appliance)': { "de": u"SNMP (Netzwerkgerät, Appliance)", },
+}
 
 # Contains user specified icons and actions for hosts and services
 user_icons_and_actions = {}
+
+user_downtime_timeranges = [
+            {'title': _("2 hours"),    'end': 2 * 60 * 60},
+            {'title': _("Today"),      'end': 'next_day'},
+            {'title': _("This week"),  'end': 'next_week'},
+            {'title': _("This month"), 'end': 'next_month'},
+            {'title': _("This year"),  'end': 'next_year'},
+        ]
 
 # Override toplevel and sort_index settings of builtin icons
 builtin_icon_visibility = {}

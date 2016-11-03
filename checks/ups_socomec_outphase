@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -42,10 +42,17 @@ def parse_ups_socomec_outphase(info):
     return parsed
 
 
+def check_ups_socomec_outphase(item, params, info):
+    if not item.startswith("Phase"):
+        # fix item names discovered before 1.2.7
+        item = "Phase %s" % item
+    return check_elphase(item, params, info)
+
+
 check_info['ups_socomec_outphase'] = {
     "parse_function"           : parse_ups_socomec_outphase,
     "inventory_function"       : inventory_elphase,
-    "check_function"           : check_elphase,
+    "check_function"           : check_ups_socomec_outphase,
     "default_levels_variable"  : "socomec_outphase_default_levels",
     "service_description"      : "Output %s",
     "has_perfdata"             : True,

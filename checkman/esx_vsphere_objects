@@ -19,15 +19,3 @@ item:
  The text {HostSystem} or {VM} followed by a space followed by the name of the host system
  or VM.
 
-examples:
- # Allow VMs beginning with "testvm" to be powered off.
- check_parameters = [
-   ( { "states" : { "poweredOff" : 0 } }, [ "esx-host01" ], [ "VM testvm" ]),
- ]
-
-
-[parameters]
-params(dict): A dictionary will currently one optional key: {states}. This is again a dictionary
- with the optional entries {"poweredOn"}, {"poweredOff"} and {"suspended"}. The value for each
- entry is {0}, {1}, {2} or {3} and sets the check result in that case to OK, WARN, CRIT or UNKNOWN.
-

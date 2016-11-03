@@ -18,9 +18,3 @@ inventory:
 item:
  The mount point of the filesystem on the netscaler device.
 
-perfdata:
- See the man page of the {df} check
-
-[parameters]
-parameters (dict): See the man page of the {df} check
-

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,18 +25,22 @@
 #ifndef HostFileColumn_h
 #define HostFileColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
+#include <vector>
 #include "BlobColumn.h"
 
-class HostFileColumn : public BlobColumn
-{
-    string _base_dir;
-    string _suffix;
-public:
-    HostFileColumn(string name, string description, const char *base_dir,
-                   const char *suffice, int indirect_offset);
+class HostFileColumn : public BlobColumn {
+    std::string _base_dir;
+    std::string _suffix;
 
-    // returns a buffer to be freed afterwards!!
-    char *getBlob(void *data, int *size);
+public:
+    HostFileColumn(std::string name, std::string description,
+                   std::string base_dir, std::string suffix,
+                   int indirect_offset, int extra_offset = -1);
+
+    std::unique_ptr<std::vector<char>> getBlob(void *data) override;
 };
 
-#endif // HostFileColumn_h
+#endif  // HostFileColumn_h

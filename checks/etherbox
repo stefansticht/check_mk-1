@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -46,15 +46,13 @@ def etherbox_convert(info):
     return sensor_data
 
 def inventory_etherbox(info, req_sensor_type):
-    inventory = []
     sensor_data = etherbox_convert(info)
     for index, name, sensor_type, value in sensor_data:
         # Ignore not connected Temperature Sensors
         if sensor_type == '1' and value == '0':
             continue
         if sensor_type == req_sensor_type:
-            inventory.append( ("%s.%s" % (index, sensor_type), None) )
-    return inventory
+            yield "%s.%s" % (index, sensor_type), None
 
 def etherbox_get_sensor(item, item_type, info):
     sensor_data = etherbox_convert(info)
@@ -89,13 +87,13 @@ def check_etherbox_temp(item, params, info):
 
     uom = { "0": "c", "1": "f", "2": "k" }[info[0][0][0]]
     temp = int(value) / 10.0
-    return check_temperature(temp, params, uom)
+    return check_temperature(temp, params, "etherbox_temp_%s" % item, uom)
 
 
 check_info["etherbox.temp"] = {
     "check_function"        : check_etherbox_temp,
-    "inventory_function"    : lambda x: inventory_etherbox(x, "1"),
-    "service_description"   : "Sensor %s",
+    "inventory_function"    : lambda info: inventory_etherbox(info, "1"),
+    "service_description"   : "Temperature %s",
     "has_perfdata"          : True,
     "group"                 : "temperature",
     "snmp_scan_function"    : etherbox_scan,
@@ -114,7 +112,7 @@ def check_etherbox_humidity(item, params, info):
     levels_info = ""
     if params:
         crit_low, warn_low, warn_high, crit_high = params
-        levels_info = " (low levels at %.1f/%.1f %%RH / high levels at %.1f/%.1f %%RH )" %\
+        levels_info = " (warn/crit below %.1f/%.1f %%RH / warn/crit at %.1f/%.1f %%RH )" %\
                         (crit_low, warn_low, warn_high, crit_high)
         if temp <= crit_low:
             state = 2

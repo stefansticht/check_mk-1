@@ -17,16 +17,20 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "AttributelistFilter.h"
+#include <ostream>
 #include "AttributelistColumn.h"
-#include "opids.h"
-#include "logger.h"
+#include "Logger.h"
 
+AttributelistFilter::AttributelistFilter(AttributelistColumn *column,
+                                         RelationalOperator relOp,
+                                         unsigned long ref)
+    : _column(column), _relOp(relOp), _ref(ref) {}
 
 /* The following operators are defined:
 
@@ -48,25 +52,39 @@
    Also number comparisons
  */
 
+AttributelistColumn *AttributelistFilter::column() const { return _column; }
 
-bool AttributelistFilter::accepts(void *data)
-{
-    unsigned long act_value = _column->getValue(data);
-    bool pass = true;
-    switch (_opid) {
-        case OP_EQUAL:
-            pass = act_value == _ref; break;
-        case OP_GREATER:
-            pass = act_value > _ref; break;
-        case OP_LESS:
-            pass = act_value < _ref; break;
-        case OP_REGEX:
-            pass = (act_value & _ref) == _ref; break;
-        case OP_REGEX_ICASE:
-            pass = (act_value & _ref) != 0; break;
-        default:
-            logger(LG_INFO, "Sorry. Operator %s not implemented for attribute lists", op_names_plus_8[_opid]);
+bool AttributelistFilter::accepts(void *row, contact * /* auth_user */,
+                                  int /* timezone_offset */) {
+    unsigned long act_value =
+        static_cast<unsigned long>(_column->getValue(row, nullptr));
+    switch (_relOp) {
+        case RelationalOperator::equal:
+            return act_value == _ref;
+        case RelationalOperator::not_equal:
+            return act_value != _ref;
+        case RelationalOperator::matches:
+            return (act_value & _ref) == _ref;
+        case RelationalOperator::doesnt_match:
+            return (act_value & _ref) != _ref;
+        case RelationalOperator::matches_icase:
+            return (act_value & _ref) != 0;
+        case RelationalOperator::doesnt_match_icase:
+            return (act_value & _ref) == 0;
+        case RelationalOperator::less:
+            return act_value < _ref;
+        case RelationalOperator::greater_or_equal:
+            return act_value >= _ref;
+        case RelationalOperator::greater:
+            return act_value > _ref;
+        case RelationalOperator::less_or_equal:
+            return act_value <= _ref;
+        case RelationalOperator::equal_icase:
+        case RelationalOperator::not_equal_icase:
+            Informational(logger())
+                << "Sorry. Operator " << _relOp
+                << " for attribute list columns not implemented.";
+            return false;
     }
-    return pass != _negate;
+    return false;  // unreachable
 }
-

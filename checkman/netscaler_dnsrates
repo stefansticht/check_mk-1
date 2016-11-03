@@ -17,21 +17,6 @@ description:
 inventory:
  One service per loadbalancer device will be created.
 
-perfdata:
- The counter rates of the monitored counters.
-
 item:
  The name of counter.
 
-[parameters]
-parameters(dict): parameters is a dictionary with a key for each monitored counter.
-
- {"query_rate"}: a tuple of warning and critical levels.
-
- {"answer_rate"}: a tuple of warning and critical levels.
-
- The numbers are integers and represent the counter increase per second.
-
-[configuration]
-netscaler_dnsrates_default_levels(dict): This variable is preset to
-{{ "query_rate": (1500.0, 2000.0), "answer_rate": (1500.0, 2000.0) }}

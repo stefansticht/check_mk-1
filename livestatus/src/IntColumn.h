@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,23 +25,38 @@
 #ifndef IntColumn_h
 #define IntColumn_h
 
-#include "config.h"
-
-#include <stdint.h>
-
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <string>
 #include "Column.h"
+#include "opids.h"
+class Filter;
+class RowRenderer;
 
-class IntColumn : public Column
-{
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class IntColumn : public Column {
 public:
-    IntColumn(string name, string description, int indirect_offset)
-        : Column(name, description, indirect_offset) {}
-    virtual int32_t getValue(void *data, Query *) = 0;
-    void output(void *, Query *);
-    int type() { return COLTYPE_INT; }
-    string valueAsString(void *data, Query *);
-    Filter *createFilter(int operator_id, char *value);
+    IntColumn(const std::string &name, const std::string &description,
+              int indirect_offset, int extra_offset,
+              int extra_extra_offset = -1)
+        : Column(name, description, indirect_offset, extra_offset,
+                 extra_extra_offset) {}
+
+    // TODO(sp) Get rid of the contact* parameter, it doesn't really belong here
+    // and is only used in ServicelistStateColumn and HostlistStateColumn for
+    // questionable purposes...
+    virtual int32_t getValue(void *row, contact *auth_user) = 0;
+
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    ColumnType type() override { return ColumnType::int_; }
+    std::string valueAsString(void *row, contact *auth_user) override;
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
 };
 
-#endif // IntColumn_h
-
+#endif  // IntColumn_h

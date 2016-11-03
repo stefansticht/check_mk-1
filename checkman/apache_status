@@ -20,37 +20,9 @@ description:
  With the optional item 'page' its posible to change the status page from server-status to a
  name you want
 
-examples:
- servers = [
- {
-  'protocol' : 'http',
-  'address'  : 'localhost',
-  'port'     : 80 ,
- },
- {
-  'protocol' : 'https',
-  'address'  : 'localhost',
-  'port'     : 443 ,
-  'page'     : 'server-status-2',
- },
- ]
-
 inventory:
  One service per Apache server will be created.
 
 item:
  A string-combination of servername and port, e.g. {127.0.0.1:5000}.
-
-perfdata:
- This check outputs lots of performance variables since this is the
- purpose of the check. Please look at the shipped PNP template for
- details.
-
-[parameters]
-parameters(dict): a dictionary with the optional key
-
- {"OpenSlots"} : (int, int) -  warn/crit levels for the number of remaining open slots
-
-
-
 

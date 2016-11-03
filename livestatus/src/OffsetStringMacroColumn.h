@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,28 +25,36 @@
 #ifndef OffsetStringMacroColumn_h
 #define OffsetStringMacroColumn_h
 
-#include "nagios.h"
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "OffsetStringColumn.h"
+#include "nagios.h"
+#include "opids.h"
+class Filter;
+class RowRenderer;
 
-class OffsetStringMacroColumn : public OffsetStringColumn
-{
-    int _offset;
+class OffsetStringMacroColumn : public OffsetStringColumn {
 public:
-    OffsetStringMacroColumn(string name, string description, int offset, int indirect_offset = -1) :
-        OffsetStringColumn(name, description, offset, indirect_offset) {}
+    OffsetStringMacroColumn(const std::string &name,
+                            const std::string &description, int offset,
+                            int indirect_offset, int extra_offset)
+        : OffsetStringColumn(name, description, offset, indirect_offset,
+                             extra_offset) {}
     // reimplement several functions from StringColumn
 
-    string valueAsString(void *data, Query *);
-    void output(void *data, Query *);
-    Filter *createFilter(int opid, char *value);
+    std::string valueAsString(void *row, contact *auth_user) override;
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
 
     // overriden by host and service macro columns
     virtual host *getHost(void *) = 0;
     virtual service *getService(void *) = 0;
+
 private:
     const char *expandMacro(const char *macroname, host *hst, service *svc);
-    const char *expandCustomVariables(const char *varname, customvariablesmember *custvars);
+    const char *expandCustomVariables(const char *varname,
+                                      customvariablesmember *custvars);
 };
 
-#endif // OffsetStringMacroColumn_h
-
+#endif  // OffsetStringMacroColumn_h

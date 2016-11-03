@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,28 +25,34 @@
 #ifndef CustomVarsFilter_h
 #define CustomVarsFilter_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <regex>
+#include <string>
+#include "ColumnFilter.h"
 #include "CustomVarsColumn.h"
-#include "Filter.h"
-#include <regex.h>
+#include "opids.h"
 
-class CustomVarsFilter : public Filter
-{
-    CustomVarsColumn *_column;
-    int _opid;
-    bool _negate;
-    string _ref_text;
-    regex_t *_regex;
-    // needed in case of COLTYPE_DICT
-    string _ref_string;
-    string _ref_varname;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
 
+class CustomVarsFilter : public ColumnFilter {
 public:
-    CustomVarsFilter(CustomVarsColumn *column, int opid, char *value);
-    ~CustomVarsFilter();
-    bool accepts(void *data);
+    CustomVarsFilter(CustomVarsColumn *column, RelationalOperator relOp,
+                     std::string value);
+    bool accepts(void *row, contact *auth_user, int timezone_offset) override;
+    CustomVarsColumn *column() const override;
+
+private:
+    CustomVarsColumn *_column;
+    RelationalOperator _relOp;
+    std::string _ref_text;
+    std::regex _regex;
+    // needed in case of COLTYPE_DICT
+    std::string _ref_string;
+    std::string _ref_varname;
 };
 
-#endif // CustomVarsFilter_h
-
+#endif  // CustomVarsFilter_h

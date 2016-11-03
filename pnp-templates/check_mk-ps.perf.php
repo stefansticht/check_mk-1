@@ -18,7 +18,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -57,7 +57,7 @@ $def[1] = ""
 
 # 2. Graph: Memory usage
 if (isset($RRD["vsz"])) {
- $opt[2] = " --vertical-label \"MB\" -l 0 --title \"Memory Usage per process\" ";
+ $opt[2] = " --vertical-label \"MB\" -l 0 --title \"Memory Usage for all Processes\" ";
  $def[2] = ""
    . "DEF:count=$RRD[count] "
    . "DEF:vsz=$RRD[vsz] "
@@ -76,7 +76,7 @@ if (isset($RRD["vsz"])) {
 }
 
 if (isset($RRD["pcpu"])) {
-    $opt[3] = " --vertical-label \"CPU(%)\" -l 0 -u 100 --title \"CPU Usage\" ";
+    $opt[3] = " --vertical-label \"CPU(%)\" -l 0 -u 100 --title \"CPU Usage for all Processes\" ";
     $def[3] = ""
      . "DEF:pcpu=$RRD[pcpu] "
      . "AREA:pcpu#30ff80:\"CPU usage (%) \" "

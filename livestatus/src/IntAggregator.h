@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,34 @@
 #ifndef IntAggregator_h
 #define IntAggregator_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
 #include "Aggregator.h"
 class IntColumn;
+class RowRenderer;
 
-class IntAggregator : public Aggregator
-{
-    IntColumn *_column;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class IntAggregator : public Aggregator {
+public:
+    IntAggregator(StatsOperation operation, IntColumn *column)
+        : Aggregator(operation)
+        , _column(column)
+        , _count(0)
+        , _aggr(0)
+        , _sumq(0) {}
+    void consume(void *row, contact *auth_user, int timezone_offset) override;
+    void output(RowRenderer &r) override;
+
+private:
+    IntColumn *const _column;
+    std::uint32_t _count;
     int64_t _aggr;
     double _sumq;
-public:
-    IntAggregator(IntColumn *c, int o) :
-        Aggregator(o), _column(c), _aggr(0), _sumq(0) {}
-    void consume(void *data, Query *);
-    void output(Query *);
 };
 
-#endif // IntAggregator_h
-
+#endif  // IntAggregator_h

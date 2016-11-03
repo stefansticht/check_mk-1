@@ -17,173 +17,235 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "Store.h"
-#include "Query.h"
-#include "logger.h"
-#include "strutil.h"
+#include <chrono>
+#include <cstring>
+#include <ctime>
+#include <ostream>
+#include <utility>
+#include "InputBuffer.h"
+#include "Logger.h"
+#include "MonitoringCore.h"
 #include "OutputBuffer.h"
+#include "Query.h"
+#include "Table.h"
+#include "data_encoding.h"
+#include "mk_logwatch.h"
+#include "strutil.h"
 
-#ifdef EXTERN
-#undef EXTERN
-#endif
-#define EXTERN
-#include "tables.h"
-#undef EXTERN
-
-extern int g_debug_level;
+extern Encoding g_data_encoding;
 extern unsigned long g_max_cached_messages;
 
-Store::Store()
-  : _log_cache(g_max_cached_messages)
-  , _table_hosts(false)
-  , _table_hostsbygroup(true)
-  , _table_services(false, false)
-  , _table_servicesbygroup(true, false)
-  , _table_servicesbyhostgroup(false, true)
-  , _table_downtimes(true)
-  , _table_comments(false)
-{
-    _tables.insert(make_pair("columns", &_table_columns));
-    _tables.insert(make_pair("commands", &_table_commands));
-    _tables.insert(make_pair("comments", &_table_comments));
-    _tables.insert(make_pair("contactgroups", &_table_contactgroups));
-    _tables.insert(make_pair("contacts", &_table_contacts));
-    _tables.insert(make_pair("downtimes", &_table_downtimes));
-    _tables.insert(make_pair("hostgroups", &_table_hostgroups));
-    _tables.insert(make_pair("hostsbygroup", &_table_hostsbygroup));
-    _tables.insert(make_pair("hosts", &_table_hosts));
-    _tables.insert(make_pair("log", &_table_log));
-    _tables.insert(make_pair("servicegroups", &_table_servicegroups));
-    _tables.insert(make_pair("servicesbygroup", &_table_servicesbygroup));
-    _tables.insert(make_pair("servicesbyhostgroup", &_table_servicesbyhostgroup));
-    _tables.insert(make_pair("services", &_table_services));
-    _tables.insert(make_pair("statehist", &_table_statehistory));
-    _tables.insert(make_pair("status", &_table_status));
-    _tables.insert(make_pair("timeperiods", &_table_timeperiods));
+using std::chrono::duration_cast;
+using std::chrono::milliseconds;
+using std::chrono::system_clock;
+using std::list;
+using std::lock_guard;
+using std::mutex;
+using std::string;
 
-    g_table_hosts = &_table_hosts;
-    g_table_services = &_table_services;
-    g_table_servicesbygroup = &_table_servicesbygroup;
-    g_table_servicesbyhostgroup = &_table_servicesbyhostgroup;
-    g_table_hostgroups = &_table_hostgroups;
-    g_table_servicegroups = &_table_servicegroups;
-    g_table_contacts = &_table_contacts;
-    g_table_commands = &_table_commands;
-    g_table_downtimes = &_table_downtimes;
-    g_table_comments = &_table_comments;
-    g_table_status = &_table_status;
-    g_table_timeperiods = &_table_timeperiods;
-    g_table_contactgroups = &_table_contactgroups;
-    g_table_log = &_table_log;
-    g_table_statehistory = &_table_statehistory;
-    g_table_columns = &_table_columns;
+Store::Store(MonitoringCore *mc)
+    : _logger(mc->loggerLivestatus())
+    , _log_cache(_logger, _commands_holder, g_max_cached_messages)
+    , _table_contacts(_logger)
+    , _table_commands(_commands_holder, _logger)
+    , _table_hostgroups(_logger)
+    , _table_hosts(_downtimes, _comments, _logger)
+    , _table_hostsbygroup(_downtimes, _comments, _logger)
+    , _table_servicegroups(_logger)
+    , _table_services(_downtimes, _comments, _logger)
+    , _table_servicesbygroup(_downtimes, _comments, _logger)
+    , _table_servicesbyhostgroup(_downtimes, _comments, _logger)
+    , _table_timeperiods(_logger)
+    , _table_contactgroups(_logger)
+    , _table_downtimes(_downtimes, _comments, _logger)
+    , _table_comments(_downtimes, _comments, _logger)
+    , _table_status(_logger)
+    , _table_log(&_log_cache, _downtimes, _comments, _logger)
+    , _table_statehistory(&_log_cache, _downtimes, _comments, _logger)
+    , _table_columns(_logger)
+    , _table_eventconsoleevents(mc, _downtimes, _comments)
+    , _table_eventconsolehistory(mc, _downtimes, _comments)
+    , _table_eventconsolestatus(mc)
+    , _table_eventconsolereplication(mc) {
+    addTable(&_table_columns);
+    addTable(&_table_commands);
+    addTable(&_table_comments);
+    addTable(&_table_contactgroups);
+    addTable(&_table_contacts);
+    addTable(&_table_downtimes);
+    addTable(&_table_hostgroups);
+    addTable(&_table_hostsbygroup);
+    addTable(&_table_hosts);
+    addTable(&_table_log);
+    addTable(&_table_servicegroups);
+    addTable(&_table_servicesbygroup);
+    addTable(&_table_servicesbyhostgroup);
+    addTable(&_table_services);
+    addTable(&_table_statehistory);
+    addTable(&_table_status);
+    addTable(&_table_timeperiods);
+    addTable(&_table_eventconsoleevents);
+    addTable(&_table_eventconsolehistory);
+    addTable(&_table_eventconsolestatus);
+    addTable(&_table_eventconsolereplication);
+}
 
-    for (_tables_t::iterator it = _tables.begin();
-            it != _tables.end();
-            ++it)
-    {
-        _table_columns.addTable(it->second);
+void Store::addTable(Table *table) {
+    _tables.emplace(table->name(), table);
+    _table_columns.addTable(table);
+}
+
+Table *Store::findTable(const string &name) {
+    auto it = _tables.find(name);
+    if (it == _tables.end()) {
+        return nullptr;
+    }
+    return it->second;
+}
+
+void Store::registerDowntime(nebstruct_downtime_data *data) {
+    _downtimes.registerDowntime(data);
+}
+
+void Store::registerComment(nebstruct_comment_data *data) {
+    _comments.registerComment(data);
+}
+
+namespace {
+list<string> getLines(InputBuffer *input) {
+    list<string> lines;
+    while (!input->empty()) {
+        lines.push_back(input->nextLine());
+        if (lines.back().empty()) {
+            break;
+        }
+    }
+    return lines;
+}
+}  // namespace
+
+void Store::logRequest(const string &line, const list<string> &lines) {
+    Informational log(_logger);
+    log << "request: " << line;
+    if (_logger->isLoggable(LogLevel::debug)) {
+        for (const auto &l : lines) {
+            log << R"(\n)" << l;
+        }
+    } else {
+        size_t s = lines.size();
+        if (s > 0) {
+            log << R"(\n{)" << s << (s == 1 ? " line follows" : " lines follow")
+                << "...}";
+        }
     }
 }
 
-Table *Store::findTable(string name)
-{
-    _tables_t::iterator it = _tables.find(name);
-    if (it == _tables.end())
-        return 0;
-    else
-        return it->second;
-}
-
-
-void Store::registerComment(nebstruct_comment_data *d)
-{
-    _table_comments.addComment(d);
-}
-
-void Store::registerDowntime(nebstruct_downtime_data *d)
-{
-    _table_downtimes.addDowntime(d);
-}
-
-bool Store::answerRequest(InputBuffer *input, OutputBuffer *output)
-{
+bool Store::answerRequest(InputBuffer *input, OutputBuffer *output) {
     output->reset();
-    int r = input->readRequest();
-    if (r != IB_REQUEST_READ) {
-        if (r != IB_END_OF_FILE)
-            output->setError(RESPONSE_CODE_INCOMPLETE_REQUEST,
+    InputBuffer::Result res = input->readRequest();
+    if (res != InputBuffer::Result::request_read) {
+        if (res != InputBuffer::Result::eof) {
+            output->setError(
+                OutputBuffer::ResponseCode::incomplete_request,
                 "Client connection terminated while request still incomplete");
+        }
         return false;
     }
     string l = input->nextLine();
     const char *line = l.c_str();
-    if (g_debug_level > 0)
-        logger(LG_INFO, "Query: %s", line);
-    if (!strncmp(line, "GET ", 4))
-        answerGetRequest(input, output, lstrip((char *)line + 4));
-    else if (!strcmp(line, "GET"))
-        answerGetRequest(input, output, ""); // only to get error message
-    else if (!strncmp(line, "COMMAND ", 8)) {
-        answerCommandRequest(lstrip((char *)line + 8));
+    if (strncmp(line, "GET ", 4) == 0) {
+        auto lines = getLines(input);
+        logRequest(l, lines);
+        answerGetRequest(lines, output, lstrip(const_cast<char *>(line) + 4));
+    } else if (strcmp(line, "GET") == 0) {
+        // only to get error message
+        auto lines = getLines(input);
+        logRequest(l, lines);
+        answerGetRequest(lines, output, "");
+    } else if (strncmp(line, "COMMAND ", 8) == 0) {
+        logRequest(l, {});
+        answerCommandRequest(lstrip(const_cast<char *>(line) + 8));
         output->setDoKeepalive(true);
-    }
-    else if (!strncmp(line, "LOGROTATE", 9)) {
-    	logger(LG_INFO, "Forcing logfile rotation");
-        rotate_log_file(time(0));
-        schedule_new_event(EVENT_LOG_ROTATION,TRUE,get_next_log_rotation_time(),FALSE,0,(void *)get_next_log_rotation_time,TRUE,NULL,NULL,0);
-    }
-    else {
-        logger(LG_INFO, "Invalid request '%s'", line);
-        output->setError(RESPONSE_CODE_INVALID_REQUEST, "Invalid request method");
+    } else if (strncmp(line, "LOGROTATE", 9) == 0) {
+        logRequest(l, {});
+        Informational(_logger) << "Forcing logfile rotation";
+        rotate_log_file(time(nullptr));
+        schedule_new_event(EVENT_LOG_ROTATION, 1, get_next_log_rotation_time(),
+                           0, 0,
+                           reinterpret_cast<void *>(get_next_log_rotation_time),
+                           1, nullptr, nullptr, 0);
+    } else {
+        logRequest(l, {});
+        Warning(_logger) << "Invalid request '" << l << "'";
+        output->setError(OutputBuffer::ResponseCode::invalid_request,
+                         "Invalid request method");
     }
     return output->doKeepalive();
 }
 
-void Store::answerCommandRequest(const char *command)
-{
+void Store::answerCommandRequest(const char *command) {
+    if (answerLogwatchCommandRequest(command)) {
+        return;
+    }
+
+    lock_guard<mutex> lg(_command_mutex);
 #ifdef NAGIOS4
     process_external_command1((char *)command);
 #else
     int buffer_items = -1;
     /* int ret = */
-    submit_external_command((char *)command, &buffer_items);
+    submit_external_command(const_cast<char *>(command), &buffer_items);
 #endif
 }
 
-
-void Store::answerGetRequest(InputBuffer *input, OutputBuffer *output, const char *tablename)
-{
-    output->reset();
-    if (!tablename[0]) {
-        output->setError(RESPONSE_CODE_INVALID_REQUEST, "Invalid GET request, missing tablename");
-    }
-    Table *table = findTable(tablename);
-    if (!table) {
-        output->setError(RESPONSE_CODE_NOT_FOUND, "Invalid GET request, no such table '%s'", tablename);
-    }
-    Query query(input, output, table);
-
-    if (table && !output->hasError()) {
-        if (query.hasNoColumns()) {
-            table->addAllColumnsToQuery(&query);
-            query.setShowColumnHeaders(true);
+bool Store::answerLogwatchCommandRequest(const char *command) {
+    // Handle special command "[1462191638]
+    // MK_LOGWATCH_ACKNOWLEDGE;host123;\var\log\syslog"
+    if (strlen(command) >= 37 && command[0] == '[' && command[11] == ']' &&
+        (strncmp(command + 13, "MK_LOGWATCH_ACKNOWLEDGE;", 24) == 0)) {
+        const char *host_name_begin = command + 37;
+        const char *host_name_end = strchr(host_name_begin, ';');
+        if (host_name_end == nullptr) {
+            return false;
         }
-        struct timeval before, after;
-        gettimeofday(&before, 0);
-        query.start();
-        table->answerQuery(&query);
-        query.finish();
-        gettimeofday(&after, 0);
-        unsigned long ustime = (after.tv_sec - before.tv_sec) * 1000000 + (after.tv_usec - before.tv_usec);
-        if (g_debug_level > 0)
-            logger(LG_INFO, "Time to process request: %lu us. Size of answer: %d bytes", ustime, output->size());
+        std::string host_name(host_name_begin, host_name_end - host_name_begin);
+        std::string file_name(host_name_end + 1);
+        extern char g_mk_logwatch_path[];
+        mk_logwatch_acknowledge(_logger, g_mk_logwatch_path, host_name,
+                                file_name);
+        return true;
     }
+    return false;
 }
 
+void Store::answerGetRequest(const list<string> &lines, OutputBuffer *output,
+                             const char *tablename) {
+    output->reset();
 
+    if (tablename[0] == 0) {
+        output->setError(OutputBuffer::ResponseCode::invalid_request,
+                         "Invalid GET request, missing tablename");
+        return;
+    }
+
+    Table *table = findTable(tablename);
+    if (table == nullptr) {
+        output->setError(
+            OutputBuffer::ResponseCode::not_found,
+            "Invalid GET request, no such table '" + string(tablename) + "'");
+        return;
+    }
+
+    auto start = system_clock::now();
+    Query(lines, table, g_data_encoding).process(output);
+    auto elapsed = duration_cast<milliseconds>(system_clock::now() - start);
+    Informational(_logger) << "processed request in " << elapsed.count()
+                           << " ms, replied with " << output->size()
+                           << " bytes";
+}

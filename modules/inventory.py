@@ -19,15 +19,20 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import gzip
 
-inventory_output_dir = var_dir + "/inventory"
-inventory_archive_dir = var_dir + "/inventory_archive"
+import cmk.tty as tty
+import cmk.paths
+
+import cmk_base.console as console
+
+inventory_output_dir = cmk.paths.var_dir + "/inventory"
+inventory_archive_dir = cmk.paths.var_dir + "/inventory_archive"
 inventory_pprint_output = True
 
 #   .--Plugins-------------------------------------------------------------.
@@ -47,14 +52,8 @@ inv_info = {}   # Inventory plugins
 inv_export = {} # Inventory export hooks
 
 # Read all inventory plugins right now
-filelist = glob.glob(inventory_dir + "/*")
-filelist.sort()
-
-# read local checks *after* shipped ones!
-if local_inventory_dir:
-    local_files = glob.glob(local_inventory_dir + "/*")
-    local_files.sort()
-    filelist += local_files
+filelist = plugin_pathnames_in_directory(cmk.paths.inventory_dir) \
+         + plugin_pathnames_in_directory(cmk.paths.local_inventory_dir)
 
 
 # read include files always first, but still in the sorted
@@ -67,10 +66,17 @@ for f in filelist:
         try:
             execfile(f)
         except Exception, e:
-            sys.stderr.write("Error in inventory plugin file %s: %s\n" % (f, e))
-            if opt_debug:
+            console.output("Error in inventory plugin file %s: %s\n", f, e, stream=sys.stderr)
+            if cmk.debug.enabled():
                 raise
             sys.exit(5)
+
+
+# This is just a small wrapper for the inv_tree() function which makes
+# it clear that the requested tree node is treated as a list.
+def inv_tree_list(path):
+    # The [] is needed to tell pylint that a list is returned
+    return inv_tree(path, [])
 
 
 # Function for accessing the inventory tree of the current host
@@ -78,14 +84,21 @@ for f in filelist:
 # The path must end with : or .
 # -> software is a dict
 # -> packages is a list
-def inv_tree(path):
+def inv_tree(path, default_value=None):
     global g_inv_tree
 
-    node = g_inv_tree
+    if default_value != None:
+        node = default_value
+    else:
+        node = {}
+
     current_what = "."
     current_path = ""
 
     while path:
+        if current_path == "":
+            node = g_inv_tree
+
         parts = re.split("[:.]", path)
         name = parts[0]
         what = path[len(name)]
@@ -154,29 +167,26 @@ def inv_cleanup_tree(tree):
 
 
 def do_inv(hostnames):
-
-    if not os.path.exists(inventory_output_dir):
-        os.makedirs(inventory_output_dir)
-    if not os.path.exists(inventory_archive_dir):
-        os.makedirs(inventory_archive_dir)
+    ensure_directory(inventory_output_dir)
+    ensure_directory(inventory_archive_dir)
 
     # No hosts specified: do all hosts and force caching
     if hostnames == None:
         hostnames = all_active_realhosts()
-        global opt_use_cachefile
-        opt_use_cachefile = True
+        set_use_cachefile()
 
     errors = []
     for hostname in hostnames:
         try:
-            verbose("Doing HW/SW-Inventory for %s..." % hostname)
+            console.verbose("Doing HW/SW-Inventory for %s..." % hostname)
             do_inv_for(hostname)
-            verbose("..OK\n")
+            console.verbose("..OK\n")
         except Exception, e:
-            if opt_debug:
+            if cmk.debug.enabled():
                 raise
-            verbose("Failed: %s\n" % e)
+            console.verbose("Failed: %s\n" % e)
             errors.append("Failed to inventorize %s: %s" % (hostname, e))
+        cleanup_globals()
 
     if errors:
         raise MKGeneralException("\n".join(errors))
@@ -187,11 +197,15 @@ def do_inv_check(hostname):
         inv_tree, old_timestamp = do_inv_for(hostname)
         num_entries = count_nodes(g_inv_tree)
         if not num_entries:
-            sys.stdout.write("WARN - Found no data\n")
-            sys.exit(1)
+            console.output("OK - Found no data\n")
+            sys.exit(0)
 
         infotext = "found %d entries" % num_entries
         state = 0
+        if not inv_tree.get("software") and opt_inv_sw_missing:
+            infotext += ", software information is missing"
+            state = opt_inv_sw_missing
+            infotext += state_markers[opt_inv_sw_missing]
 
         if old_timestamp:
             path = inventory_archive_dir + "/" + hostname + "/%d" % old_timestamp
@@ -212,14 +226,14 @@ def do_inv_check(hostname):
                 if opt_inv_hw_changes:
                     infotext += state_markers[opt_inv_hw_changes]
 
-        sys.stdout.write(core_state_names[state] + " - " + infotext + "\n")
+        console.output(core_state_names[state] + " - " + infotext + "\n")
         sys.exit(state)
 
     except Exception, e:
-        if opt_debug:
+        if cmk.debug.enabled():
             raise
-        sys.stdout.write("WARN - Inventory failed: %s\n" % e)
-        sys.exit(1)
+        console.output("Inventory failed: %s\n" % e)
+        sys.exit(opt_inv_fail_status)
 
 
 def count_nodes(tree):
@@ -234,7 +248,7 @@ def count_nodes(tree):
 
 def do_inv_for(hostname):
     try:
-        ipaddress = lookup_ipaddress(hostname)
+        ipaddress = lookup_ip_address(hostname)
     except:
         raise MKGeneralException("Cannot resolve hostname '%s'." % hostname)
 
@@ -250,23 +264,24 @@ def do_inv_for(hostname):
 
     for info_type, plugin in inv_info.items():
         # Skip SNMP sections that are not supported by this device
-        if check_uses_snmp(info_type) and info_type not in snmp_check_types:
-            continue
+        use_caches = True
+        if check_uses_snmp(info_type):
+            use_caches = False
+            if info_type not in snmp_check_types:
+                continue
 
         try:
-            info = get_info_for_discovery(hostname, ipaddress, info_type, use_caches=True)
+            info = get_info_for_discovery(hostname, ipaddress, info_type, use_caches=use_caches)
         except Exception, e:
             if str(e):
                 raise # Otherwise simply ignore missing agent section
             continue
 
-        if info == None: # section not present (None or [])
+        if not info: # section not present (None or [])
             # Note: this also excludes existing sections without info..
             continue
 
-        if opt_verbose:
-            sys.stdout.write(tty_green + tty_bold + info_type + " " + tty_normal)
-            sys.stdout.flush()
+        console.verbose(tty.green + tty.bold + info_type + " " + tty.normal)
 
         # Inventory functions can optionally have a second argument: parameters.
         # These are configured via rule sets (much like check parameters).
@@ -277,16 +292,52 @@ def do_inv_for(hostname):
         else:
             inv_function(info)
 
+    extend_tree_with_check_mk_inventory_info(hostname)
+
     # Remove empty paths
     inv_cleanup_tree(g_inv_tree)
     old_timestamp = save_inv_tree(hostname)
 
-    if opt_verbose:
-        sys.stdout.write("..%s%s%d%s entries" % (tty_bold, tty_yellow, count_nodes(g_inv_tree), tty_normal))
-        sys.stdout.flush()
+    console.verbose("..%s%s%d%s entries" % (tty.bold, tty.yellow, count_nodes(g_inv_tree), tty.normal))
 
     run_inv_export_hooks(hostname, g_inv_tree)
     return g_inv_tree, old_timestamp
+
+
+def extend_tree_with_check_mk_inventory_info(hostname):
+    persisted_file = cmk.paths.omd_root + "/var/check_mk/persisted/%s" % hostname
+    try:
+        persisted_data = eval(file(persisted_file).read()).items()
+
+    except IOError, e:
+        if e.errno == 2: # IOError: [Errno 2] No such file or directory
+            return
+        else:
+            raise
+
+    except Exception, e:
+        raise MKGeneralException(_("Cannot parse persisted file of %s: %s") % (hostname, e))
+
+    add_check_mk_inventory_info_to_tree(persisted_data)
+    console.verbose(tty.green + tty.bold + "check_mk_sections" + " " + tty.normal)
+
+
+def add_check_mk_inventory_info_to_tree(persisted_data):
+    node = inv_tree_list("software.applications.check_mk.inventory.sections:")
+    section_ages = []
+    for section, sectiondata in persisted_data:
+        when, until = sectiondata[:2]
+        section_ages.append(when)
+
+        node.append({
+            "section" : section,
+            "age"     : when,
+            "until"   : until,
+        })
+
+    node = inv_tree("software.applications.check_mk.inventory.")
+    node["oldest_section"] = min(section_ages)
+
 
 def get_inv_params(hostname, info_type):
     return host_extra_conf_merged(hostname, inv_parameters.get(info_type, []))
@@ -316,21 +367,21 @@ def save_inv_tree(hostname):
 
         if old_tree != g_inv_tree:
             if old_tree:
-                verbose("..changed")
+                console.verbose("..changed")
                 old_time = os.stat(path).st_mtime
                 arcdir = "%s/%s" % (inventory_archive_dir, hostname)
                 if not os.path.exists(arcdir):
                     os.makedirs(arcdir)
                 os.rename(path, arcdir + ("/%d" % old_time))
             else:
-                verbose("..new")
+                console.verbose("..new")
 
             file(path, "w").write(r + "\n")
             gzip.open(path + ".gz", "w").write(r + "\n")
             # Inform Livestatus about the latest inventory update
             file(inventory_output_dir + "/.last", "w")
         else:
-            verbose("..unchanged")
+            console.verbose("..unchanged")
 
     else:
         if os.path.exists(path): # Remove empty inventory files. Important for host inventory icon
@@ -345,14 +396,12 @@ def run_inv_export_hooks(hostname, tree):
     for hookname, ruleset in inv_exports.items():
         entries = host_extra_conf(hostname, ruleset)
         if entries:
-            if opt_verbose:
-                sys.stdout.write(", running %s%s%s%s..." % (tty_blue, tty_bold, hookname, tty_normal))
-                sys.stdout.flush()
+            console.verbose(", running %s%s%s%s..." % (tty.blue, tty.bold, hookname, tty.normal))
             params = entries[0]
             try:
                 inv_export[hookname]["export_function"](hostname, params, tree)
             except Exception, e:
-                if opt_debug:
+                if cmk.debug.enabled():
                     raise
                 raise MKGeneralException("Failed to execute export hook %s: %s" % (
                     hookname, e))

@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -89,9 +89,10 @@ def inventory_winperf_msx_queues(info):
             return [ (name, { "offset" : offset } ) for name, offset in queues.items() ]
 
 def check_winperf_msx_queues(item, params, info):
-    num_instances = int(info[1][0])
-    if num_instances < 1:
-        return (3, "no counters available, transport service running?")
+    # current windows  agents should not produce winperf sections with no data after the header but
+    # this ensures compatibility with older agents
+    if len(info) < 2 or int(info[1][0]) < 1:
+        return 3, "no counters available, transport service running?"
 
     # Old default case:
     if type(params) == tuple:

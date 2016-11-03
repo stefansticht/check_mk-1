@@ -17,19 +17,20 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "MetricsColumn.h"
-#include "Query.h"
+#include "Renderer.h"
 
-void MetricsColumn::output(void *data, Query *query)
-{
-    data = shiftPointer(data);
-    if (!data) return;
+void MetricsColumn::output(void *row, RowRenderer &r,
+                           contact * /* auth_user */) {
+    void *data = shiftPointer(row);
+    if (data == nullptr) {
+        return;
+    }
 
-    query->outputBeginList();
-    query->outputEndList();
+    ListRenderer l(r);
 }

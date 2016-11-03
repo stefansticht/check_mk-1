@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -27,7 +27,9 @@
 # This module contains some helper functions dealing with the creation
 # of multi-tier tar files (tar files containing tar files)
 
-import os, tarfile, time, shutil, cStringIO, defaults, grp
+import cmk.paths
+import os, tarfile, time, shutil, cStringIO, grp
+import traceback
 from lib import *
 
 class fake_file:
@@ -116,10 +118,8 @@ def extract_domains(tar, domains):
         except Exception, e:
             pass
 
-    gid = grp.getgrnam(defaults.www_group).gr_gid
-
-    # We are using the defaults.var_dir, because defaults.tmp_dir might not have enough space
-    restore_dir = defaults.var_dir + "/wato/snapshots/restore_snapshot"
+    # We are using the var_dir, because tmp_dir might not have enough space
+    restore_dir = cmk.paths.var_dir + "/wato/snapshots/restore_snapshot"
     if not os.path.exists(restore_dir):
         os.makedirs(restore_dir)
 
@@ -147,7 +147,8 @@ def extract_domains(tar, domains):
 
         # Older versions of python tarfile handle empty subtar archives :(
         # This won't work: subtar = tarfile.open("%s/%s" % (restore_dir, tar_member.name))
-        p = subprocess.Popen("tar tzf %s/%s" % (restore_dir, tar_member.name), shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        p = subprocess.Popen(["tar", "tzf", "%s/%s" % (restore_dir, tar_member.name) ],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
         if stderr:
             errors.append(_("Contains corrupt file %s") % tar_member.name)
@@ -197,7 +198,7 @@ def extract_domains(tar, domains):
         try:
             target_dir = domain.get("prefix")
             if not target_dir:
-                return
+                return []
             # The complete tar.gz file never fits in stringIO buffer..
             tar.extract(tar_member, restore_dir)
 
@@ -217,6 +218,8 @@ def extract_domains(tar, domains):
         except Exception, e:
             return [ "%s - %s" % (domain["title"], str(e)) ]
 
+        return []
+
 
     def execute_restore(domain, is_pre_restore = True):
         if is_pre_restore:
@@ -227,8 +230,9 @@ def extract_domains(tar, domains):
                 return domain["post_restore"]()
         return []
 
-
     total_errors = []
+    logger(LOG_INFO, "Restoring snapshot: %s" % tar.name)
+    logger(LOG_INFO, "Domains: %s" % ", ".join(tar_domains.keys()))
     for what, abort_on_error, handler in [
                             ("Permissions",  True,  lambda domain, tar_member: check_domain(domain, tar_member)),
                             ("Pre-Restore",  True,  lambda domain, tar_member: execute_restore(domain, is_pre_restore = True)),
@@ -239,23 +243,35 @@ def extract_domains(tar, domains):
         errors = []
         for name, tar_member in tar_domains.items():
             if name in domains:
-                dom_errors = handler(domains[name], tar_member)
-                if dom_errors:
-                    errors.extend(dom_errors)
+                try:
+                    dom_errors = handler(domains[name], tar_member)
+                    errors.extend(dom_errors or [])
+                except Exception, e:
+                    # This should NEVER happen
+                    err_info = "Restore-Phase: %s, Domain: %s\nError: %s" % (what, name, traceback.format_exc())
+                    errors.append(err_info)
+                    logger(LOG_CRIT, err_info)
+                    if abort_on_error == False:
+                        # At this state, the restored data is broken.
+                        # We still try to apply the rest of the snapshot
+                        # Hopefully the log entry helps in identifying the problem..
+                        logger(LOG_ALERT, "Snapshot restore FAILED! (possible loss of snapshot data)")
+                        continue
+                    break
 
         if errors:
             if what == "Permissions":
                 errors = list(set(errors))
-                errors.append(_("<br>If there are permission problems, please ensure the group is set to '%s' and has write permissions.") % defaults.www_group)
+                errors.append(_("<br>If there are permission problems, please ensure the site user has write permissions."))
             if abort_on_error:
-                raise MKGeneralException(_("%s - Unable to restore snapshot:<br>%s" % (what, "<br>".join(errors))))
+                raise MKGeneralException(_("%s - Unable to restore snapshot:<br>%s") % (what, "<br>".join(errors)))
             total_errors.extend(errors)
 
     # Cleanup
     wipe_directory(restore_dir)
 
     if total_errors:
-        raise MKGeneralException(_("Errors on restoring snapshot:<br>%s" % "<br>".join(total_errors)))
+        raise MKGeneralException(_("Errors on restoring snapshot:<br>%s") % "<br>".join(total_errors))
 
 
 # Extract a tarball
@@ -286,7 +302,6 @@ def extract(tar, components):
             subtar = tarfile.open(fileobj = subtarstream)
             subtar.extractall(target_dir)
         except Exception, e:
-            import traceback
             raise MKGeneralException('Failed to extract subtar %s: %s' % (name, traceback.format_exc()))
 
 # Try to cleanup everything starting from the root_path

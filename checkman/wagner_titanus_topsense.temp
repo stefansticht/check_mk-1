@@ -14,30 +14,3 @@ inventory:
 item:
  The ID of the detector.
 
-perfdata:
- One value: The temperature in degree celsius, together with levels for warning
- and critical.
-
-examples:
- # set other default levels
- wagner_titanus_topsense_temperature_default_values = (25, 40)
-
- # check detector 1 with default levels
- checks += [
-     ("ras", "wagner_titanus_topsense.temp", '1', wagner_titanus_topsense_temperature_default_values)
- ]
-
- # check detector 1 with individual levels
- checks += [
-     ( "ras", "wagner_titanus_topsense.temp", '1', (20, 50) )
- ]
-
-[parameters]
-parameters (tuple): A pair of numbers for warn and crit level.
-    If the temperature in degree celsius is higher or equal warn,
-    the check returns {WARN}. If the temperature in degree celsius is higher
-    or equal crit, the check returns {CRIT}.
-
-[configuration]
-wagner_titanus_topsense_temperature_default_values(int, int):
-    Default levels for warning and critical, preset to (30, 35)

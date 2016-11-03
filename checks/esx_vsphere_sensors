@@ -19,10 +19,16 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+
+# Note: Sometimes the esx_vsphere_sensors check reports incorrect sensor data.
+# The reason is that the data is cached on the esx system. In the worst case some sensors
+# might get stuck in an unhealthy state. You can find more information under the following link:
+# http://kb.vmware.com/selfservice/microsites/search.do?cmd=displayKC&externalId=1037330
 
 # <<<esx_vsphere_sensors:sep(59)>>>
 # VMware Rollup Health State;;0;system;0;;red;Red;Sensor is operating under critical conditions
@@ -30,7 +36,7 @@
 # Power Supply 2 Power Supply 2 0: Power Supply AC lost - Assert;;0;power;0;;red;Red;Sensor is operating under critical conditions
 
 def inventory_esx_vsphere_sensors(info):
-    return [(None, None)]
+    return [(None, [])]
 
 def check_esx_vsphere_sensors(_no_item, params, info):
     state = 0

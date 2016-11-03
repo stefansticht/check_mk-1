@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,25 +25,26 @@
 #ifndef DynamicColumn_h
 #define DynamicColumn_h
 
+#include "config.h"  // IWYU pragma: keep
 #include <string>
-using namespace std;
-
 class Column;
+class Logger;
 
-class DynamicColumn
-{
-    string _name;
-    string _description;
-    int    _indirect_offset;
+class DynamicColumn {
 public:
-    DynamicColumn(string name, string description, int indirect_offset) :
-        _name(name), _description(description), _indirect_offset(indirect_offset) {}
-    virtual ~DynamicColumn() {}
-    const char *name() const { return _name.c_str(); }
-    const char *description() const { return _description.c_str(); }
-    Column *createColumn(const char *arguments);
-    virtual Column *createColumn(int indirect_offset, const char *arguments) = 0;
+    DynamicColumn(std::string name, std::string description,
+                  int indirect_offset, int extra_offset, Logger *logger);
+    virtual ~DynamicColumn();
+    std::string name() const;
+    virtual Column *createColumn(const std::string &name,
+                                 const std::string &arguments) = 0;
+
+protected:
+    const std::string _name;
+    const std::string _description;  // Note: Currently unused!
+    const int _indirect_offset;
+    const int _extra_offset;
+    Logger *const _logger;
 };
 
-#endif // DynamicColumn_h
-
+#endif  // DynamicColumn_h

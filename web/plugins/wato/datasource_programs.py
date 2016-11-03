@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -37,8 +37,7 @@ register_rule(group,
                  "program that should be called by Check_MK instead of connecting the agent "
                  "via TCP. That program must output the agent's data on standard output in "
                  "the same format the agent would do. This is for example useful for monitoring "
-                 "via SSH. The command line may contain the placeholders <tt>&lt;IP&gt;</tt> and "
-                 "<tt>&lt;HOST&gt;</tt>."),
+                 "via SSH.") + monitoring_macro_help(),
         label = _("Command line to execute"),
         empty_text = _("Access Check_MK Agent via TCP"),
         size = 80,
@@ -59,6 +58,18 @@ register_rule(group,
                   Password(
                       title = _("vSphere secret"),
                       allow_empty = False,
+                  )
+                ),
+                ( "direct",
+                  DropdownChoice(
+                      title = _("Type of query"),
+                      choices = [
+                          ( True,               _("Queried host is a host system" ) ),
+                          ( "hostsystem_agent", _("Queried host is a host system with Check_MK Agent installed") ),
+                          ( False,              _("Queried host is the vCenter") ),
+                          ( "agent",            _("Queried host is the vCenter with Check_MK Agent installed") ),
+                      ],
+                      default = True,
                   )
                 ),
                 ( "tcp_port",
@@ -94,6 +105,17 @@ register_rule(group,
                       unit = _("seconds"),
                   )
                 ),
+                ( "use_pysphere",
+                  Checkbox(
+                    title = _("Compatibility mode"),
+                    label = _("Support ESX 4.1 (using slower PySphere implementation)"),
+                    true_label = _("Support 4.1"),
+                    false_label = _("fast"),
+                    help = _("The current very performant implementation of the ESX special agent "
+                             "does not support older ESX versions than 5.0. Please use the slow "
+                             "compatibility mode for those old hosts."),
+                  )
+                ),
                 ( "infos",
                   Transform(
                       ListChoice(
@@ -110,6 +132,18 @@ register_rule(group,
                        forth = lambda v: [ x.replace("storage", "datastore") for x in v ],
                        title = _("Retrieve information about..."),
                     )
+                 ),
+                 ( "skip_placeholder_vms",
+                    Checkbox(
+                        title = _("Placeholder VMs"),
+                        label = _("Do no monitor placeholder VMs"),
+                        default_value = True,
+                        true_label = _("ignore"),
+                        false_label = _("monitor"),
+                        help = _("Placeholder VMs are created by the Site Recovery Manager(SRM) and act as backup "
+                                 "virtual machines in case the default vm is unable to start. This option tells the "
+                                 "vsphere agent to exclude placeholder vms in its output."
+                        ))
                  ),
                  ( "host_pwr_display",
                    DropdownChoice(
@@ -133,6 +167,16 @@ register_rule(group,
                        default = None,
                    )
                  ),
+                 ( "vm_piggyname",
+                   DropdownChoice(
+                       title = _("Piggyback name of virtual machines"),
+                       choices = [
+                           ( "alias",    _("Use the name specified in the ESX system") ),
+                           ( "hostname", _("Use the VMs hostname if set, otherwise fall back to ESX name") ),
+                       ],
+                       default = "alias",
+                   )
+                 ),
                  ( "spaces",
                    DropdownChoice(
                        title = _("Spaces in hostnames"),
@@ -143,42 +187,8 @@ register_rule(group,
                        default = "underscore",
                    )
                  ),
-                 ( "direct",
-                   DropdownChoice(
-                       title = _("Type of query"),
-                       choices = [
-                           ( True,    _("Queried host is a host system" ) ),
-                           ( False,   _("Queried host is the vCenter") ),
-                           ( "agent", _("Queried host is the vCenter with Check_MK Agent installed") ),
-                       ],
-                       default = True,
-                   )
-                ),
-                ( "skip_placeholder_vms",
-                   Checkbox(
-                       title = _("Placeholder VMs"),
-                       label = _("Do no monitor placeholder VMs"),
-                       default_value = True,
-                       true_label = _("ignore"),
-                       false_label = _("monitor"),
-                       help = _("Placeholder VMs are created by the Site Recovery Manager(SRM) and act as backup "
-                                "virtual machines in case the default vm is unable to start. This option tells the "
-                                "vsphere agent to exclude placeholder vms in its output."
-                       ))
-                ),
-                ( "use_pysphere",
-                  Checkbox(
-                    title = _("Compatibility mode"),
-                    label = _("Support ESX 4.1 (using slower PySphere implementation)"),
-                    true_label = _("Support 4.1"),
-                    false_label = _("fast"),
-                    help = _("The current very performant implementation of the ESX special agent "
-                             "does not support older ESX versions than 5.0. Please use the slow "
-                             "compatibility mode for those old hosts."),
-                  )
-                ),
             ],
-            optional_keys = [ "tcp_port", "timeout", "vm_pwr_display", "host_pwr_display" ],
+            optional_keys = [ "tcp_port", "timeout", "vm_pwr_display", "host_pwr_display", "vm_piggyname" ],
         ),
         title = _("Check state of VMWare ESX via vSphere"),
         help = _("This rule selects the vSphere agent instead of the normal Check_MK Agent "
@@ -190,34 +200,101 @@ register_rule(group,
     match = 'first')
 
 register_rule(group,
-    "special_agents:netapp",
+    "special_agents:hp_msa",
     Dictionary(
-            title = _("Username and password for the NetApp Filer."),
-            elements = [
-                ( "username",
-                  TextAscii(
-                      title = _("Username"),
-                      allow_empty = False,
-                  )
-                ),
-                ( "password",
-                  Password(
-                      title = _("Password"),
-                      allow_empty = False,
-                  )
-                ),
-            ],
-            optional_keys = False
+        elements = [
+            ( "username",
+              TextAscii(
+                  title = _("Username"),
+                  allow_empty = False,
+              )
+            ),
+            ( "password",
+              TextAscii(
+                  title = _("Password"),
+                  allow_empty = False,
+              )
+            )
+        ],
+        optional_keys = False
+    ),
+    title = _("Check HP MSA via Web Interface"),
+    help = _("This rule selects the Agent HP MSA instead of the normal Check_MK Agent "
+             "which collects the data through the HP MSA web interface"),
+    match = 'first')
+
+register_rule(group,
+    "special_agents:ipmi_sensors",
+    Dictionary(
+        elements = [
+            ( "username",
+              TextAscii(
+                  title = _("Username"),
+                  allow_empty = False,
+              )
+            ),
+            ( "password",
+              Password(
+                  title = _("Password"),
+                  allow_empty = False,
+              )
+            ),
+            ( "privilege_lvl",
+              TextAscii(
+                  title = _("Privilege Level"),
+                  help = _("Possible are 'user', 'operator', 'admin'"),
+                  allow_empty = False,
+              )
+            )
+        ],
+        optional_keys = False
+    ),
+    title = _("Check IPMI Sensors via Freeipmi"),
+    help = _("This rule selects the Agent IPMI Sensors instead of the normal Check_MK Agent "
+             "which collects the data through the Freeipmi command"),
+    match = 'first')
+
+register_rule(group,
+    "special_agents:netapp",
+    Transform(
+        Dictionary(
+                title = _("Username and password for the NetApp Filer."),
+                elements = [
+                    ( "username",
+                      TextAscii(
+                          title = _("Username"),
+                          allow_empty = False,
+                      )
+                    ),
+                    ( "password",
+                      Password(
+                          title = _("Password"),
+                          allow_empty = False,
+                      )
+                    ),
+                    ( "skip_elements",
+                        ListChoice(
+                           choices = [
+                                ("ctr_volumes",  _("Do not query volume performance counters")),
+                           ],
+                        title = _("Performance improvements"),
+                        help = _("Here you can configure whether the performance counters should get queried. "
+                                 "This can save quite a lot of CPU load on larger systems."),
+                        ),
+                    )
+                ],
+                optional_keys = False
+        ),
+        forth = lambda x: dict([("skip_elements", [])] + x.items())
     ),
     title = _("Check NetApp via WebAPI"),
     help  = _("This rule set selects the NetApp special agent instead of the normal Check_MK Agent "
-              "and allows monitoring via the NetApp API. Right now only <i>7-Mode</i> is supported, "
-              "<i>Cluster Mode</i> will follow soon. Important: To make this special agent NetApp work "
-              "you will have to provide two additional python files (<tt>NaServer.py</tt>, <tt>NaElement.py</tt>) "
-              "from the NetApp Manageability SDK. They need to be put into the site directory "
-              "into <tt>~/local/lib/python</tt>. The user requires a number of permissions for specific API classes. "
-              "They are displayed if you call the agent with <tt>agent_netapp --help</tt>. The agent itself "
-              "is located in the site directory under <tt>~/share/check_mk/agents/special</tt>."),
+              "and allows monitoring via the NetApp Web API. Important: To get this agent running, you need to "
+              "install two additional python files (<tt>NaServer.py</tt>, <tt>NaElement.py</tt>) from the "
+              "NetApp Manageabiltiy SDK into the <tt>~/local/lib/python</tt> directory. To access the data the "
+              "user requires permissions to several API classes. They are shown when you call the agent with "
+              "<tt>agent_netapp --help</tt>. The agent itself is located in the site directory under "
+              "<tt>~/share/check_mk/agents/special</tt>."),
     match = 'first')
 
 register_rule(group,
@@ -280,6 +357,9 @@ register_rule(group,
                          ( "hwstatus",       _("Hardware Status") ),
                          ( "raidgroups",     _("RAID Groups") ),
                          ( "agent",          _("Model and Revsion") ),
+                         ( "sp_util",        _("Storage Processor Utilization") ),
+                         ( "writecache",     _("Write Cache State") ),
+                         ( "mirrorview",     _("Mirror Views") ),
                      ],
                      default_value = [ "disks", "hba", "hwstatus", ],
                      allow_empty = False,
@@ -377,10 +457,9 @@ register_rule(group,
      FixedValue(
         {},
         title = _("Check ACME Session Border Controller"),
-        help = _("This rule activates an expect based agent who connects"
-                 "to an ACME Session Border Controller (SBC). This agent uses SSH, this"
-                 "means that you have to exchange a SSH key to make a password less"
-                 "connect possible"),
+        help = _("This rule activates an agent which connects "
+                 "to an ACME Session Border Controller (SBC). This agent uses SSH, so "
+                 "you have to exchange an SSH key to make a passwordless connect possible."),
         totext = _("Connect to ACME SBC"),
     ),
     factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
@@ -504,15 +583,33 @@ def validate_siemens_plc_values(value, varprefix):
         valuetypes[valuetype].append(ident)
 
 _siemens_plc_value = [
-    Integer(
-        title = "<nobr>%s</nobr>" % _("DB Number"),
-        minvalue = 1,
+    Transform(
+        CascadingDropdown(
+            title = _("The Area"),
+            choices = [
+                ("db", _("Datenbaustein"),
+                    Integer(
+                        title = "<nobr>%s</nobr>" % _("DB Number"),
+                        minvalue = 1,
+                    )
+                ),
+                ("input",   _("Input")),
+                ("output",  _("Output")),
+                ("merker",  _("Merker")),
+                ("timer",   _("Timer")),
+                ("counter", _("Counter")),
+            ],
+            orientation = "horizontal",
+            sorted = True,
+        ),
+        # Transform old Integer() value spec to new cascading dropdown value
+        forth = lambda x: type(x) == int and ("db", x) or x,
     ),
     Float(
         title = _("Address"),
         display_format = "%.1f",
-        help = _("Addresses are specified as float values, while the numbers "
-                 "the dot specify the byte to fetch and the number after the "
+        help = _("Addresses are specified with a dot notation, where number "
+                 "before the dot specify the byte to fetch and the number after the "
                  "dot specifies the bit to fetch. The number of the bit is always "
                  "between 0 and 7."),
     ),
@@ -674,7 +771,7 @@ register_rule(group,
         ],
         optional_keys = False
     ),
-    title = _("Agent Ruckus Spot"),
+    title = _("Agent for Ruckus Spot"),
     help = _("This rule selects the Agent Ruckus Spot agent instead of the normal Check_MK Agent "
              "which collects the data through the Ruckus Spot web interface"),
     match = 'first')
@@ -733,4 +830,131 @@ register_rule(group,
     help = _('This rule allows querying an AppDynamics server for information about Java applications'
              'via the AppDynamics REST API. You can configure your connection settings here.'),
     factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
+    match = 'first')
+
+mk_jolokia_elements = [
+   ( "port",
+     Integer(
+         title = _("TCP port for connection"),
+         default_value = 8080,
+         minvalue = 1,
+         maxvalue = 65535,
+     )
+   ),
+   ( "login",
+       Tuple(
+           title = _("Optional login (if required)"),
+           elements = [
+             TextAscii(
+                 title = _("User ID for web login (if login required)"),
+                 default_value = "monitoring",
+             ),
+             Password(
+                 title = _("Password for this user")
+             ),
+             DropdownChoice(
+                 title = _("Login mode"),
+                 choices = [
+                    ( "basic",  _("HTTP Basic Authentication") ),
+                    ( "digest", _("HTTP Digest") ),
+                 ]
+             )
+           ]
+       )
+   ),
+   ( "suburi",
+     TextAscii(
+         title = _("relative URI under which Jolokia is visible"),
+         default_value = "jolokia",
+         size = 30,
+     )
+   ),
+   ( "instance",
+     TextUnicode(
+         title = _("Name of the instance in the monitoring"),
+         help = _("If you do not specify a name here, then the TCP port number "
+                  "will be used as an instance name.")
+     ),
+   ),
+   ( "protocol",
+     DropdownChoice(
+         title = _("Protocol"),
+         choices = [
+             ( "http",  "HTTP" ),
+             ( "https", "HTTPS" ),
+         ]
+     ),
+   ),
+]
+
+group = 'datasource_programs'
+register_rule(group,
+    'special_agents:jolokia',
+    Dictionary(
+        elements = mk_jolokia_elements,
+    ),
+    title = _('Jolokia'),
+    help = _('This rule allows querying the Jolokia web API.'),
+    factory_default = FACTORY_DEFAULT_UNUSED, # No default, do not use setting if no rule matches
+    match = 'first')
+
+register_rule(group,
+    "special_agents:tinkerforge",
+    Dictionary(
+        title = _("Settings for Tinkerforge agent"),
+        elements = [
+            ( "port",
+            Integer(
+                title = _('TCP port number'),
+                help = _('Port number that AppDynamics is listening on. The default is 8090.'),
+                default_value = 4223,
+                minvalue = 1,
+                maxvalue = 65535
+            )
+            ),
+            ( "segment_display_uid",
+            TextAscii(
+                title = _("7-segment display uid"),
+                help = _("This is the uid of the sensor you want to display in the 7-segment display, "
+                         "not the uid of the display itself. There is currently no support for "
+                         "controling multiple displays.")
+            )
+            ),
+            ( "segment_display_brightness",
+            Integer(
+                title = _("7-segment display brightness"),
+                minvalue = 0,
+                maxvalue = 7
+            )
+            )
+        ],
+    ),
+    title = _("Tinkerforge"),
+    match = 'first')
+
+
+register_rule(group,
+    'special_agents:prism',
+    Dictionary(
+        elements = [
+            ("port",
+            Integer(
+                title = _("TCP port for connection"),
+                default_value = 9440,
+                minvalue = 1,
+                maxvalue = 65535
+
+            )),
+            ("username",
+            TextAscii(
+                title = _("User ID for web login"),
+            )),
+            ("password",
+            Password(
+                title = _("Password for this user")
+            )),
+        ],
+        optional_keys = ["port"]
+    ),
+    title = _("Nutanix Prism"),
     match = 'first')

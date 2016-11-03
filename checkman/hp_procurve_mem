@@ -13,17 +13,6 @@ description:
  The check will result in a WARNING/CRITICAL state when the given thresholds
  for the memory usage are reached.
 
-perfdata:
- One variable: The current memory usage
-
 inventory:
  On each switch which supports this MIB one service {Memory} is being created.
-
-[parameters]
-warning (int): Memory usage percentage at which a warning level is triggered.
-critical (int): Memory usage percentage at which a critical level is triggered.
-
-[configuration]
-hp_procurve_mem_default_levels (int, int): Default levels used by inventorized checks.
- This variable is preset to {(80, 90)}.
 

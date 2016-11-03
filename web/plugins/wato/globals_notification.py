@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -29,8 +29,10 @@
 # TODO: Remove all configuration for legacy-Email to deprecated, or completely
 # remove from WATO.
 
+import cmk.paths
+
 group = _("Notifications")
-g_configvar_order[group] = 15
+configvar_order()[group] = 15
 
 register_configvar(group,
     "enable_rulebased_notifications",
@@ -52,7 +54,8 @@ register_configvar(group,
         help = _("If you work with rule based notifications then you should configure an email "
                  "address here. In case of a hole in your notification rules a notification "
                  "will be sent to this address. This makes sure that in any case <i>someone</i> gets "
-                 "notified."),
+                 "notified. You can also configure single users to receive those fallback notifications, "
+                 "by enabling the option in the user profile."),
         empty_text = _("<i>(No fallback email address configured!)</i>"),
         make_clickable = False,
    ),
@@ -65,7 +68,7 @@ register_configvar(group,
         help = _("If this option is set to a non-zero number, then Check_MK "
                  "keeps the last <i>X</i> notifications for later reference. "
                  "You can replay these notifications and analyse your set of "
-                 "notifications rules. This only works with rulebased notiications. Note: "
+                 "notifications rules. This only works with rulebased notifications. Note: "
                  "only notifications sent out by the local notification system can be "
                  "tracked. If you have a distributed environment you need to do the analysis "
                  "directly on the remote sites - unless you use a central spooling."),
@@ -87,6 +90,16 @@ register_configvar(group,
     need_restart = True)
 
 register_configvar(group,
+    "notification_plugin_timeout",
+    Age(
+        title = _("Notification plugin timeout"),
+        help = _("After the configured time notification plugins are being interrupted."),
+        default_value = 60,
+        minvalue = 1,
+    ),
+    domain = "check_mk")
+
+register_configvar(group,
     "notification_logging",
     Transform(
         DropdownChoice(
@@ -99,8 +112,8 @@ register_configvar(group,
         forth = lambda x: x == 0 and 1 or x, # transform deprecated value 0 (no logging) to 1
         title = _("Notification log level"),
         help = _("You can configure the notification mechanism to log more details about "
-                 "the notifications into the notification log. These information are logged "
-                 "into the file <tt>%s</tt>") % site_neutral_path(defaults.log_dir + "/notify.log"),
+                 "the notifications into the notification log. This information are logged "
+                 "into the file <tt>%s</tt>") % site_neutral_path(cmk.paths.log_dir + "/notify.log"),
     ),
     domain = "check_mk")
 

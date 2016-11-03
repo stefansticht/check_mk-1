@@ -17,26 +17,24 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "StringColumn.h"
-#include "StringColumnFilter.h"
-#include "Query.h"
+#include "Renderer.h"
+#include "StringFilter.h"
+#include "opids.h"
 
-void StringColumn::output(void *data, Query *query)
-{
-    if (data)
-        query->outputString(getValue(data));
-    else
-        query->outputString(0);
+using std::string;
+
+void StringColumn::output(void *row, RowRenderer &r,
+                          contact * /* auth_user */) {
+    r.output(row == nullptr ? "" : getValue(row));
 }
 
-Filter *StringColumn::createFilter(int operator_id, char *value)
-{
-    return new StringColumnFilter(this, operator_id, value);
+Filter *StringColumn::createFilter(RelationalOperator relOp,
+                                   const string &value) {
+    return new StringFilter(this, relOp, value);
 }
-
-

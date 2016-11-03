@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -157,16 +157,6 @@ factory_settings["mem_linux_default_levels"] = {
     "levels_vmalloc":       ("abs_free",  (50*1024*1024, 30*1024*1024)),
 }
 
-# Parse /proc/meminfo into the canonical form: into bytes, not kB
-def parse_proc_meminfo_bytes(info):
-    meminfo = {}
-    for line in info:
-        value = int(line[1])
-        if len(line) > 2 and line[2] == 'kB':
-            value *= 1024
-        meminfo[line[0][:-1]] = value
-    return meminfo
-
 def is_linux_meminfo(meminfo):
     return "PageTables" in meminfo and "Writeback" in meminfo and "Committed_AS" in meminfo
 
@@ -228,7 +218,7 @@ def check_mem_levels(title, used, total, levels, of_what=None, of_value=None, sh
 
             if state:
                 perc_shown = True
-                infotext += levels_text + "levels at %.1f%%/%.1f%%)" % (warn, crit)
+                infotext += levels_text + "warn/crit at %.1f%%/%.1f%%)" % (warn, crit)
 
         else:
             if how == "abs_used":
@@ -244,7 +234,7 @@ def check_mem_levels(title, used, total, levels, of_what=None, of_value=None, sh
                     state = 1
 
             if state:
-                infotext += " (levels at %s/%s)" % (get_bytes_human_readable(warn), get_bytes_human_readable(crit))
+                infotext += " (warn/crit at %s/%s)" % (get_bytes_human_readable(warn), get_bytes_human_readable(crit))
 
     if not perc_shown and show_percentage:
         infotext += " (%.1f%%)" % (100.0 * float(used) / of_value)
@@ -326,20 +316,19 @@ def check_mem_linux(_no_item, params, info):
         if r[0]:
             yield r # only display if non-OK
 
-    # VMalloc
-    r = check_mem_levels("Largest Free VMalloc Chunk", meminfo["VmallocTotal"] - meminfo["VmallocChunk"],
-            meminfo["VmallocTotal"], params.get("levels_vmalloc"), of_what = "VMalloc Area", show_free=True)
-    if r[0]:
-        yield r # only display if non-OK
+    # VMalloc,
+    # newer kernel version report wrong data,
+    # i.d. both VmallocUsed and Chunk equal zero
+    if not (meminfo["VmallocUsed"] == 0 and meminfo["VmallocChunk"] == 0):
+        r = check_mem_levels("Largest Free VMalloc Chunk", meminfo["VmallocTotal"] - meminfo["VmallocChunk"],
+                meminfo["VmallocTotal"], params.get("levels_vmalloc"), of_what = "VMalloc Area", show_free=True)
+        if r[0]:
+            yield r # only display if non-OK
 
     # HardwareCorrupted
     hwc = meminfo.get("HardwareCorrupted")
     if hwc:
-        if "handle_hw_corrupted_error" in params:
-            if params["handle_hw_corrupted_error"] != 3:
-                yield params["handle_hw_corrupted_error"], "Hardware defect of %s" % get_bytes_human_readable(hwc)
-        else:
-            yield 2, "Hardware defect of %s" % get_bytes_human_readable(hwc)
+        yield params.get("handle_hw_corrupted_error", 2), "Hardware defect of %s" % get_bytes_human_readable(hwc)
 
     # Now send performance data. We simply output *all* fields of meminfo
     # except for a few really useless values
@@ -361,14 +350,15 @@ def check_mem_linux(_no_item, params, info):
     yield 0, "", perfdata
 
 
-
 check_info["mem.linux"] = {
-    'check_function':          check_mem_linux,
-    'inventory_function':      inventory_mem_linux,
-    'service_description':     'Memory',
-    'default_levels_variable': 'mem_linux_default_levels',
-    'has_perfdata':            True,
-    'group':                   'memory_linux',
+    'inventory_function'        : inventory_mem_linux,
+    'check_function'            : check_mem_linux,
+    'service_description'       : 'Memory',
+    'default_levels_variable'   : 'mem_linux_default_levels',
+    'has_perfdata'              : True,
+    'group'                     : 'memory_linux',
+    "handle_real_time_checks"   : True,
+    'includes'                  : [ 'mem.include' ],
 }
 
 #.
@@ -410,6 +400,7 @@ check_info['mem.used'] = {
     "group"                   : "memory",
     "default_levels_variable" : "memory_default_levels",
     "includes"                : [ "mem.include" ],
+    "handle_real_time_checks" : True,
 }
 
 #.
@@ -441,9 +432,9 @@ def check_mem_windows(item, params, info):
     MB = 1024.0 * 1024
     now = time.time()
 
-    for title, what, paramname in [
-        ( "Memory",    "Mem",  "memory" ),
-        ( "Page file", "Page", "pagefile" )]:
+    for title,             what,   paramname in [
+        ("Memory usage",  "Mem",  "memory"),
+        ("Commit Charge", "Page", "pagefile")]:
         total_kb = meminfo[what + "Total"]
         free_kb  = meminfo[what + "Free"]
         used_kb  = total_kb - free_kb
@@ -451,7 +442,7 @@ def check_mem_windows(item, params, info):
         free_mb  = free_kb / 1024.0
         perc     = 100.0 * used_kb / total_kb
 
-        infotext = "%s usage: %.1f%% (%.1f/%.1f GB)" % \
+        infotext = "%s: %.1f%% (%.1f/%.1f GB)" % \
                 (title, perc, used_kb / MB, total_kb / MB)
 
         if type(params[paramname]) == tuple:
@@ -473,6 +464,11 @@ def check_mem_windows(item, params, info):
         # Predictive levels have no level information in the performance data
         else:
             perfdata = [(paramname, used_kb / 1024.0, None, None, 0, total_kb / 1024.0)]
+
+        if what == "Mem":
+            perfdata.append(("mem_total", total_kb / 1024.0))
+        elif what == "Page":
+            perfdata.append(("pagefile_total", total_kb / 1024.0))
 
         # Do averaging, if configured, just for matching the levels
         if "average" in params:
@@ -519,6 +515,7 @@ check_info["mem.win"] = {
     'has_perfdata':            True,
     'group':                   'memory_pagefile_win',
     'default_levels_variable': 'memory_win_default_levels',
+    "handle_real_time_checks" : True,
 }
 
 #.
@@ -544,7 +541,10 @@ def inventory_mem_vmalloc(info):
     if is_linux_meminfo(meminfo):
         return # handled by new Linux memory check
 
-    if "VmallocTotal" in meminfo:
+    # newer kernel version report wrong data,
+    # i.d. both VmallocUsed and Chunk equal zero
+    if "VmallocTotal" in meminfo and \
+        not (meminfo["VmallocUsed"] == 0 and meminfo["VmallocChunk"] == 0):
         # Do not checks this on 64 Bit systems. They have almost
         # infinitive vmalloc
         vmalloc = meminfo["VmallocTotal"] / 1024.4
@@ -596,4 +596,5 @@ check_info["mem.vmalloc"] = {
     'check_function':          check_mem_vmalloc,
     'service_description':     'Vmalloc address space',
     'has_perfdata':            True,
+    "handle_real_time_checks" : True,
 }

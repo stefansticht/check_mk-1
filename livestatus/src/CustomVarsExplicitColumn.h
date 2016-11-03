@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,27 @@
 #ifndef CustomVarsExplicitColumn_h
 #define CustomVarsExplicitColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "StringColumn.h"
 #include "nagios.h"
 
-using namespace std;
-
-
-class CustomVarsExplicitColumn : public StringColumn
-{
-    int _offset; // within data structure (differs from host/service)
+class CustomVarsExplicitColumn : public StringColumn {
+    int _offset;  // within data structure (differs from host/service)
     std::string _varname;
 
 public:
-    CustomVarsExplicitColumn(string name, string description, int offset, int indirect_offset, const char *varname)
-        : StringColumn(name, description, indirect_offset),  _offset(offset), _varname(varname) {}
-    char *getValue(void *data);
+    CustomVarsExplicitColumn(const std::string &name,
+                             const std::string &description, int offset,
+                             int indirect_offset, const char *varname,
+                             int extra_offset = -1)
+        : StringColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset)
+        , _varname(varname) {}
+    std::string getValue(void *data) const override;
+
 private:
-    customvariablesmember *getCVM(void *data);
+    customvariablesmember *getCVM(void *data) const;
 };
 
-
-#endif // CustomVarsExplicitColumn_h
+#endif  // CustomVarsExplicitColumn_h

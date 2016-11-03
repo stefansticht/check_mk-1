@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,27 @@
 #ifndef TableColumns_h
 #define TableColumns_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include <vector>
 #include "Table.h"
+class Column;
+class Logger;
+class Query;
 
-class TableColumns : public Table
-{
-    typedef vector<Table *> _tables_t;
-    _tables_t _tables;
+class TableColumns : public Table {
+    std::vector<Table *> _tables;
+
 public:
-    TableColumns();
-    const char *name() { return "columns"; }
+    explicit TableColumns(Logger *logger);
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+
     void addTable(Table *);
-    void answerQuery(Query *query);
-    const char *getValue(Column *column, int colcol);
-    const char *tableNameOf(Column *column);
+    std::string getValue(Column *column, int colcol) const;
+    std::string tableNameOf(Column *column) const;
 };
 
-
-#endif // TableColumns_h
-
+#endif  // TableColumns_h

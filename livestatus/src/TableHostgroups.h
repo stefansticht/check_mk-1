@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,22 +25,25 @@
 #ifndef TableHostgroups_h
 #define TableHostgroups_h
 
-#include "config.h"
-
-#include <set>
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Table.h"
-#include "nagios.h"
+#include "nagios.h"  // IWYU pragma: keep
+class Logger;
+class Query;
 
-class TableHostgroups : public Table
-{
+class TableHostgroups : public Table {
 public:
-    TableHostgroups();
-    const char *name() { return "hostgroups"; }
-    void *findObject(char *objectspec);
-    bool isAuthorized(contact *, void *);
-    void addColumns(Table *, string prefix, int indirect_offset);
-    void answerQuery(Query *query);
+    explicit TableHostgroups(Logger *logger);
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+    void *findObject(const std::string &objectspec) override;
+    bool isAuthorized(contact *, void *) override;
+
+    static void addColumns(Table *, const std::string &prefix,
+                           int indirect_offset);
 };
 
-#endif // TableHostgroups_h
-
+#endif  // TableHostgroups_h

@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -42,7 +42,7 @@ def begin(table_id=None, title=None, **kwargs):
     try:
         limit = config.table_row_limit
     except:
-        pass
+        limit = None
 
     limit = kwargs.get('limit', limit)
     if html.var('limit') == 'none' or kwargs.get("output_format", "html") != "html":
@@ -115,6 +115,8 @@ def cell(*posargs, **kwargs):
     next_args = posargs, kwargs
 
 def add_cell(title="", text="", css=None, help=None, colspan=None, sortable=True):
+    if type(text) == HTML:
+        text = text.value
     if type(text) != unicode:
         text = str(text)
     htmlcode = text + html.drain()
@@ -149,6 +151,8 @@ def end():
         table = None
         return
 
+    #html.guitest_record_output("data_tables", table)
+
     if table["title"] and not do_csv:
         html.write("<h3>%s</h3>" % table["title"])
 
@@ -167,7 +171,7 @@ def end():
     search_term = None
     actions_enabled = (table["searchable"] or table["sortable"]) and not do_csv
     if actions_enabled:
-        user_opts = config.load_user_file("tableoptions", {})
+        user_opts = config.user.load_file("tableoptions", {})
         user_opts.setdefault(table_id, {})
         table_opts = user_opts[table_id]
 
@@ -185,16 +189,18 @@ def end():
 
         if table["searchable"]:
             # Search is always lower case -> case insensitive
-            search_term = html.var('_%s_search' % table_id, table_opts.get('search', '')).lower()
+            search_term = html.get_unicode_input('_%s_search' % table_id, table_opts.get('search', '')).lower()
             if search_term:
                 html.set_var('_%s_search' % table_id, search_term)
                 table_opts['search'] = search_term # persist
                 filtered_rows = []
                 for row, css, state, fixed in rows:
                     if state == "header" or fixed:
+                        filtered_rows.append((row, css, state, fixed))
                         continue # skip filtering of headers or fixed rows
+
                     for cell_content, css_classes, colspan in row:
-                        if fixed or search_term in cell_content.lower():
+                        if search_term in cell_content.lower():
                             filtered_rows.append((row, css, state, fixed))
                             break # skip other cells when matched
                 rows = filtered_rows
@@ -219,10 +225,18 @@ def end():
                         rows.remove(row)
                         fixed_rows.append((index, row))
 
-                # Then use natural sorting to sort the list
-                rows.sort(cmp=lambda a, b: cmp(num_split(a[0][sort_col][0]),
-                                               num_split(b[0][sort_col][0])),
-                          reverse=sort_reverse==1)
+                # Then use natural sorting to sort the list. Note: due to a
+                # change in the number of columns of a table in different software
+                # versions the cmp-function might fail. This is because the sorting
+                # column is persisted in a user file. So we ignore exceptions during
+                # sorting. This gives the user the chance to change the sorting and
+                # see the table in the first place.
+                try:
+                    rows.sort(cmp=lambda a, b: cmp(num_split(a[0][sort_col][0]),
+                                                   num_split(b[0][sort_col][0])),
+                              reverse=sort_reverse==1)
+                except IndexError:
+                    pass
 
                 # Now re-add the removed "fixed" rows to the list again
                 if fixed_rows:
@@ -238,7 +252,7 @@ def end():
         rows = rows[:limit]
 
     if not do_csv:
-        html.write('<table class="data')
+        html.write('<table class="data oddeven')
         if "css" in table:
             html.write(" %s" % table["css"])
         html.write('">\n')
@@ -270,7 +284,10 @@ def end():
 
                 # Add the table action link
                 if first_col:
+                    first_col = False
                     if actions_enabled:
+                        if not header:
+                            header = "&nbsp;" # Fixes layout problem with white triangle
                         if actions_visible:
                             state = '0'
                             help  = _('Hide table actions')
@@ -279,11 +296,17 @@ def end():
                             state = '1'
                             help  = _('Display table actions')
                             img   = 'table_actions_off'
+                        html.write("<div class=\"toggle_actions\">")
                         html.icon_button(html.makeuri([('_%s_actions' % table_id, state)]),
                             help, img, cssclass = 'toggle_actions')
-                    first_col = False
+                        html.write("<span>%s</span>" % header)
+                        html.write("</div>")
+                    else:
+                        html.write(header)
+                else:
+                    html.write(header)
 
-                html.write("%s</th>\n" % header)
+                html.write("</th>\n")
             html.write("  </tr>\n")
 
     # If we have no group headers then paint the headers now
@@ -356,7 +379,7 @@ def end():
                            (limit, num_rows_unlimited, html.makeuri([('limit', 'none')])))
 
     if actions_enabled and not do_csv:
-        config.save_user_file("tableoptions", user_opts)
+        config.user.save_file("tableoptions", user_opts)
 
     table = None
 

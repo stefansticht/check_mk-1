@@ -96,10 +96,10 @@ function wato_fix_visibility() {
             }
             var oTdContent = oTr.childNodes[1];
             /* If the Checkbox is unchecked try to get a value from the inherited_tags */
-            var oCheckbox = oTdLegend.childNodes[1].childNodes[0];
+            var oCheckbox = oTdLegend.getElementsByTagName("input")[0];
             if (oCheckbox.checked == false ){
-                var attrname = 'attr_' + oCheckbox.name.replace('_change_', '');
-                if(attrname in inherited_tags && inherited_tags[attrname] !== null){
+                var attrname = 'attr_' + oCheckbox.name.replace(/.*_change_/, '');
+                if (attrname in inherited_tags && inherited_tags[attrname] !== null){
                     currentTags = currentTags.concat(inherited_tags[attrname].split("|"));
                 }
             } else {
@@ -199,7 +199,7 @@ function wato_fix_visibility() {
     }
 
     // FIXME: use generic identifier for each form
-    var available_forms = [ "form_edithost", "form_editfolder", "form_bulkedit" ];
+    var available_forms = [ "form_edit_host", "form_editfolder" ];
     for (var try_form = 0; try_form < available_forms.length; try_form++) {
         var my_form = document.getElementById(available_forms[try_form]);
         if (my_form != null) {
@@ -509,63 +509,6 @@ function update_bulk_moveto(val) {
     fields = null;
 }
 
-//   .----------------------------------------------------------------------.
-//   |              _        _   _            _   _                         |
-//   |             / \   ___| |_(_)_   ____ _| |_(_) ___  _ __              |
-//   |            / _ \ / __| __| \ \ / / _` | __| |/ _ \| '_ \             |
-//   |           / ___ \ (__| |_| |\ V / (_| | |_| | (_) | | | |            |
-//   |          /_/   \_\___|\__|_| \_/ \__,_|\__|_|\___/|_| |_|            |
-//   |                                                                      |
-//   +----------------------------------------------------------------------+
-
-function wato_do_activation(est) {
-    var siteid = 'local';
-
-    // Hide the activate changes button
-    var button = document.getElementById('act_changes_button');
-    if (button) {
-        button.style.display = 'none';
-    }
-    button = document.getElementById('discard_changes_button');
-    if (button) {
-        button.style.display = 'none';
-        button = null;
-    }
-
-    get_url("wato_ajax_activation.py",
-            wato_activation_result, siteid);
-    replication_progress[siteid] = 20; // 10 of 10 10ths
-    setTimeout("replication_step('"+siteid+"',"+est+");", est/10);
-}
-
-function wato_activation_result(siteid, code) {
-    replication_progress[siteid] = 0;
-    var oState = document.getElementById("repstate_" + siteid);
-    var oMsg   = document.getElementById("repmsg_" + siteid);
-    if (code.substr(0, 3) == "OK:") {
-        oState.innerHTML = "<div class='repprogress ok' style='width: 160px;'>OK</div>";
-        oMsg.innerHTML = code.substr(3);
-
-        // Reload page after 1 secs
-        setTimeout(wato_replication_finish, 1000);
-    } else {
-        oState.innerHTML = '';
-        oMsg.innerHTML = code;
-        wato_hide_changes_button();
-    }
-    oState = null;
-    oMsg = null;
-}
-
-function wato_hide_changes_button()
-{
-    var button = document.getElementById('act_changes_button');
-    if (button) {
-        button.style.display = 'none';
-        button = null;
-    }
-}
-
 //   +----------------------------------------------------------------------+
 //   |           ____            _ _           _   _                        |
 //   |          |  _ \ ___ _ __ | (_) ___ __ _| |_(_) ___  _ __             |
@@ -601,31 +544,48 @@ function wato_replication_result(siteid, code) {
     var oDiv = document.getElementById("repstate_" + siteid);
     if (code.substr(0, 3) == "OK:") {
         oDiv.innerHTML = "<div class='repprogress ok' style='width: 160px;'>" +
-              code.substr(3) + "</div>";
+                         code.substr(3) + "</div>";
         num_replsites--;
     }
     else
         oDiv.innerHTML = code;
 
     if (0 == num_replsites) {
-        setTimeout(wato_replication_finish, 1000);
+        setTimeout(finish_replication, 1000);
     }
 }
 
-function wato_replication_finish() {
+function finish_replication()
+{
     // check if we have a sidebar-main frame setup
     if (this.parent && parent && parent.frames[1] == this)
         reload_sidebar();
 
-    var oDiv = document.getElementById("act_changes_button");
-    oDiv.style.display = "none";
-    oDiv = null
+    hide_changes_buttons();
+    hide_pending_changes_container();
+}
 
-    // Hide the pending changes container
+function hide_pending_changes_container()
+{
     var oPending = document.getElementById("pending_changes");
     if (oPending) {
         oPending.style.display = "none";
         oPending = null
+    }
+}
+
+function hide_changes_buttons()
+{
+    var button = document.getElementById('act_changes_button');
+    if (button) {
+        button.style.display = 'none';
+        button = null;
+    }
+
+    button = document.getElementById('discard_changes_button');
+    if (button) {
+        button.style.display = 'none';
+        button = null;
     }
 }
 
@@ -738,7 +698,7 @@ function wato_toggle_folder(event, oDiv, on) {
     var obj = oDiv.parentNode;
     var id = obj.id.substr(7);
 
-    var elements = ['edit', 'move', 'delete'];
+    var elements = ['edit', 'popup_trigger_move', 'delete'];
     for(var num in elements) {
         var elem = document.getElementById(elements[num] + '_' + id);
         if(elem) {
@@ -751,9 +711,9 @@ function wato_toggle_folder(event, oDiv, on) {
     }
 
     if(on) {
-        obj.style.backgroundImage = 'url("images/folder_open.png")';
+        add_class(obj, "open");
     } else {
-        obj.style.backgroundImage = 'url("images/folder_closed.png")';
+        remove_class(obj, "open");
 
         // Hide the eventual open move dialog
         var move_dialog = document.getElementById('move_dialog_' + id);
@@ -764,33 +724,6 @@ function wato_toggle_folder(event, oDiv, on) {
     }
     elem = null;
     obj = null;
-}
-
-function wato_toggle_move_folder(event, oButton) {
-    if(!event)
-        event = window.event;
-
-    var id = oButton.id.substr(5);
-    var obj = document.getElementById('move_dialog_' + id);
-    if(obj) {
-        if(obj.style.display == 'none') {
-            obj.style.display = 'block';
-        } else {
-            obj.style.display = 'none';
-        }
-        obj = null;
-    }
-
-    if (event.stopPropagation)
-        event.stopPropagation();
-    event.cancelBubble = true;
-
-    // Disable the default events for all the different browsers
-    if (event.preventDefault)
-        event.preventDefault();
-    else
-        event.returnValue = false;
-    return false;
 }
 
 // .--Host Diag-----------------------------------------------------------.
@@ -806,6 +739,7 @@ function handle_host_diag_result(ident, response_text) {
     var img   = document.getElementById(ident + '_img');
     var log   = document.getElementById(ident + '_log');
     var retry = document.getElementById(ident + '_retry');
+    remove_class(img, "reloading");
 
     if (response_text[0] == "0") {
         img.src = "images/icon_success.png";
@@ -818,7 +752,7 @@ function handle_host_diag_result(ident, response_text) {
 
     log.innerHTML = response_text.substr(1).replace(/\n/g, "<br>\n");
 
-    retry.src = "images/icon_retry.gif";
+    retry.src = "images/icon_reload.png";
     retry.style.display = 'inline';
 }
 
@@ -831,13 +765,39 @@ function start_host_diag_test(ident, hostname) {
 
     var vars = '';
     vars = '&ipaddress=' + encodeURIComponent(document.getElementsByName('vs_host_p_ipaddress')[0].value);
-    vars += '&snmp_community=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_community')[0].value);
+
+
+    if (document.getElementsByName("vs_host_p_snmp_community_USE")[0].checked)
+        vars += '&snmp_community=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_community')[0].value);
+
+    if (document.getElementsByName("vs_host_p_snmp_v3_credentials_USE")[0].checked) {
+        v3_use = encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_use')[0].value);
+        vars += '&snmpv3_use=' + v3_use;
+        if (v3_use == "0") {
+            vars += '&snmpv3_security_name=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_0_1')[0].value);
+        }
+        else if (v3_use == "1") {
+            vars += '&snmpv3_auth_proto=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_1_1')[0].value);
+            vars += '&snmpv3_security_name=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_1_2')[0].value);
+            vars += '&snmpv3_security_password=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_1_3')[0].value);
+        }
+        else if (v3_use == "2") {
+            vars += '&snmpv3_auth_proto=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_2_1')[0].value);
+            vars += '&snmpv3_security_name=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_2_2')[0].value);
+            vars += '&snmpv3_security_password=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_2_3')[0].value);
+            vars += '&snmpv3_privacy_proto=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_2_4')[0].value);
+            vars += '&snmpv3_privacy_password=' + encodeURIComponent(document.getElementsByName('vs_host_p_snmp_v3_credentials_2_5')[0].value);
+        }
+    }
+
     vars += '&agent_port=' + encodeURIComponent(document.getElementsByName('vs_rules_p_agent_port')[0].value);
     vars += '&snmp_timeout=' + encodeURIComponent(document.getElementsByName('vs_rules_p_snmp_timeout')[0].value);
     vars += '&snmp_retries=' + encodeURIComponent(document.getElementsByName('vs_rules_p_snmp_retries')[0].value);
     vars += '&datasource_program=' + encodeURIComponent(document.getElementsByName('vs_rules_p_datasource_program')[0].value);
 
-    img.src = "images/icon_loading.gif";
+    img.src = "images/icon_reload.png";
+    add_class(img, "reloading");
+
     log.innerHTML = "...";
     get_url("wato_ajax_diag_host.py?host=" + encodeURIComponent(hostname)
             + "&_test=" + encodeURIComponent(ident) + vars,

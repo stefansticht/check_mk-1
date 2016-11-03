@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,16 +25,35 @@
 #ifndef MetricsColumn_h
 #define MetricsColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Column.h"
+class RowRenderer;
 
-class MetricsColumn : public Column
-{
+#ifdef CMC
+#include "cmc.h"
+class Core;
+#else
+#include "nagios.h"
+#endif
+
+class MetricsColumn : public Column {
+#ifdef CMC
+    Core *_core;
+#endif
 public:
-    MetricsColumn(string name, string description, int indirect_offset)
-        : Column(name, description, indirect_offset) {}
-    int type() { return COLTYPE_LIST; }
-    void output(void *, Query *);
-    // Filter *createFilter(int opid, char *value);
+#ifdef CMC
+    MetricsColumn(const std::string &name, const std::string &description,
+                  int indirect_offset, int extra_offset, Core *core)
+        : Column(name, description, indirect_offset, extra_offset)
+        , _core(core) {}
+#else
+    MetricsColumn(const std::string &name, const std::string &description,
+                  int indirect_offset, int extra_offset)
+        : Column(name, description, indirect_offset, extra_offset) {}
+#endif
+    ColumnType type() override { return ColumnType::list; }
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
 };
 
-#endif // MetricsColumn_h
+#endif  // MetricsColumn_h

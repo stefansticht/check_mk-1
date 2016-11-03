@@ -17,61 +17,48 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "HostlistColumn.h"
-#include "HostlistColumnFilter.h"
-#include "nagios.h"
-#include "logger.h"
-#include "Query.h"
-#include "TableHosts.h"
+#include "HostlistFilter.h"
+#include "Renderer.h"
+#include "auth.h"
+#include "opids.h"
 
-extern TableHosts *g_table_hosts;
+using std::string;
 
-hostsmember *HostlistColumn::getMembers(void *data)
-{
+hostsmember *HostlistColumn::getMembers(void *data) {
     data = shiftPointer(data);
-    if (!data) return 0;
+    if (data == nullptr) {
+        return nullptr;
+    }
 
-    return *(hostsmember **)((char *)data + _offset);
+    return *reinterpret_cast<hostsmember **>(reinterpret_cast<char *>(data) +
+                                             _offset);
 }
 
-void HostlistColumn::output(void *data, Query *query)
-{
-    query->outputBeginList();
-    contact *auth_user = query->authUser();
-    hostsmember *mem = getMembers(data);
-
-    bool first = true;
-    while (mem) {
+void HostlistColumn::output(void *row, RowRenderer &r, contact *auth_user) {
+    ListRenderer l(r);
+    for (hostsmember *mem = getMembers(row); mem != nullptr; mem = mem->next) {
         host *hst = mem->host_ptr;
-        if (!auth_user || g_table_hosts->isAuthorized(auth_user, hst)) {
-            if (!first)
-                query->outputListSeparator();
-            else
-                first = false;
-            if (!_show_state)
-                query->outputString(hst->name);
-            else {
-                query->outputBeginSublist();
-                query->outputString(hst->name);
-                query->outputSublistSeparator();
-                query->outputInteger(hst->current_state);
-                query->outputSublistSeparator();
-                query->outputInteger(hst->has_been_checked);
-                query->outputEndSublist();
+        if (auth_user == nullptr ||
+            is_authorized_for(auth_user, hst, nullptr)) {
+            if (!_show_state) {
+                l.output(string(hst->name));
+            } else {
+                SublistRenderer s(l);
+                s.output(string(hst->name));
+                s.output(hst->current_state);
+                s.output(hst->has_been_checked);
             }
         }
-        mem = mem->next;
     }
-    query->outputEndList();
 }
 
-Filter *HostlistColumn::createFilter(int opid, char *value)
-{
-    return new HostlistColumnFilter(this, opid, value);
+Filter *HostlistColumn::createFilter(RelationalOperator relOp,
+                                     const string &value) {
+    return new HostlistFilter(this, relOp, value);
 }
-

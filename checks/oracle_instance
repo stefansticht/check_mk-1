@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -50,8 +50,8 @@ def inventory_oracle_instance(info):
 def check_oracle_instance(item, params, info):
 
     def state_marker(state, infotext, param, column, data):
-	value = params.get(param)
-	if value != None and column == data:
+        value = params.get(param)
+        if value != None and column == data:
             state = max(state, value)
             if value == 1:
                 infotext += '(!)'
@@ -77,7 +77,7 @@ def check_oracle_instance(item, params, info):
                 return state, infotext
 
             sid, version, openmode, logins, archiver, up_seconds, dbid, \
-                log_mode, database_role, force_logging, name = line
+                log_mode, database_role, force_logging, name = line[:11]
 
             infotext = "Database Name %s, Status %s" % \
                        (name, openmode)
@@ -105,7 +105,7 @@ def check_oracle_instance(item, params, info):
                 warn = int(warn)
                 crit = int(crit)
 
-                infotext += ' (levels at %s/%s)' % (get_age_human_readable(warn), get_age_human_readable(crit))
+                infotext += ' (warn/crit at %s/%s)' % (get_age_human_readable(warn), get_age_human_readable(crit))
                 if up_seconds <= crit:
                     state = 2
                     infotext += '(!!) not long enough up'
@@ -125,7 +125,8 @@ def check_oracle_instance(item, params, info):
                 if name != '_MGMTDB' and sid != '-MGMTDB':
                     infotext += ', Log Mode %s' % (log_mode.lower())
                     state, infotext = state_marker(state, infotext, 'archivelog', log_mode, 'ARCHIVELOG')
-                    state, infotext = state_marker(state, infotext, 'noarchivelog',log_mode,  'NOARCHIVELOG')
+                    if not params.get('ignore_noarchivelog', False):
+                        state, infotext = state_marker(state, infotext, 'noarchivelog',log_mode,  'NOARCHIVELOG')
 
                     # force logging is only usable when archivelog is enabled
                     if log_mode == 'ARCHIVELOG':

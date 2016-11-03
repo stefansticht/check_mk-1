@@ -17,28 +17,30 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#ifndef ServiceSpecialDoubleColumn_h
-#define ServiceSpecialDoubleColumn_h
+#ifndef HostSpecialDoubleColumn_h
+#define HostSpecialDoubleColumn_h
 
-#include "config.h"
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "DoubleColumn.h"
 
 #define HSDC_STALENESS 1
 
-class HostSpecialDoubleColumn : public DoubleColumn
-{
+class HostSpecialDoubleColumn : public DoubleColumn {
     int _type;
 
 public:
-    HostSpecialDoubleColumn(string name, string description, int hsdc_type, int indirect)
-        : DoubleColumn(name, description, indirect) , _type(hsdc_type) {}
-    double getValue(void *data);
+    HostSpecialDoubleColumn(const std::string& name,
+                            const std::string& description, int hsdc_type,
+                            int indirect, int extra_offset = -1)
+        : DoubleColumn(name, description, indirect, extra_offset)
+        , _type(hsdc_type) {}
+    double getValue(void* data);
 };
 
-#endif // ServiceSpecialDoubleColumn_h
-
+#endif  // HostSpecialDoubleColumn_h

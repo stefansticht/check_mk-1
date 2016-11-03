@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -44,7 +44,12 @@ def check_oracle_locks(item, params, info):
     for line in info:
         warn, crit = params["levels"]
 
-        if line[0] == item and line[1] <> '':
+        if line[0] == item and line[1] != '':
+            err = oracle_handle_ora_errors(line)
+            if err == False:
+                continue
+            elif isinstance(err, tuple):
+                return err
 
             sid, sidnr, serial, machine, program, process, osuser, ctime, \
             object_owner, object_name = line
@@ -84,7 +89,6 @@ check_info["oracle_locks"] = {
     'check_function':          check_oracle_locks,
     'inventory_function':      inventory_oracle_locks,
     'service_description':     'ORA %s Locks',
-    'has_perfdata':            False,
     "default_levels_variable" : "oracle_locks_defaults",
     'group':                   'oracle_locks',
 }

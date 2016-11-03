@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -28,11 +28,26 @@
 
 import subprocess
 
+import cmk.tty as tty
+
+import cmk_base.agent_simulator
+import cmk_base.console as console
+
 OID_END              =  0  # Suffix-part of OID that was not specified
 OID_STRING           = -1  # Complete OID as string ".1.3.6.1.4.1.343...."
 OID_BIN              = -2  # Complete OID as binary string "\x01\x03\x06\x01..."
 OID_END_BIN          = -3  # Same, but just the end part
 OID_END_OCTET_STRING = -4  # yet same, but omit first byte (assuming that is the length byte)
+
+
+# Wrapper to mark OIDs as being cached for regular checks, but not for discovery
+def CACHED_OID(oid):
+    return "cached", oid
+
+
+def BINARY(oid):
+    return "binary", oid
+
 
 def strip_snmp_value(value, hex_plain = False):
     v = value.strip()
@@ -103,7 +118,7 @@ def snmpv3_contexts_of(hostname, check_type):
             return rules
     return [None]
 
-def get_snmp_table(hostname, ip, check_type, oid_info):
+def get_snmp_table(hostname, ip, check_type, oid_info, use_snmpwalk_cache):
     # oid_info is either ( oid, columns ) or
     # ( oid, suboids, columns )
     # suboids is a list if OID-infixes that are put between baseoid
@@ -119,10 +134,8 @@ def get_snmp_table(hostname, ip, check_type, oid_info):
     if not oid.startswith("."):
         raise MKGeneralException("OID definition '%s' does not begin with ." % oid)
 
-    all_values = []
     index_column = -1
     index_format = None
-    number_rows = -1
     info = []
     for suboid in suboids:
         colno = -1
@@ -132,18 +145,14 @@ def get_snmp_table(hostname, ip, check_type, oid_info):
         max_len_col = -1
 
         for column in targetcolumns:
-            fetchoid = oid
-            if suboid:
-                fetchoid += "." + str(suboid)
-            if column != "":
-                fetchoid += "." + str(column)
+            fetchoid, value_encoding = compute_fetch_oid(oid, suboid, column)
 
             # column may be integer or string like "1.5.4.2.3"
             colno += 1
             # if column is 0, we do not fetch any data from snmp, but use
             # a running counter as index. If the index column is the first one,
             # we do not know the number of entries right now. We need to fill
-            # in later. If the column in OID_STRING or OID_BIN we do something
+            # in later. If the column is OID_STRING or OID_BIN we do something
             # similar: we fill in the complete OID of the entry, either as
             # string or as binary UTF-8 encoded number string
             if column in [ OID_END, OID_STRING, OID_BIN, OID_END_BIN, OID_END_OCTET_STRING ]:
@@ -151,53 +160,23 @@ def get_snmp_table(hostname, ip, check_type, oid_info):
                     raise MKGeneralException("Invalid SNMP OID specification in implementation of check. "
                         "You can only use one of OID_END, OID_STRING, OID_BIN, OID_END_BIN and OID_END_OCTET_STRING.")
                 index_column = colno
-                columns.append((fetchoid, []))
+                columns.append((fetchoid, [], "string"))
                 index_format = column
                 continue
 
-            if opt_use_snmp_walk or is_usewalk_host(hostname):
-                rowinfo = get_stored_snmpwalk(hostname, fetchoid)
-            else:
-                added_oids = set([])
-                rowinfo = []
-                if is_snmpv3_host(hostname):
-                    snmp_contexts = snmpv3_contexts_of(hostname, check_type)
-                else:
-                    snmp_contexts = [None]
+            rowinfo = get_snmpwalk(hostname, ip, check_type, oid, fetchoid, column, use_snmpwalk_cache)
 
-                for context_name in snmp_contexts:
-                    if has_inline_snmp and use_inline_snmp:
-                        rows = inline_snmpwalk_on_suboid(hostname, check_type, fetchoid, oid,
-                                                                              context_name=context_name)
-                    else:
-                        rows = snmpwalk_on_suboid(hostname, ip, fetchoid, context_name=context_name)
-
-                    # I've seen a broken device (Mikrotik Router), that broke after an
-                    # update to RouterOS v6.22. It would return 9 time the same OID when
-                    # .1.3.6.1.2.1.1.1.0 was being walked. We try to detect these situations
-                    # by removing any duplicate OID information
-                    if len(rows) > 1 and rows[0][0] == rows[1][0]:
-                        vverbose("Detected broken SNMP agent. Ignoring duplicate OID %s.\n" % rows[0][0])
-                        rows = rows[:1]
-
-                    for row_oid, val in rows:
-                        if row_oid in added_oids:
-                            vverbose("Duplicate OID found: %s (%s)\n" % (row_oid, val))
-                        else:
-                            rowinfo.append((row_oid, val))
-                            added_oids.add(row_oid)
-
-            columns.append((fetchoid, rowinfo))
-            number_rows = len(rowinfo)
-            if len(rowinfo) > max_len:
-                max_len = len(rowinfo)
+            columns.append((fetchoid, rowinfo, value_encoding))
+            number_of_rows = len(rowinfo)
+            if number_of_rows > max_len:
+                max_len     = number_of_rows
                 max_len_col = colno
 
         if index_column != -1:
             index_rows = []
             # Take end-oids of non-index columns as indices
-            fetchoid, max_column  = columns[max_len_col]
-            for o, value in max_column:
+            fetchoid, max_column, value_encoding  = columns[max_len_col]
+            for o, _unused_value in max_column:
                 if index_format == OID_END:
                     index_rows.append((o, extract_end_oid(fetchoid, o)))
                 elif index_format == OID_STRING:
@@ -209,16 +188,16 @@ def get_snmp_table(hostname, ip, check_type, oid_info):
                 else: # OID_END_OCTET_STRING:
                     index_rows.append((o, oid_to_bin(extract_end_oid(fetchoid, o))[1:]))
 
-            columns[index_column] = fetchoid, index_rows
+            columns[index_column] = fetchoid, index_rows, value_encoding
 
 
         # prepend suboid to first column
         if suboid and columns:
-            fetchoid, first_column = columns[0]
+            fetchoid, first_column, value_encoding = columns[0]
             new_first_column = []
             for o, val in first_column:
                 new_first_column.append((o, str(suboid) + "." + str(val)))
-            columns[0] = fetchoid, new_first_column
+            columns[0] = fetchoid, new_first_column, value_encoding
 
         # Here we have to deal with a nasty problem: Some brain-dead devices
         # omit entries in some sub OIDs. This happens e.g. for CISCO 3650
@@ -229,16 +208,92 @@ def get_snmp_table(hostname, ip, check_type, oid_info):
         # From all SNMP data sources (stored walk, classic SNMP, inline SNMP) we
         # get normal python strings. But for Check_MK we need unicode strings now.
         # Convert them by using the standard Check_MK approach for incoming data
-        new_columns = sanitize_snmp_encoding(new_columns)
+        sanitized_columns = sanitize_snmp_encoding(new_columns)
 
-        info += construct_snmp_table_of_rows(new_columns)
+        info += construct_snmp_table_of_rows(sanitized_columns)
 
     return info
 
 
+def get_snmpwalk(hostname, ip, check_type, oid, fetchoid, column, use_snmpwalk_cache):
+    is_cachable = is_snmpwalk_cachable(column)
+    rowinfo = None
+    if is_cachable and use_snmpwalk_cache:
+        # Returns either the cached SNMP walk or None when nothing is cached
+        rowinfo = get_cached_snmpwalk(hostname, fetchoid)
+
+    if rowinfo == None:
+        if opt_use_snmp_walk or is_usewalk_host(hostname):
+            rowinfo = get_stored_snmpwalk(hostname, fetchoid)
+        else:
+            rowinfo = perform_snmpwalk(hostname, ip, check_type, oid, fetchoid)
+
+        if is_cachable:
+            save_snmpwalk_cache(hostname, fetchoid, rowinfo)
+
+    return rowinfo
+
+
+def perform_snmpwalk(hostname, ip, check_type, base_oid, fetchoid):
+    added_oids = set([])
+    rowinfo = []
+    if is_snmpv3_host(hostname):
+        snmp_contexts = snmpv3_contexts_of(hostname, check_type)
+    else:
+        snmp_contexts = [None]
+
+    for context_name in snmp_contexts:
+        cpu_tracking.push_phase("snmp")
+        if is_inline_snmp_host(hostname):
+            rows = inline_snmpwalk_on_suboid(hostname, check_type, fetchoid, base_oid,
+                                                                  context_name=context_name,
+                                                                  ipaddress=ip)
+        else:
+            rows = snmpwalk_on_suboid(hostname, ip, fetchoid, context_name=context_name)
+        cpu_tracking.pop_phase()
+
+        # I've seen a broken device (Mikrotik Router), that broke after an
+        # update to RouterOS v6.22. It would return 9 time the same OID when
+        # .1.3.6.1.2.1.1.1.0 was being walked. We try to detect these situations
+        # by removing any duplicate OID information
+        if len(rows) > 1 and rows[0][0] == rows[1][0]:
+            console.vverbose("Detected broken SNMP agent. Ignoring duplicate OID %s.\n" % rows[0][0])
+            rows = rows[:1]
+
+        for row_oid, val in rows:
+            if row_oid in added_oids:
+                console.vverbose("Duplicate OID found: %s (%s)\n" % (row_oid, val))
+            else:
+                rowinfo.append((row_oid, val))
+                added_oids.add(row_oid)
+
+    return rowinfo
+
+
+def compute_fetch_oid(oid, suboid, column):
+    fetchoid = oid
+    value_encoding = "string"
+
+    if suboid:
+        fetchoid += "." + str(suboid)
+
+    if column != "":
+        if type(column) == tuple:
+            fetchoid += "." + str(column[1])
+            if column[0] == "binary":
+                value_encoding = "binary"
+        else:
+            fetchoid += "." + str(column)
+
+    return fetchoid, value_encoding
+
+
 def sanitize_snmp_encoding(columns):
-    for index, column in enumerate(columns):
-        columns[index] = map(decode_incoming_string, column)
+    for index, (column, value_encoding) in enumerate(columns):
+        if value_encoding == "string":
+            columns[index] = map(snmp_decode_string, column)
+        else:
+            columns[index] = map(snmp_decode_binary, column)
     return columns
 
 
@@ -246,7 +301,7 @@ def sanitize_snmp_table_columns(columns):
     # First compute the complete list of end-oids appearing in the output
     # by looping all results and putting the endoids to a flat list
     endoids = []
-    for fetchoid, column in columns:
+    for fetchoid, column, value_encoding in columns:
         for o, value in column:
             endoid = extract_end_oid(fetchoid, o)
             if endoid not in endoids:
@@ -262,7 +317,7 @@ def sanitize_snmp_table_columns(columns):
 
     # Now fill gaps in columns where some endois are missing
     new_columns = []
-    for fetchoid, column in columns:
+    for fetchoid, column, value_encoding in columns:
         # It might happen that end OIDs are not ordered. Fix the OID sorting to make
         # it comparable to the already sorted endoids list. Otherwise we would get
         # some mixups when filling gaps
@@ -287,7 +342,7 @@ def sanitize_snmp_table_columns(columns):
         while i < len(endoids):
             new_column.append("") # (beginoid + '.' +endoids[i], "") )
             i += 1
-        new_columns.append(new_column)
+        new_columns.append((new_column, value_encoding))
 
     return new_columns
 
@@ -353,12 +408,39 @@ def check_snmp_fixed(item, targetvalue, info):
     for line in info:
         if item == line[0]:
             value = line[1]
-            text = line[2]
             if value != targetvalue:
                 return (2, "CRIT - %s (should be %s)" % (value, targetvalue))
             else:
                 return (0, "OK - %s" % (value,))
     return (3, "Missing item %s in SNMP data" % item)
+
+
+def is_snmpwalk_cachable(column):
+    return type(column) == tuple and column[0] == "cached"
+
+
+def get_cached_snmpwalk(hostname, fetchoid):
+    path = cmk.paths.var_dir + "/snmp_cache/" + hostname + "/" + fetchoid
+
+    try:
+        console.vverbose("  Loading %s from walk cache %s\n" % (fetchoid, path))
+        return eval(file(path).read())
+    except IOError:
+        return None # don't print error when not cached yet
+    except:
+        if cmk.debug.enabled():
+            raise
+        console.verbose("Failed to read cached SNMP walk from %s, ignoring.\n" % path)
+        return None
+
+
+def save_snmpwalk_cache(hostname, fetchoid, rowinfo):
+    base_dir = cmk.paths.var_dir + "/snmp_cache/" + hostname + "/"
+    if not os.path.exists(base_dir):
+        os.makedirs(base_dir)
+    console.vverbose("  Caching walk of %s\n" % fetchoid)
+    file(base_dir + fetchoid, "w").write("%r\n" % rowinfo)
+
 
 g_walk_cache = {}
 def get_stored_snmpwalk(hostname, oid):
@@ -372,7 +454,9 @@ def get_stored_snmpwalk(hostname, oid):
         oid_prefix = oid
         dot_star = False
 
-    path = snmpwalks_dir + "/" + hostname
+    path = cmk.paths.snmpwalks_dir + "/" + hostname
+
+    console.vverbose("  Loading %s from %s\n" % (oid, path))
 
     rowinfo = []
 
@@ -437,7 +521,7 @@ def get_stored_snmpwalk(hostname, oid):
             if o == oid or o.startswith(oid_prefix + "."):
                 if len(parts) > 1:
                     try:
-                        value = agent_simulator_process(parts[1])
+                        value = cmk_base.agent_simulator.process(parts[1])
                     except:
                         value = parts[1] # agent simulator missing in precompiled mode
                 else:
@@ -461,22 +545,21 @@ def get_stored_snmpwalk(hostname, oid):
     else:
         return rowinfo
 
-# Helper function to be used in checks.  It applies a user-specified
-# character encoding in order to tranlate e.g. latin1 to utf8
 def snmp_decode_string(text):
     encoding = get_snmp_character_encoding(g_hostname)
     if encoding:
-        return text.decode(encoding).encode("utf-8")
+        return text.decode(encoding)
     else:
-        # Try to determine the current string encoding. In case a UTF-8
-        # decoding fails, we decode latin1 and encode it as UTF-8 again.
-        # When UTF-8 decoding works, we assume the string is already
-        # encoded in UTF-8 as we expect it to be.
+        # Try to determine the current string encoding. In case a UTF-8 decoding fails, we decode latin1.
         try:
-            text.decode('utf-8')
-            return text
+            return text.decode('utf-8')
         except:
-            return text.decode('latin1').encode('utf-8')
+            return text.decode('latin1')
+
+
+def snmp_decode_binary(text):
+    return map(ord, text)
+
 
 #   .--Classic SNMP--------------------------------------------------------.
 #   |        ____ _               _        ____  _   _ __  __ ____         |
@@ -490,14 +573,18 @@ def snmp_decode_string(text):
 #   '----------------------------------------------------------------------'
 
 def snmpwalk_on_suboid(hostname, ip, oid, hex_plain = False, context_name = None):
+    protospec = snmp_proto_spec(hostname)
     portspec = snmp_port_spec(hostname)
     command = snmp_walk_command(hostname)
     if context_name != None:
-        command += " -n %s" % quote_shell_string(context_name)
-    command += " -OQ -OU -On -Ot %s%s %s" % (ip, portspec, oid)
-    vverbose('   Running %s\n' % command)
+        command += [ "-n", context_name ]
+    command += [ "-OQ", "-OU", "-On", "-Ot", "%s%s%s" % (protospec, ip, portspec), oid ]
 
-    snmp_process = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+    debug_cmd = [ "''" if a == "" else a for a in command ]
+    console.vverbose("Running '%s'\n" % " ".join(debug_cmd))
+
+    snmp_process = subprocess.Popen(command, close_fds=True, stdin=open(os.devnull),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     # Ugly(1): in some cases snmpwalk inserts line feed within one
     # dataset. This happens for example on hexdump outputs longer
@@ -534,6 +621,6 @@ def snmpwalk_on_suboid(hostname, ip, oid, hex_plain = False, context_name = None
     error = snmp_process.stderr.read()
     exitstatus = snmp_process.wait()
     if exitstatus:
-        verbose(tty_red + tty_bold + "ERROR: " + tty_normal + "SNMP error: %s\n" % error.strip())
+        console.verbose(tty.red + tty.bold + "ERROR: " + tty.normal + "SNMP error: %s\n" % error.strip())
         raise MKSNMPError("SNMP Error on %s: %s (Exit-Code: %d)" % (ip, error.strip(), exitstatus))
     return rowinfo

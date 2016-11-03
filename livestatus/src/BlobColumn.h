@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,19 +25,27 @@
 #ifndef BlobColumn_h
 #define BlobColumn_h
 
-#include "config.h"
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
+#include <vector>
 #include "Column.h"
+class RowRenderer;
 
-class BlobColumn : public Column
-{
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class BlobColumn : public Column {
 public:
-    BlobColumn(string name, string description, int indirect_offset) :
-        Column(name, description, indirect_offset) {}
-    virtual char *getBlob(void *data, int *size) = 0;
-    void output(void *, Query *);
-    int type() { return COLTYPE_BLOB; }
+    BlobColumn(const std::string &name, const std::string &description,
+               int indirect_offset, int extra_offset)
+        : Column(name, description, indirect_offset, extra_offset) {}
+    virtual std::unique_ptr<std::vector<char>> getBlob(void *data) = 0;
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    ColumnType type() override { return ColumnType::blob; }
 };
 
-#endif // BlobColumn_h
-
-
+#endif  // BlobColumn_h

@@ -75,7 +75,7 @@ body.main {
    on the URL */
 body.main.screenshotmode {
     background-image: url("");
-    background-color: white;
+    background-color: white; /* #5893af; */
 }
 
 body.main div.main {
@@ -128,8 +128,20 @@ body.main table.header td.right {
 
 
 body.main table.header td.right img {
-    position: relative;
-    top: 5px;
+    width: 19px;
+    height: 19px;
+    vertical-align: bottom;
+}
+
+body.main table.header td.right a.head_logo img {
+    width: 23px;
+    height: 23px;
+    margin: 0 0 1px 5px;
+}
+
+body.main table.header td.right a.head_logo img:hover {
+    opacity: 0.5;
+    filter: alpha(opacity=50);
 }
 
 body.main hr.header {
@@ -172,15 +184,59 @@ body.main table.footer td.middle { text-align: center; }
 body.main table.footer td.right  { text-align: right; }
 body.main table.footer a { color: #246; }
 
-body.main table.footer img.statusicon {
-    width: 16px;
-    top: 16px;
-    position: relative;
-    top: -3px;
-}
-
 div#foot_refresh, div#foot_refresh_time {
     display: inline-block;
+}
+
+#reload_pause {
+    display: block;
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    width: 90px;
+    height: 90px;
+    background-color: #111;
+    opacity: 0.8;
+    filter: alpha(opacity=80); /* For IE8 and earlier */
+    border-radius: 5px;
+    padding: 10px;
+    text-decoration: none;
+    z-index: 40;
+    text-align: center;
+}
+
+.pause_bar {
+    display: inline-block;
+    width: 20px;
+    height: 60px;
+    margin-top: 5px;
+    margin-bottom: 5px;
+    background-color: #fff;
+    opacity: 0.9;
+    filter: alpha(opacity=90); /* For IE8 and earlier */
+    border-radius: 5px;
+}
+
+.pause_bar.p1 {
+    margin-left: 15px;
+    margin-right: 5px;
+}
+
+.pause_bar.p2 {
+    margin-left: 5px;
+    margin-right: 15px;
+}
+
+#reload_pause_counter {
+    font-weight: bold;
+    color: #fff;
+    text-align: center;
+    font-size: 120%;
+    text-decoration: none;
+}
+
+#reload_pause_counter:hover {
+    text-decoration: underline;
 }
 
 
@@ -245,7 +301,7 @@ div.contextlink img {
    height: 18px;
    vertical-align: middle;
    position: relative;
-   top: -2px;
+   top: -1.5px;
    margin-right: 5px;
 }
 
@@ -291,6 +347,54 @@ table.data th {
 }
 table.data th:last-child {
     border-right-style: none;
+}
+
+table.data td.buttons {
+    white-space: nowrap;
+    width: 1%;
+}
+
+table.data td.count {
+    text-align: right;
+    font-weight: bold;
+    font-family: sans-serif;
+}
+
+table.data td.number {
+    text-align: right;
+    white-space: nowrap;
+}
+
+table.data td.nobr {
+    white-space: nowrap;
+}
+
+table.data td.center {
+    text-align: center;
+}
+
+table.data td.unused {
+    color: #888;
+    text-shadow: 1px 1px 0.5px #fff;
+}
+
+td.narrow {
+    width: 10px;
+}
+td.wide {
+    width: 100%;
+}
+
+table.data.oddeven > tbody > tr:nth-child(odd) {
+    background-color: #eee;
+}
+
+table.data.oddeven > tbody > tr:nth-child(even) {
+    background-color: #ddd;
+}
+
+table.data.oddeven > tbody > tr.groupheader {
+    background-color: transparent;
 }
 
 /* Two-lined header, for example in WATO: ChangeLog->Site Status */
@@ -395,9 +499,13 @@ table.data tr th {
     vertical-align: baseline;
 }
 
+table.data tr div.toggle_actions {
+    position: relative;
+    padding-left: 14px;
+}
+
 table.data tr a.toggle_actions {
-    display: inline-block;
-    float: left;
+    position: absolute;
     top: 0;
     left: 0;
     margin: 0;
@@ -419,6 +527,11 @@ table.groupheader {
     padding: 6px 0px 3px 0px;
 }
 
+table.data tr.groupheader,
+table.data tr.groupheader.td {
+    background-color: transparent;
+}
+
 tr.groupheader td {
     border-style: none;
     margin: 0px;
@@ -435,10 +548,22 @@ tr.groupheader a:hover {
     text-decoration: underline;
 }
 
+tr.data.grouped_row_header td {
+    cursor: pointer;
+}
+
+tr.data.grouped_row_header img.treeangle {
+    margin-left: 0;
+}
+
+tr.data.group_end {
+    border-bottom: 2px solid #ccc;
+}
+
 /* state in group header must have fixed width */
 .groupheader td.state {
     border: 1px solid #000000;
-    border-radius: 5px 5px 5px 5px;
+    border-radius: 5px;
     box-shadow: 1px 1px 2px #444444;
     padding: 2px 5px;
     width: 50px;
@@ -449,10 +574,59 @@ img.iconbutton {
     height: 20px;
     padding: 0px 2px;
 }
-/* Don't know why this style is/was here. Destroys ListOf()... */
-/* img.iconbutton.trans {
-    width: 100px;
-}*/
+
+
+.wato a.checkbox img.iconbutton {
+    width: 60px;
+    height: 16px;
+}
+
+img.iconbutton:hover {
+    opacity: 0.5;
+    filter: alpha(opacity=50); /* For IE8 and earlier */
+}
+
+/* reschedule check icon */
+img.iconbutton.reloading,
+img.icon.reloading {
+    -webkit-animation:spin 1s linear infinite;
+    -moz-animation:spin 1s linear infinite;
+    animation:spin 1s linear infinite;
+}
+@-moz-keyframes spin { 100% { -moz-transform: rotate(360deg); } }
+@-webkit-keyframes spin { 100% { -webkit-transform: rotate(360deg); } }
+@keyframes spin { 100% { -webkit-transform: rotate(360deg); transform:rotate(360deg); } }
+
+img.iconbutton.reload_failed {
+    -webkit-filter: sepia(100%);
+    filter: sepia(100%);
+}
+
+/* Table with captions on the left side. Used e.g. for man pages and werks */
+
+table.data.headerleft th {
+    text-align: left;
+    padding: 4px 5px;
+}
+table.data.headerleft td {
+    padding: 4px 5px;
+}
+
+table.data.headerleft > tbody > tr:nth-child(odd) > th {
+    background-color: #73a1b4;
+}
+
+table.data.headerleft > tbody > tr:nth-child(even) > th {
+    background-color: #7fadc0;
+}
+
+table.data.headerleft > tbody > tr:nth-child(odd) > td {
+    background-color: #ddd;
+}
+table.data.headerleft > tbody > tr:nth-child(even) > td {
+    background-color: #eee;
+}
+
 
 /*-------------------------------------------------------------------------.
 |                    _____                                                 |
@@ -480,13 +654,9 @@ input[type=text], input[type=password] {
 }
 select {
     height: 24px;
-    /* border-style: solid none;
-    border-width: 2px;
-    border-color: red; */
     box-shadow: 0.1px 1.2px 1.8px 0 #888 inset;
     vertical-align: middle;
     padding-top: 4px;
-    /* padding: 1px 3px; */
 
 }
 
@@ -507,9 +677,10 @@ h2.formcaption {
   margin-bottom: 0px;
 }
 
+/* TODO: lm: Is this table.form used anywhere? If not, remove it! */
+
 table.form {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
     border-collapse: collapse;
     empty-cells: show;
     border-spacing: 0px;
@@ -526,16 +697,9 @@ table.form.nomargin {
     margin: 0;
     border-bottom-style: none;
 }
-/* table.form.nomargin td.legend,
-table.form.nomargin td.content,
-table.form.nomargin td.checkbox,
-table.form.nomargin td.buttons {
-    border-top-style: none;
-}*/
 
 table.form.nomargin td.title {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
 }
 
 table.form > tbody > tr > td {
@@ -573,21 +737,18 @@ table.form td.legend.border {
 /*    border-right-style: solid; */
 }
 table.form td.hilite {
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
     margin: 10px;
 }
 
 table.form td.lgend.button {
     text-align: right;
-/*    border-right: 1px solid #fff; */
 }
 
 td.content hr {
     height: 1px;
     border-style: none;
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
 }
 
 td.legend {
@@ -610,7 +771,7 @@ input.date, input.time {
     font-family: monospace;
 }
 
-.inputerror input, .inputerror textarea, .inputerror span.checkbox {
+.inputerror input, .inputerror textarea, .inputerror span.checkbox, .inputerror > select {
     background-color: #f84;
 }
 
@@ -633,7 +794,6 @@ span.checkbox {
 /* Next-Generation forms */
 table.nform {
     border-spacing: 0px;
-    /* border-collapse: collapse; */
     margin: 0;
     padding: 0;
     empty-cells: show;
@@ -642,8 +802,7 @@ table.nform {
     border-radius: 5px;
     box-shadow: 0px 0px 2px #000;
     margin-bottom: 10px;
-    background-image: url("images/nform_background.png");
-    background-repeat: repeat;
+    background-color: rgba(160, 181, 190, 0.6);
     border-color: #86A9B8 #22404D #22414D #86A9B8;
     border-width: 1px;
     border-style: solid;
@@ -663,14 +822,11 @@ table.nform tr.heading td {
 }
 table.nform tr.heading > td {
     border-radius: 5px 5px 0px 0px;
-    background-image: url("images/white_20percent.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
     height: 20px;
     vertical-align: middle;
     padding-left: 10px;
-}
-table.nform tr.heading > td:hover {
-    background-image: url("images/white_20percent.png");
+    cursor: pointer;
 }
 
 table.nform > tbody > tr td {
@@ -679,7 +835,6 @@ table.nform > tbody > tr td {
 
 table.nform > tbody > tr > td {
     vertical-align: middle;
-    /* height: 15px; */
 }
 
 table.nform > tbody > tr > td.simple {
@@ -689,7 +844,6 @@ table.nform > tbody > tr > td.simple {
 
 table.nform td.legend {
     text-align: left;
-    /* font-weight: bold; */
     width: 240px;
     padding-right: 8px;
     vertical-align: top;
@@ -816,12 +970,38 @@ div.togglebutton.checkbox.down {
     left: -2px;
 }
 
-div.togglebutton.checkbox         { background-image: url("images/button_checkbox_lo.png"); }
-div.togglebutton.checkbox:hover   { background-image: url("images/button_checkbox_hi.png"); }
-div.togglebutton.checkbox.down       { background-image: url("images/button_checkbox_down_lo.png"); }
-div.togglebutton.checkbox.down:hover { background-image: url("images/button_checkbox_down_hi.png"); }
-div.togglebutton.checkbox.off      { background-image: url("images/button_checkbox_off.png"); }
+div.togglebutton img {
+    width: 20px;
+    height: 20px;
+    position: relative;
+    left: 5px;
+}
 
+div.togglebutton.down img {
+    top: 1px;
+    left: 7px;
+}
+
+div.togglebutton.checkbox.down img {
+    top: 1px;
+    left: 5px;
+}
+
+div.togglebutton.checkbox img {
+    left: 4px;
+}
+
+div.togglebutton         { background-image: url("images/togglebutton_lo.png"); }
+div.togglebutton:hover   { background-image: url("images/togglebutton_hi.png"); }
+div.togglebutton.down       { background-image: url("images/togglebutton_down_lo.png"); }
+div.togglebutton.down:hover { background-image: url("images/togglebutton_down_hi.png"); }
+div.togglebutton.off      { opacity: 0.5; filter: alpha(opacity=50); }
+
+div.togglebutton.checkbox         { background-image: url("images/togglebutton_check_lo.png"); }
+div.togglebutton.checkbox:hover   { background-image: url("images/togglebutton_check_hi.png"); }
+div.togglebutton.checkbox.down       { background-image: url("images/togglebutton_check_down_lo.png"); }
+div.togglebutton.checkbox.down:hover { background-image: url("images/togglebutton_check_down_hi.png"); }
+div.togglebutton.checkbox.off      { opacity: 0.5; filter: alpha(opacity=50); }
 
 /*-------------------------------------------------------------------------.
 |                         _   _      _                                     |
@@ -834,31 +1014,24 @@ div.togglebutton.checkbox.off      { background-image: url("images/button_checkb
 |                                                                          |
 '-------------------------------------------------------------------------*/
 
-a#helpbutton {
-    width: 19px;
-    height: 19px;
-    margin: 0px 5px;
-    position: relative;
-    top: 2px;
-    left: 3px;
+body.main table.header td.right a#helpbutton img {
+    margin: 1px 5px;
 }
-a#helpbutton.active:hover {
-    background-image: url("images/helpbutton_active_hi.png");
-}
-a#helpbutton.passive:hover {
-    background-image: url("images/helpbutton_passive_hi.png");
-}
-a#helpbutton.active {
-    background-image: url("images/helpbutton_active.png");
-}
+
 a#helpbutton.passive {
-    background-image: url("images/helpbutton_passive.png");
+    filter: grayscale(100%);
+    -webkit-filter: grayscale(100%);
+    -moz-filter: grayscale(100%);
+    -ms-filter: grayscale(100%);
+    -o-filter: grayscale(100%);
+    filter: gray;
+    -webkit-filter: grayscale(1);
 }
 
 div.help {
     background-image: url("images/helpbackground.jpg");
     background-color: #FFFFCC;
-    border-radius: 5px 5px 5px 5px;
+    border-radius: 5px;
     box-shadow: 0 0 10px #fff;
     margin: 6px 3px 10px 3px;
     padding: 5px;
@@ -912,7 +1085,7 @@ body.main .popup_menu {
     position: absolute;
     top: 15px;
     left: 15px;
-    z-index: 10;
+    z-index: 50;
 
     padding: 5px 8px;
     min-width: 300px;
@@ -1134,4 +1307,8 @@ tr.data td.pnpgraph div.pnp_graph > a.popup_trigger > img.icon {
     border: none;
     box-shadow: none;
     margin: 0;
+}
+
+div.popup_trigger img.iconbutton {
+    padding: 0;
 }

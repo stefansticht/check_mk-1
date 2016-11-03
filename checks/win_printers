@@ -19,17 +19,28 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 # Example output from agent:
 # Put here the example output from your TCP-Based agent. If the
-# check is SNMP-Based, then remove this section
+# <<<win_printers>>>
+# PrinterStockholm                      0                   3                   0
+# WH1_BC_O3_UPS                         0                   3                   0
+
+
+factory_settings['win_printer_default_levels'] = {
+        "levels"        : (None, None),
+        "warn_states"   : [ 8, 11 ],
+        "crit_states"   : [ 9, 10 ],
+}
 
 def inventory_win_printers(info):
-    return [ (" ".join(x[:-3]), None) for x in info ]
+    for line in info:
+        if line[-1] != '9': # Do not discovery offline printers
+            yield " ".join(line[:-3]), {}
 
 def check_win_printers(item, params, info):
     status_map = {
@@ -56,22 +67,29 @@ def check_win_printers(item, params, info):
         11 : "Output Bin Full"
     }
 
-    if params == None:
-        warn, crit = None, None
+    if type(params) != dict:
+        # Legacy params:
+        if params == None:
+            warn, crit = None, None
+        else:
+            warn, crit = params
+        params = {}
+        params['crit_states'] = [9,10]
+        params['warn_states'] = [8,11]
     else:
-        warn, crit = params
+        warn, crit = params['levels']
 
     for line in info:
         name = " ".join(line[:-3])
         if name == item:
             state = 0
-            current_jobs, status, error = map(saveint, line[-3:])
+            current_jobs, status, error = map(int, line[-3:])
 
             error_text = ""
-            if error in [ 9, 10 ]:
+            if error in params['crit_states']:
                 state = 2
                 error_text = "Error State: %s(!!)" %  error_map[error]
-            elif error in [ 8, 11 ]:
+            elif error in params['warn_states']:
                 state = 1
                 error_text = "Error State: %s(!)" % error_map[error]
 
@@ -89,10 +107,10 @@ def check_win_printers(item, params, info):
     return 3, "Printer not found in agent output"
 
 check_info["win_printers"] = {
-    "check_function"        : check_win_printers,
-    "group"                 : "windows_printer_queues",
-    "inventory_function"    : inventory_win_printers,
-    "service_description"   : "Printer %s",
-    "has_perfdata"          : False,
+    "check_function"         : check_win_printers,
+    "group"                  : "windows_printer_queues",
+    "inventory_function"     : inventory_win_printers,
+    "service_description"    : "Printer %s",
+    "default_levels_variable" : "win_printer_default_levels",
 }
 

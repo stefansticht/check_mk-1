@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -33,8 +33,9 @@ except ImportError:
 
 from lib import *
 from valuespec import *
-import config, table
+import config, table, userdb
 import pagetypes # That will replace visuals.py one day
+import cmk.store as store
 
 #   .--Plugins-------------------------------------------------------------.
 #   |                   ____  _             _                              |
@@ -49,9 +50,9 @@ import pagetypes # That will replace visuals.py one day
 
 loaded_with_language = False
 
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     global visual_types
@@ -98,7 +99,7 @@ def load_plugins():
 
 def save(what, visuals, user_id = None):
     if user_id == None:
-        user_id = config.user_id
+        user_id = config.user.id
 
     uservisuals = {}
     for (owner_id, name), visual in visuals.items():
@@ -106,8 +107,9 @@ def save(what, visuals, user_id = None):
             uservisuals[name] = visual
     config.save_user_file('user_' + what, uservisuals, user = user_id)
 
-
-def load(what, builtin_visuals, skip_func = None):
+# FIXME: Currently all user visual files of this type are locked. We could optimize
+# this not to lock all files but only lock the files the user is about to modify.
+def load(what, builtin_visuals, skip_func = None, lock=False):
     visuals = {}
 
     # first load builtins. Set username to ''
@@ -123,7 +125,7 @@ def load(what, builtin_visuals, skip_func = None):
 
         visuals[('', name)] = visual
 
-    # Now scan users subdirs for files "visuals.mk"
+    # Now scan users subdirs for files "user_*.mk"
     subdirs = os.listdir(config.config_dir)
     for user in subdirs:
         try:
@@ -141,7 +143,10 @@ def load(what, builtin_visuals, skip_func = None):
             if not os.path.exists(path):
                 continue
 
-            user_visuals = eval(file(path).read())
+            if not userdb.user_exists(user):
+                continue
+
+            user_visuals = store.load_data_from_file(path, {}, lock)
             for name, visual in user_visuals.items():
                 visual["owner"] = user
                 visual["name"] = name
@@ -191,7 +196,7 @@ def declare_custom_permissions(what):
                 path = "%s/%s.mk" % (dirpath, what)
                 if not os.path.exists(path):
                     continue
-                visuals = eval(file(path).read())
+                visuals = store.load_data_from_file(path, {})
                 for name, visual in visuals.items():
                     declare_visual_permission(what, name, visual)
         except:
@@ -201,41 +206,52 @@ def declare_custom_permissions(what):
 # Get the list of visuals which are available to the user
 # (which could be retrieved with get_visual)
 def available(what, all_visuals):
-    user = config.user_id
+    user = config.user.id
     visuals = {}
     permprefix = what[:-1]
 
+    def published_to_user(visual):
+        if visual["public"] == True:
+            return True
+
+        if type(visual["public"]) == tuple and visual["public"][0] == "contact_groups":
+            user_groups = set(userdb.contactgroups_of_user(user))
+            if user_groups.intersection(visual["public"][1]):
+                return True
+
+        return False
+
     # 1. user's own visuals, if allowed to edit visuals
-    if config.may("general.edit_" + what):
+    if config.user.may("general.edit_" + what):
         for (u, n), visual in all_visuals.items():
             if u == user:
                 visuals[n] = visual
 
     # 2. visuals of special users allowed to globally override builtin visuals
     for (u, n), visual in all_visuals.items():
-        if n not in visuals and visual["public"] and config.user_may(u, "general.force_" + what):
+        if n not in visuals and published_to_user(visual) and config.user_may(u, "general.force_" + what):
             # Honor original permissions for the current user
             permname = "%s.%s" % (permprefix, n)
             if config.permission_exists(permname) \
-                and not config.may(permname):
+                and not config.user.may(permname):
                 continue
             visuals[n] = visual
 
     # 3. Builtin visuals, if allowed.
     for (u, n), visual in all_visuals.items():
-        if u == '' and n not in visuals and config.may("%s.%s" % (permprefix, n)):
+        if u == '' and n not in visuals and config.user.may("%s.%s" % (permprefix, n)):
             visuals[n] = visual
 
     # 4. other users visuals, if public. Sill make sure we honor permission
     #    for builtin visuals. Also the permission "general.see_user_visuals" is
     #    necessary.
-    if config.may("general.see_user_" + what):
+    if config.user.may("general.see_user_" + what):
         for (u, n), visual in all_visuals.items():
-            if n not in visuals and visual["public"] and config.user_may(u, "general.publish_" + what):
+            if n not in visuals and published_to_user(visual) and config.user_may(u, "general.publish_" + what):
                 # Is there a builtin visual with the same name? If yes, honor permissions.
                 permname = "%s.%s" % (permprefix, n)
                 if config.permission_exists(permname) \
-                    and not config.may(permname):
+                    and not config.user.may(permname):
                     continue
                 visuals[n] = visual
 
@@ -263,7 +279,7 @@ def page_list(what, title, visuals, custom_columns = [],
     check_deletable_handler = None):
 
     what_s = what[:-1]
-    if not config.may("general.edit_" + what):
+    if not config.user.may("general.edit_" + what):
         raise MKAuthException(_("Sorry, you lack the permission for editing this type of visuals."))
 
     html.header(title, stylesheets=["pages", "views", "status"])
@@ -275,24 +291,29 @@ def page_list(what, title, visuals, custom_columns = [],
     for other_what, info in visual_types.items():
         if what != other_what:
             html.context_button(info["plural_title"].title(), 'edit_%s.py' % other_what, other_what[:-1])
+
     # TODO: We hack in those visuals that already have been moved to pagetypes here
-    html.context_button(_("Graph collections"), "graph_collections.py", "graph_collection")
+    if pagetypes.has_page_type("graph_collection"):
+        html.context_button(_("Graph Collections"), "graph_collections.py", "graph_collection")
+    if pagetypes.has_page_type("custom_graph"):
+        html.context_button(_("Custom Graphs"), "custom_graphs.py", "custom_graph")
+    html.context_button(_("Bookmark Lists"), "bookmark_lists.py", "bookmark_list")
 
     html.end_context_buttons()
 
     # Deletion of visuals
     delname  = html.var("_delete")
     if delname and html.transaction_valid():
-        if config.may('general.delete_foreign_%s' % what):
-            user_id = html.var('_user_id', config.user_id)
+        if config.user.may('general.delete_foreign_%s' % what):
+            user_id = html.var('_user_id', config.user.id)
         else:
-            user_id = config.user_id
+            user_id = config.user.id
 
         deltitle = visuals[(user_id, delname)]['title']
 
         try:
             if check_deletable_handler:
-                check_deletable_handler(visuals, delname)
+                check_deletable_handler(visuals, user_id, delname)
 
             c = html.confirm(_("Please confirm the deletion of \"%s\".") % deltitle)
             if c:
@@ -303,8 +324,8 @@ def page_list(what, title, visuals, custom_columns = [],
                 html.footer()
                 return
         except MKUserError, e:
-            html.write("<div class=error>%s</div>\n" % e.message)
-            html.add_user_error(e.varname, e.message)
+            html.write("<div class=error>%s</div>\n" % e)
+            html.add_user_error(e.varname, e)
 
     keys_sorted = visuals.keys()
     keys_sorted.sort(cmp = lambda a,b: -cmp(a[0],b[0]) or cmp(a[1], b[1]))
@@ -312,11 +333,11 @@ def page_list(what, title, visuals, custom_columns = [],
     custom  = []
     builtin = []
     for (owner, visual_name) in keys_sorted:
-        if owner == "" and not config.may("%s.%s" % (what_s, visual_name)):
+        if owner == "" and not config.user.may("%s.%s" % (what_s, visual_name)):
             continue # not allowed to see this view
 
         visual = visuals[(owner, visual_name)]
-        if owner == config.user_id or \
+        if owner == config.user.id or \
            (visual["public"] and owner != '' and config.user_may(owner, "general.publish_" + what)):
             custom.append((owner, visual_name, visual))
         elif visual["public"] and owner == "":
@@ -341,14 +362,14 @@ def page_list(what, title, visuals, custom_columns = [],
             html.icon_button(clone_url, buttontext, "clone")
 
             # Delete
-            if owner and (owner == config.user_id or config.may('general.delete_foreign_%s' % what)):
+            if owner and (owner == config.user.id or config.user.may('general.delete_foreign_%s' % what)):
                 add_vars = [('_delete', visual_name)]
-                if owner != config.user_id:
+                if owner != config.user.id:
                     add_vars.append(('_user_id', owner))
                 html.icon_button(html.makeactionuri(add_vars), _("Delete!"), "delete")
 
             # Edit
-            if owner == config.user_id:
+            if owner == config.user.id:
                 html.icon_button("edit_%s.py?load_name=%s" % (what_s, visual_name), _("Edit"), "edit")
 
             # Custom buttons - visual specific
@@ -441,8 +462,8 @@ def page_create_visual(what, info_keys, next_url = None):
             return
 
         except MKUserError, e:
-            html.write("<div class=error>%s</div>\n" % e.message)
-            html.add_user_error(e.varname, e.message)
+            html.write("<div class=error>%s</div>\n" % e)
+            html.add_user_error(e.varname, e)
 
     html.begin_form('create_visual')
     html.hidden_field('mode', 'create')
@@ -474,43 +495,45 @@ def page_create_visual(what, info_keys, next_url = None):
 def get_context_specs(visual, info_handler):
     context_specs = []
     info_keys = info_handler and info_handler(visual) or infos.keys()
-    for info_key in info_keys:
+
+    single_info_keys = [key for key in info_keys if key in visual['single_infos']]
+    multi_info_keys =  [key for key in info_keys if key not in single_info_keys]
+
+    def visual_spec_single(info_key):
         info = infos[info_key]
+        params = info['single_spec']
+        optional = True
+        isopen = True
+        return Dictionary(
+            title = info['title'],
+            # render = 'form',
+            form_isopen = isopen,
+            optional_keys = optional,
+            elements = params,
+        )
 
-        if info_key in visual['single_infos']:
-            params = info['single_spec']
-            optional = True
-            isopen = True
-            vs = Dictionary(
-                title = info['title'],
-                # render = 'form',
-                form_isopen = isopen,
-                optional_keys = optional,
-                elements = params,
-            )
-        else:
-            filter_list  = VisualFilterList([info_key], title=info['title'])
-            filter_names = filter_list.filter_names()
+    def visual_spec_multi(info_key):
+        info = infos[info_key]
+        filter_list  = VisualFilterList([info_key], title=info['title'], ignore=set(single_info_keys))
+        filter_names = filter_list.filter_names()
 
-            if not filter_names:
-                continue # Skip infos which have no filters available
+        if not filter_names:
+            return # Skip infos which have no filters available
 
-            params = [
-                ('filters', filter_list),
-            ]
-            optional = None
-            # Make it open by default when at least one filter is used
-            isopen = bool([ fn for fn in visual.get('context', {}).keys()
-                                                   if fn in filter_names ])
-            vs = filter_list
+        params = [
+            ('filters', filter_list),
+        ]
+        optional = None
+        # Make it open by default when at least one filter is used
+        isopen = bool([ fn for fn in visual.get('context', {}).keys()
+                                                if fn in filter_names ])
+        return filter_list
 
+    # single infos first, the rest afterwards
+    return [(info_key, visual_spec_single(info_key)) for info_key in single_info_keys] +\
+        [(info_key, visual_spec_multi(info_key)) for info_key in multi_info_keys
+                            if visual_spec_multi(info_key) ]
 
-        # Single info context specifications should be listed first
-        if info_key in visual['single_infos']:
-            context_specs.insert(0, (info_key, vs))
-        else:
-            context_specs.append((info_key, vs))
-    return context_specs
 
 def process_context_specs(context_specs):
     context = {}
@@ -534,13 +557,13 @@ def render_context_specs(visual, context_specs):
         spec.render_input(ident, value)
 
 def page_edit_visual(what, all_visuals, custom_field_handler = None,
-                     create_handler = None, try_handler = None,
+                     create_handler = None,
                      load_handler = None, info_handler = None,
                      sub_pages = []):
     visual_type = visual_types[what]
 
     visual_type = visual_types[what]
-    if not config.may("general.edit_" + what):
+    if not config.user.may("general.edit_" + what):
         raise MKAuthException(_("You are not allowed to edit %s.") % visual_type["plural_title"])
     what_s = what[:-1]
 
@@ -559,27 +582,29 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
                 raise MKUserError('cloneuser', _('The %s does not exist.') % visual_type["title"])
 
             # Make sure, name is unique
-            if cloneuser == config.user_id: # Clone own visual
+            if cloneuser == config.user.id: # Clone own visual
                 newname = visualname + "_clone"
             else:
                 newname = visualname
             # Name conflict -> try new names
             n = 1
-            while (config.user_id, newname) in all_visuals:
+            while (config.user.id, newname) in all_visuals:
                 n += 1
                 newname = visualname + "_clone%d" % n
             visual["name"] = newname
+            visual["public"] = False
             visualname = newname
             oldname = None # Prevent renaming
-            if cloneuser == config.user_id:
+            if cloneuser == config.user.id:
                 visual["title"] += _(" (Copy)")
         else:
-            visual = all_visuals.get((config.user_id, visualname))
+            visual = all_visuals.get((config.user.id, visualname))
             if not visual:
                 visual = all_visuals.get(('', visualname)) # load builtin visual
                 mode = 'clone'
                 if not visual:
                     raise MKGeneralException(_('The requested %s does not exist.') % visual_types[what]['title'])
+                visual["public"] = False
 
         single_infos = visual['single_infos']
 
@@ -621,13 +646,27 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
     # A few checkboxes concerning the visibility of the visual. These will
     # appear as boolean-keys directly in the visual dict, but encapsulated
     # in a list choice in the value spec.
-    visibility_choices = [
-        ('hidden',     _('Hide this %s from the sidebar') % visual_type["title"]),
-        ('hidebutton', _('Do not show a context button to this %s') % visual_type["title"]),
+    visibility_elements = [
+        ('hidden', FixedValue(None,
+            title = _('Hide this %s from the sidebar') % visual_type["title"],
+        )),
+        ('hidebutton', FixedValue(None,
+            title = _('Do not show a context button to this %s') % visual_type["title"],
+        )),
     ]
-    if config.may("general.publish_" + what):
-        visibility_choices.append(
-            ('public', _('Make this %s available for all users') % visual_type["title"]))
+    if config.user.may("general.publish_" + what):
+        visibility_elements.append(('public', CascadingDropdown(
+            choices = [
+                (True, _("Publish to all users")),
+                ("contact_groups", _("Publish to members of contact groups"), userdb.GroupChoice(
+                    "contact",
+                    title = _("Publish to members of contact groups"),
+                    rows = 5,
+                    size = 40,
+                )),
+            ],
+            title = _('Make this %s available for other users') % visual_type["title"]
+        )))
 
     vs_general = Dictionary(
         title = _("General Properties"),
@@ -663,9 +702,9 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
             ('icon', IconSelector(
                 title = _('Button Icon'),
             )),
-            ('visibility', ListChoice(
+            ('visibility', Dictionary(
                 title = _('Visibility'),
-                choices = visibility_choices,
+                elements = visibility_elements,
             )),
         ],
     )
@@ -678,7 +717,7 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
         if html.var("save%d" % nr):
             save_and_go = pagename
 
-    if save_and_go or html.var("save") or html.var("try") or html.var("search"):
+    if save_and_go or html.var("save") or html.var("search"):
         try:
             general_properties = vs_general.from_html_vars('general')
             vs_general.validate_value(general_properties, 'general')
@@ -698,10 +737,10 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
                 visual[key] = general_properties[key]
 
             # ...and import the visibility flags directly into the visual
-            for key, title in visibility_choices:
-                visual[key] = key in general_properties['visibility']
+            for key in dict(visibility_elements).keys():
+                visual[key] = general_properties['visibility'].get(key, False)
 
-            if not config.may("general.publish_" + what):
+            if not config.user.may("general.publish_" + what):
                 visual['public'] = False
 
             if create_handler:
@@ -719,12 +758,12 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
                         back = 'edit_%s.py' % what
 
                 if html.check_transaction():
-                    all_visuals[(config.user_id, visual["name"])] = visual
+                    all_visuals[(config.user.id, visual["name"])] = visual
                     # Handle renaming of visuals
                     if oldname and oldname != visual["name"]:
                         # -> delete old entry
-                        if (config.user_id, oldname) in all_visuals:
-                            del all_visuals[(config.user_id, oldname)]
+                        if (config.user.id, oldname) in all_visuals:
+                            del all_visuals[(config.user.id, oldname)]
                         # -> change visual_name in back parameter
                         if back:
                             varstring = visual_type["ident_attr"] + "="
@@ -738,8 +777,8 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
                 return
 
         except MKUserError, e:
-            html.write("<div class=error>%s</div>\n" % e.message)
-            html.add_user_error(e.varname, e.message)
+            html.write("<div class=error>%s</div>\n" % e)
+            html.add_user_error(e.varname, e)
 
     html.begin_form("visual", method = "POST")
     html.hidden_field("back", back_url)
@@ -749,10 +788,10 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
 
     # FIXME: Hier werden die Flags aus visibility nicht korrekt geladen. Wäre es nicht besser,
     # diese in einem Unter-Dict zu lassen, anstatt diese extra umzukopieren?
-    visib = []
-    for key, title in visibility_choices:
+    visib = {}
+    for key, vs in visibility_elements:
         if visual.get(key):
-            visib.append(key)
+            visib[key] = visual[key]
     visual["visibility"] = visib
 
     vs_general.render_input("general", visual)
@@ -766,25 +805,12 @@ def page_edit_visual(what, all_visuals, custom_field_handler = None,
     html.show_localization_hint()
 
     html.button("save", _("Save"))
+
     for nr, (title, pagename, icon) in enumerate(sub_pages):
         html.button("save%d" % nr, _("Save and go to ") + title)
+
     html.hidden_fields()
-
-    if try_handler:
-        html.write(" ")
-        html.button("try", _("Try out"))
-        html.end_form()
-
-        if (html.has_var("try") or html.has_var("search")) and not html.has_user_errors():
-            html.set_var("search", "on")
-            if visual:
-                import bi
-                bi.reset_cache_status()
-                try_handler(visual)
-            return # avoid second html footer
-    else:
-        html.end_form()
-
+    html.end_form()
     html.footer()
 
 #.
@@ -803,6 +829,23 @@ def declare_filter(sort_index, f, comment = None):
     multisite_filters[f.name] = f
     f.comment = comment
     f.sort_index = sort_index
+
+
+def show_filter(f):
+    html.write('<div class="floatfilter %s">' % (f.double_height() and "double" or "single"))
+    html.write('<div class=legend>%s</div>' % html.attrencode(f.title))
+    html.write('<div class=content>')
+    try:
+        f.display()
+    except Exception, e:
+        if config.debug:
+            raise
+        html.icon(_("This filter cannot be displayed"), "alert")
+        html.write("%s" % e)
+
+    html.write("</div>")
+    html.write("</div>")
+
 
 # Base class for all filters
 # name:          The unique id of that filter. This id is e.g. used in the
@@ -1062,20 +1105,23 @@ class VisualFilterList(ListOfMultiple):
     def __init__(self, infos, **kwargs):
         self._infos = infos
 
+        ignore = kwargs.get("ignore", set())
+
         # First get all filters useful for the infos, then create VisualFilter
         # valuespecs from them and then sort them
         fspecs = {}
         self._filters = {}
         for info in self._infos:
             for fname, filter in filters_allowed_for_info(info).items():
-                if fname not in fspecs and fname not in ubiquitary_filters:
+                if fname not in fspecs and fname not in ignore:
                     fspecs[fname] = VisualFilter(fname,
                         title = filter.title,
                     )
                     self._filters[fname] = fspecs[fname]._filter
 
         # Convert to list and sort them!
-        fspecs = sorted(fspecs.items(), key=lambda x: (x[1]._filter.sort_index, x[1].title()))
+        fspecs = sorted(fspecs.items(),
+            key=lambda x: (x[1]._filter.sort_index, x[1].title()))
 
         kwargs.setdefault('title', _('Filters'))
         kwargs.setdefault('add_label', _('Add filter'))
@@ -1086,6 +1132,7 @@ class VisualFilterList(ListOfMultiple):
 
     def filter_names(self):
         return self._filters.keys()
+
 
 # Realizes a Multisite/visual filter in a valuespec. It can render the filter form, get
 # the filled in values and provide the filled in information for persistance.
@@ -1109,12 +1156,7 @@ class VisualFilter(ValueSpec):
             self._filter.set_value(value)
 
         # A filter can not be used twice on a page, because the varprefix is not used
-        html.write('<div class="floatfilter %s">' % (self._filter.double_height() and "double" or "single"))
-        html.write('<div class=legend>%s</div>' % self._filter.title)
-        html.write('<div class=content>')
-        self._filter.display()
-        html.write("</div>")
-        html.write("</div>")
+        show_filter(self._filter)
 
     def value_to_text(self, value):
         # FIXME: optimize. Needed?
@@ -1239,7 +1281,11 @@ def visual_title(what, visual):
 # the variables "event_id" and "history_line" to be set in order
 # to exactly specify one history entry.
 def info_params(info_key):
-    return dict(infos[info_key]['single_spec']).keys()
+    single_spec = infos[info_key]['single_spec']
+    if single_spec == None:
+        return []
+    else:
+        return dict(single_spec).keys()
 
 def get_single_info_keys(visual):
     keys = []
@@ -1256,7 +1302,7 @@ def get_singlecontext_vars(visual):
 def get_singlecontext_html_vars(visual):
     vars = get_singlecontext_vars(visual)
     for key in get_single_info_keys(visual):
-        val = html.var_utf8(key)
+        val = html.get_unicode_input(key)
         if val != None:
             vars[key] = val
     return vars
@@ -1374,8 +1420,10 @@ def transform_old_visual(visual):
 
 # TODO: Remove this code as soon as everything is moved over to pagetypes.py
 def ajax_popup_add():
+    add_type = html.var("add_type")
+
     html.write("<ul>")
-    pagetypes.render_addto_popup()
+    pagetypes.render_addto_popup(add_type)
 
     for visual_type_name, visual_type in visual_types.items():
         if "popup_add_handler" in visual_type:
@@ -1392,8 +1440,8 @@ def ajax_popup_add():
 
 
 def ajax_add_visual():
-    visual_type = html.var('visual_type') # dashboards / views / ...
-    visual_type = visual_types[visual_type]
+    visual_type_name = html.var('visual_type') # dashboards / views / ...
+    visual_type = visual_types[visual_type_name]
     module_name = visual_type["module_name"]
     visual_module = __import__(module_name)
     handler = visual_module.__dict__[visual_type["add_visual_handler"]]
@@ -1403,12 +1451,8 @@ def ajax_add_visual():
     # type of the visual to add (e.g. view)
     element_type = html.var("type")
 
-    # Context and params are | separated lists of : separated triples
-    # of name, datatype and value. Datatype is int or string
     extra_data = []
     for what in [ 'context', 'params' ]:
-        value = html.var(what)
-        if value:
-            extra_data.append(json.loads(value))
+        extra_data.append(json.loads(html.var(what)))
 
     handler(visual_name, element_type, *extra_data)

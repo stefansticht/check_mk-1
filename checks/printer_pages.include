@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -36,7 +36,8 @@ def scan_ricoh_printer(oid):
 
 def scan_canon_printer(oid):
     return "canon" in oid(".1.3.6.1.2.1.1.1.0").lower() \
-           and oid(".1.3.6.1.4.1.1602.1.1.1.1.0") != None
+           and oid(".1.3.6.1.4.1.1602.1.1.1.1.0") != None \
+           and oid(".1.3.6.1.4.1.1602.1.11.1.3.1.4") != None
 
 def scan_generic_printer(oid):
     return oid(".1.3.6.1.2.1.43.10.2.1.4.1.1") != None \

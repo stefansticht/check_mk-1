@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,24 +25,28 @@
 #ifndef AttributelistFilter_h
 #define AttributelistFilter_h
 
-#include "config.h"
-#include "Filter.h"
-#include <stdlib.h>
+#include "config.h"  // IWYU pragma: keep
+#include "AttributelistColumn.h"
+#include "ColumnFilter.h"
+#include "opids.h"
 
-class AttributelistColumn;
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
 
-class AttributelistFilter : public Filter
-{
-    AttributelistColumn *_column;
-    int _opid;
-    bool _negate;
-    unsigned long _ref;
-
+class AttributelistFilter : public ColumnFilter {
 public:
-    AttributelistFilter(AttributelistColumn *column, int opid, unsigned long ref) :
-        _column(column), _opid(abs(opid)), _negate(opid < 0), _ref(ref) {}
-    bool accepts(void *data);
+    AttributelistFilter(AttributelistColumn *column, RelationalOperator relOp,
+                        unsigned long ref);
+    bool accepts(void *row, contact *auth_user, int timezone_offset) override;
+    AttributelistColumn *column() const override;
+
+private:
+    AttributelistColumn *_column;
+    RelationalOperator _relOp;
+    unsigned long _ref;
 };
 
-
-#endif // AttributelistFilter_h
+#endif  // AttributelistFilter_h

@@ -17,29 +17,29 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "IntColumn.h"
-#include "IntColumnFilter.h"
-#include "Query.h"
+#include <cstdio>
+#include "IntFilter.h"
+#include "Renderer.h"
+#include "opids.h"
 
-void IntColumn::output(void *data, Query *query)
-{
-    query->outputInteger(getValue(data, query));
+using std::string;
+
+void IntColumn::output(void *row, RowRenderer &r, contact *auth_user) {
+    r.output(getValue(row, auth_user));
 }
 
-Filter *IntColumn::createFilter(int operator_id, char *value)
-{
-    return new IntColumnFilter(this, operator_id, value);
+Filter *IntColumn::createFilter(RelationalOperator relOp, const string &value) {
+    return new IntFilter(this, relOp, value);
 }
 
-
-string IntColumn::valueAsString(void *data, Query *query)
-{
+string IntColumn::valueAsString(void *row, contact *auth_user) {
     char i[16];
-    snprintf(i, sizeof(i), "%d", getValue(data, query));
+    snprintf(i, sizeof(i), "%d", getValue(row, auth_user));
     return i;
 }

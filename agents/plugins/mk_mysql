@@ -18,7 +18,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -26,7 +26,14 @@
 # gets optional socket as argument
 function do_query() {
   INSTANCE=$(echo $1|awk -v FS="=" '{print $2}')
-  INSTANCE_NAME="[[$(ps -ef|grep socket|grep "${INSTANCE}"|grep "[u]ser" | sed -ne 's/.*user=\([^ ]*\).*/\1/p')]]"
+  COUNT=$(ps -ef | grep [/]usr/sbin/mysqld | grep socket | wc -l)
+  if [ $COUNT -gt 1 ]
+  then
+      INSTANCE_NAME=$(ps -ef|grep socket|grep "${INSTANCE}"|grep "[u]ser" | sed -ne 's/.*socket=\([^.]*\).*/\1/p')
+      INSTANCE_NAME="[[${INSTANCE_NAME##*/}]]"
+  else
+      INSTANCE_NAME="[[$(ps -ef|grep socket|grep "${INSTANCE}"|grep "[u]ser" | sed -ne 's/.*user=\([^ ]*\).*/\1/p')]]"
+  fi
 
 
 
@@ -59,7 +66,11 @@ then
   mysql_sockets="--"$(fgrep socket $MK_CONFDIR/mysql.cfg)
   if [ $mysql_sockets = "--" ] ; then
     mysql_sockets=$(ps -ef | grep mysqld | grep "[s]ocket" | sed -ne 's/.*socket=\([^ ]*\).*/\1/p')
-    for socket in $mysql_sockets ; do do_query "--socket="$socket ; done
+    if [ -z $mysql_sockets ] ; then
+        do_query ""
+    else
+        for socket in $mysql_sockets ; do do_query "--socket="$socket ; done
+    fi
   else
     do_query ""
   fi

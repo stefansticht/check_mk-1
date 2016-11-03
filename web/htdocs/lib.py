@@ -19,22 +19,16 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import math, grp, pprint, os, errno, gettext, marshal, re, fcntl, __builtin__, time
-
-# Workarround when the file is included outsite multisite
-try:
-    import defaults
-except:
-    pass
-
-core_state_names = { -1: _("NODATA"), 0: _("OK"), 1: _("WARNING"), 2: _("CRITICAL"), 3: _("UNKNOWN")}
-nagios_short_state_names = { -1: _("PEND"), 0: _("OK"), 1: _("WARN"), 2: _("CRIT"), 3: _("UNKN") }
-nagios_short_host_state_names = { 0: _("UP"), 1: _("DOWN"), 2: _("UNREACH") }
+import math, grp, pprint, os, errno, marshal, re, fcntl, time
+from cmk.exceptions import MKException, MKGeneralException
+from cmk.regex import regex
+import cmk.store as store
+import cmk.paths
 
 # possible log levels for logger()
 LOG_EMERG   = 0 # system is unusable
@@ -46,47 +40,47 @@ LOG_NOTICE  = 5 # normal but significant condition
 LOG_INFO    = 6 # informational
 LOG_DEBUG   = 7 # debug-level messages
 
-# never used directly in the code. Just some wrapper to make all of our
-# exceptions handleable with one call
-class MKException(Exception):
-    # Do not use the Exception() __str__, because it uses str()
-    # to convert the message. We want to keep unicode strings untouched
-    # And don't use self.message, because older python versions don't
-    # have this variable set. self.args[0] seems to be the most portable
-    # way at the moment.
-    def __str__(self):
-        return self.args[0]
-
-class MKGeneralException(MKException):
-    plain_title = _("General error")
-    title       = _("Error")
-    def __init__(self, reason):
-        self.reason = reason
-    def __str__(self):
-        return self.reason
-
 class MKAuthException(MKException):
-    title       = _("Permission denied")
-    plain_title = _("Authentication error")
     def __init__(self, reason):
         self.reason = reason
+
     def __str__(self):
         return self.reason
+
+    def title(self):
+        return _("Permission denied")
+
+    def plain_title(self):
+        return _("Authentication error")
+
 
 class MKUnauthenticatedException(MKGeneralException):
-    title       = _("Not authenticated")
-    plain_title = _("Missing authentication credentials")
+    def title(self):
+        return _("Not authenticated")
+
+    def plain_title(self):
+        return _("Missing authentication credentials")
+
 
 class MKConfigError(MKException):
-    title       = _("Configuration error")
-    plain_title = _("Configuration error")
+    def title(self):
+        return _("Configuration error")
+
+    def plain_title(self):
+        return self.title()
+
 
 class MKUserError(MKException):
-    title       = _("Invalid User Input")
-    plain_title = _("User error")
     def __init__(self, varname, message):
         self.varname = varname
-        Exception.__init__(self, message)
+        super(MKUserError, self).__init__(message)
+
+    def title(self):
+        return _("Invalid User Input")
+
+    def plain_title(self):
+        return _("User error")
+
 
 class MKInternalError(MKException):
     pass
@@ -100,15 +94,10 @@ def make_nagios_directory(path):
         make_nagios_directory(parent_dir)
         try:
             os.mkdir(path)
-            gid = grp.getgrnam(defaults.www_group).gr_gid
-            os.chown(path, -1, gid)
             os.chmod(path, 0770)
         except Exception, e:
             raise MKConfigError("Your web server cannot create the directory <tt>%s</tt>, "
-                    "or cannot set the group to <tt>%s</tt> or cannot set the permissions to <tt>0770</tt>. "
-                    "Please make sure that:<ul><li>the base directory is writable by the web server.</li>"
-                    "<li>Both Nagios and the web server are in the group <tt>%s</tt>.</ul>Reason: %s" % (
-                        path, defaults.www_group, defaults.www_group, e))
+                    "or cannot set the permissions to <tt>0770</tt>: %s" % (path, e))
 
 # Same as make_nagios_directory but also creates parent directories
 # Logic has been copied from os.makedirs()
@@ -120,7 +109,7 @@ def make_nagios_directories(name):
     if head and tail and not os.path.exists(head):
         try:
             make_nagios_directories(head)
-        except os.OSError, e:
+        except OSError, e:
             # be happy if someone already created the path
             if e.errno != errno.EEXIST:
                 raise
@@ -131,15 +120,7 @@ def make_nagios_directories(name):
 def create_user_file(path, mode):
     path = make_utf8(path)
     f = file(path, mode, 0)
-    gid = grp.getgrnam(defaults.www_group).gr_gid
-    # Tackle user problem: If the file is owned by nagios, the web
-    # user can write it but cannot chown the group. In that case we
-    # assume that the group is correct and ignore the error
-    try:
-        os.chown(path, -1, gid)
-        os.chmod(path, 0660)
-    except:
-        pass
+    os.chmod(path, 0660)
     return f
 
 def write_settings_file(path, content):
@@ -154,25 +135,20 @@ def write_settings_file(path, content):
         data = repr(content)
     create_user_file(path, "w").write(data + "\n")
 
+
 def remove_user_file(path):
     path = path.encode("utf-8")
     if os.path.exists(path):
         os.remove(path)
 
+
+# TODO: Remove this helper function. Replace with explicit checks and covnersion
+# in using code.
 def savefloat(f):
     try:
         return float(f)
     except:
         return 0.0
-
-# sorted() is not available in all Python versions
-try:
-    sorted
-except:
-    def sorted(l):
-        a = l[:]
-        a.sort()
-        return a
 
 
 def make_utf8(x):
@@ -187,12 +163,12 @@ def make_utf8(x):
 # because of loss of entropy. So we hope /dev/urandom is enough.
 # Furthermore we filter out non-printable characters. The byte
 # 0x00 for example does not make it through HTTP and the URL.
-def get_random_string(size):
+def get_random_string(size, from_ascii=48, to_ascii=90):
     secret = ""
     urandom = file("/dev/urandom")
     while len(secret) < size:
         c = urandom.read(1)
-        if ord(c) >= 48 and ord(c) <= 90:
+        if ord(c) >= from_ascii and ord(c) <= to_ascii:
             secret += c
     return secret
 
@@ -210,104 +186,56 @@ def gen_id():
 # Load all files below share/check_mk/web/plugins/WHAT into a
 # specified context (global variables). Also honors the
 # local-hierarchy for OMD
+# TODO: Couldn't we precompile all our plugins during packaging to make loading faster?
+# TODO: Replace the execfile thing by some more pythonic plugin structure. But this would
+#       be a large rewrite :-/
 def load_web_plugins(forwhat, globalvars):
-    plugins_path = defaults.web_dir + "/plugins/" + forwhat
-    if os.path.exists(plugins_path):
-        fns = os.listdir(plugins_path)
-        fns.sort()
-        for fn in fns:
+    for plugins_path in [ cmk.paths.web_dir + "/plugins/" + forwhat,
+                          cmk.paths.local_web_dir + "/plugins/" + forwhat ]:
+        if not os.path.exists(plugins_path):
+            continue
+
+        for fn in sorted(os.listdir(plugins_path)):
             file_path = plugins_path + "/" + fn
-            if fn.endswith(".py"):
-                if not os.path.exists(file_path + "c"):
-                    execfile(file_path, globalvars)
+
+            if fn.endswith(".py") and not os.path.exists(file_path + "c"):
+                execfile(file_path, globalvars)
+
             elif fn.endswith(".pyc"):
                 code_bytes = file(file_path).read()[8:]
                 code = marshal.loads(code_bytes)
                 exec code in globalvars
 
-    if defaults.omd_root:
-        local_plugins_path = defaults.omd_root + "/local/share/check_mk/web/plugins/" + forwhat
-        if local_plugins_path != plugins_path: # honor ./setup.sh in site
-            if os.path.exists(local_plugins_path):
-                fns = os.listdir(local_plugins_path)
-                fns.sort()
-                for fn in fns:
-                    file_path = local_plugins_path + "/" + fn
-                    if fn.endswith(".py"):
-                        execfile(file_path, globalvars)
-                    elif fn.endswith(".pyc"):
-                        code_bytes = file(file_path).read()[8:]
-                        code = marshal.loads(code_bytes)
-                        exec code in globalvars
 
-def get_language_dirs():
-    dirs = [ defaults.locale_dir ]
-    if defaults.omd_root:
-        dirs.append(defaults.omd_root + "/local/share/check_mk/locale")
-    return dirs
+def find_local_web_plugins():
+    basedir = cmk.paths.local_web_dir + "/plugins/"
+    for plugins_dir in os.listdir(basedir):
+        dir_path = basedir + plugins_dir
+        yield dir_path # Changes in the directory like deletion of files!
+        if os.path.isdir(dir_path):
+            for file_name in os.listdir(dir_path):
+                if file_name.endswith(".py") or file_name.endswith(".pyc"):
+                    yield dir_path + "/" + file_name
 
-def get_language_alias(lang):
-    alias = lang
-    for lang_dir in get_language_dirs():
-        try:
-            alias = file('%s/%s/alias' % (lang_dir, lang), 'r').read().strip()
-        except (OSError, IOError):
-            pass
-    return alias
 
-def get_languages():
-    # Add the hard coded english language to the language list
-    # It must be choosable even if the administrator changed the default
-    # language to a custom value
-    languages = set([ (None, _('English')) ])
+last_web_plugins_update = 0
+def local_web_plugins_have_changed():
+    global last_web_plugins_update
 
-    for lang_dir in get_language_dirs():
-        try:
-            languages.update([ (val, get_language_alias(val))
-                for val in os.listdir(lang_dir) if not '.' in val ])
-        except OSError:
-            # Catch "OSError: [Errno 2] No such file or
-            # directory:" when directory not exists
-            pass
+    if html.is_cached("local_web_plugins_have_changed"):
+        return html.get_cached("local_web_plugins_have_changed")
 
-    return list(languages)
+    this_time = 0.0
+    for path in find_local_web_plugins():
+        this_time = max(os.stat(path).st_mtime, this_time)
+    last_time = last_web_plugins_update
+    last_time = last_web_plugins_update
+    last_web_plugins_update = this_time
 
-def load_language(lang):
-    # Make current language globally known to all of our modules
-    __builtin__.current_language = lang
+    have_changed = this_time > last_time
+    html.set_cache("local_web_plugins_have_changed", have_changed)
+    return have_changed
 
-    if lang:
-        locale_base = defaults.locale_dir
-
-        # OMD users can put their localization into a local path into the site
-        if defaults.omd_root:
-            local_locale_path = defaults.omd_root + "/local/share/check_mk/locale"
-            po_path = '/%s/LC_MESSAGES/multisite.mo' % lang
-            # Use file in OMD local strucuture when existing
-            if os.path.exists(local_locale_path + po_path):
-                locale_base = local_locale_path
-
-        try:
-            i18n = gettext.translation('multisite', locale_base, languages = [ lang ], codeset = 'UTF-8')
-            i18n.install(unicode = True)
-        except IOError, e:
-            # Fallback to non localized multisite
-            # I'd prefer to fallback to multisite default language but can not import config module here
-            __builtin__.current_language = None
-    else:
-        # Replace the _() function to disable i18n again
-        __builtin__._ = lambda x: x
-
-# Localization of user supplied texts
-def _u(text):
-    import config
-    ldict = config.user_localizations.get(text)
-    if ldict:
-        return ldict.get(current_language, text)
-    else:
-        return text
-
-__builtin__._u = _u
 
 def pnp_cleanup(s):
     return s \
@@ -317,8 +245,9 @@ def pnp_cleanup(s):
         .replace('\\', '_')
 
 # Quote string for use as arguments on the shell
+# TODO: Move to Check_MK library
 def quote_shell_string(s):
-        return "'" + s.replace("'", "'\"'\"'") + "'"
+    return "'" + s.replace("'", "'\"'\"'") + "'"
 
 ok_marker      = '<b class="stmark state0">OK</b>'
 warn_marker    = '<b class="stmark state1">WARN</b>'
@@ -357,15 +286,16 @@ def format_plugin_output(output, row = None):
         output = output[:a] + "running on " + h + output[e+1:]
 
     if config.escape_plugin_output:
-        output = re.sub("http[s]?://[^\"'>\t\s\n,]+",
+        # (?:&lt;A HREF=&quot;), (?: target=&quot;_blank&quot;&gt;)? and endswith(" </A>") is a special
+        # handling for the HTML code produced by check_http when "clickable URL" option is active.
+        output = re.sub("(?:&lt;A HREF=&quot;)?(http[s]?://[^\"'>\t\s\n,]+)(?: target=&quot;_blank&quot;&gt;)?",
                          lambda p: '<a href="%s"><img class=pluginurl align=absmiddle title="%s" src="images/pluginurl.png"></a>' %
-                            (p.group(0).replace('&quot;', ''), p.group(0).replace('&quot;', '')), output)
+                            (p.group(1).replace('&quot;', ''), p.group(1).replace('&quot;', '')), output)
+
+        if output.endswith(" &lt;/A&gt;"):
+            output = output[:-11]
 
     return output
-
-def format_exception():
-    import traceback
-    return traceback.format_exc()
 
 
 # Debug logging directly to the dedicated web GUI log. The log format is
@@ -387,7 +317,7 @@ def logger(level, msg):
     elif type(msg) != str:
         msg = repr(msg)
 
-    log_file = defaults.log_dir + '/web.log'
+    log_file = cmk.paths.log_dir + '/web.log'
     file(log_file, 'a')
     aquire_lock(log_file)
     try:
@@ -406,11 +336,15 @@ def lqencode(s):
     # of the next query.
     return s.replace('\n', '')
 
+
+# TODO: Remove this helper function. Replace with explicit checks and covnersion
+# in using code.
 def saveint(x):
     try:
         return int(x)
     except:
         return 0
+
 
 def tryint(x):
     try:
@@ -418,66 +352,11 @@ def tryint(x):
     except:
         return x
 
-def set_is_disjoint(a, b):
-    for elem in a:
-        if elem in b:
-            return False
-    return True
 
-# Functions for locking files. All locks must be freed if a request
-# has terminated (in good or in bad manner). Currently only exclusive
-# locks are implemented and they always will wait for ever.
-g_aquired_locks = []
-g_locked_paths = []
-def aquire_lock(path):
-    if path in g_locked_paths:
-        return # No recursive locking
-    fd = os.open(path, os.O_RDONLY)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    g_aquired_locks.append((path, fd))
-    g_locked_paths.append(path)
-
-def release_lock(path):
-    if path not in g_locked_paths:
-        return # no unlocking needed
-    for lock_path, fd in g_aquired_locks:
-        if lock_path == path:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
-            g_aquired_locks.remove((lock_path, fd))
-    g_locked_paths.remove(path)
-
-def have_lock(path):
-    return path in g_locked_paths
-
-def release_all_locks():
-    global g_aquired_locks, g_locked_paths
-    for path, fd in g_aquired_locks:
-        os.close(fd)
-    g_aquired_locks = []
-    g_locked_paths = []
-
-
-regex_cache = {}
-def regex(r):
-    rx = regex_cache.get(r)
-    if rx:
-        return rx
-    try:
-        rx = re.compile(r)
-    except Exception, e:
-        raise MKConfigError(_("Invalid regular expression '%s': %s") % (r, e))
-    regex_cache[r] = rx
-    return rx
-
-def escape_regex_chars(text):
-    escaped = ""
-    for c in text:
-        if c in '().^$[]{}+*\\':
-            escaped += '\\'
-        escaped += c
-    return escaped
-
+aquire_lock       = store.aquire_lock
+release_lock      = store.release_lock
+have_lock         = store.have_lock
+release_all_locks = store.release_all_locks
 
 # Splits a word into sequences of numbers and non-numbers.
 # Creates a tuple from these where the number are converted
@@ -502,6 +381,8 @@ def num_split(s):
 
 def cmp_service_name_equiv(r):
     if r == "Check_MK":
+        return -6
+    elif r == "Check_MK Agent":
         return -5
     elif r == "Check_MK Discovery":
         return -4
@@ -511,6 +392,13 @@ def cmp_service_name_equiv(r):
         return -2
     else:
         return 0
+
+def cmp_version(a, b):
+    if a == None or b == None:
+        return cmp(a, b)
+    aa = map(tryint, a.split("."))
+    bb = map(tryint, b.split("."))
+    return cmp(aa, bb)
 
 
 def frexpb(x, base):
@@ -525,6 +413,18 @@ def frexp10(x):
     return frexpb(x, 10)
 
 
+def render_scientific(v, precision=3):
+    if v == 0:
+        return "0"
+    elif v < 0:
+        return "-" + render_scientific(v*-1, precision)
+
+    mantissa, exponent = frexp10(float(v))
+    # Render small numbers without exponent
+    if exponent >= -3 and exponent <= 4:
+        return "%%.%df" % max(0, precision - exponent) % v
+
+    return "%%.%dfe%%d" % precision % (mantissa, exponent)
 
 
 # Render a physical value witha precision of p
@@ -539,10 +439,35 @@ def frexp10(x):
 # Note if the type of v is integer, then the precision cut
 # down to the precision of the actual number
 def physical_precision(v, precision, unit_symbol):
-    if v == 0:
-        return "%%.%df %%s" % (precision - 1) % (v, unit_symbol)
-    elif v < 0:
+    if v < 0:
         return "-" + physical_precision(-v, precision, unit_symbol)
+
+    scale_symbol, places_after_comma, scale_factor = calculate_physical_precision(v, precision)
+
+    scaled_value = float(v) / scale_factor
+    return (u"%%.%df %%s%%s" % places_after_comma) % (scaled_value, scale_symbol, unit_symbol)
+
+
+def physical_precision_list(values, precision, unit_symbol):
+    if not values:
+        reference = 0
+    else:
+        reference = min([ abs(v) for v in values ])
+
+    scale_symbol, places_after_comma, scale_factor = calculate_physical_precision(reference, precision)
+
+    units = []
+    scaled_values = []
+    for value in values:
+        scaled_value = float(value) / scale_factor
+        scaled_values.append(("%%.%df" % places_after_comma) % scaled_value)
+
+    return "%s%s" % (scale_symbol, unit_symbol), scaled_values
+
+
+def calculate_physical_precision(v, precision):
+    if v == 0:
+        return "", precision - 1, 1
 
     # Splitup in mantissa (digits) an exponent to the power of 10
     # -> a: (2.23399998, -2)  b: (4.5, 6)    c: (1.3756, 2)
@@ -550,10 +475,6 @@ def physical_precision(v, precision, unit_symbol):
 
     if type(v) == int:
         precision = min(precision, exponent + 1)
-
-    # Round the mantissa to the required number of digits
-    # -> a: 2.23              b: 4.5         c: 1.38
-    mant_rounded = round(mantissa, precision-1) * 10**exponent
 
     # Choose a power where no artifical zero (due to rounding) needs to be
     # placed left of the decimal point.
@@ -585,9 +506,8 @@ def physical_precision(v, precision, unit_symbol):
         places_before_comma = exponent + 1
         places_after_comma = precision - places_before_comma
 
-    value = mantissa * 10**exponent
+    return scale_symbols[scale], places_after_comma, 1000 ** scale
 
-    return u"%%.%df %%s%%s" % places_after_comma % (value, scale_symbols[scale], unit_symbol)
 
 def nic_speed_human_readable(bits_per_second):
     if bits_per_second == 10000000:
@@ -609,12 +529,42 @@ def nic_speed_human_readable(bits_per_second):
 # and drop useless zeroes at the end of the fraction
 # 45.1 -> "45.1"
 # 45.0 -> "45"
-def drop_dotzero(v, digits=1):
+def drop_dotzero(v, digits=2):
     t = "%%.%df" % digits % v
     if "." in t:
         return t.rstrip("0").rstrip(".")
     else:
         return t
+
+
+# Renders a floating point number with the given number
+# of non-zero digits. Example if precision is 3:
+# 12.40349034         -> 12.4
+# 1.23894859348563478 -> 1.24
+# 0.00001239898568978 -> 0.0000124
+# 12400000.00230923   -> 12400000
+
+def render_float_with_precision(value, precision):
+    if value == 0:
+        return "0"
+
+    elif value < 0:
+        return "-" + render_float_with_precision(-value, precision)
+
+    mantissa, exponent = frexp10(float(value))
+    # exponent + 1 is the number of digits left of the .
+
+    # Digits left of . are more than precision -> no fraction.
+    if exponent + 1 >= precision:
+        return "%.0f" % value
+
+    # Allow so many digits after comma that we have at least 'precision'
+    # valid non-zero digits
+    else:
+        digits = precision - exponent - 1
+        return "%%.%df" % digits % value
+
+
 
 
 def number_human_readable(n, precision=1, unit="B"):
@@ -652,36 +602,40 @@ def age_human_readable(secs, min_only=False):
         return physical_precision(secs, 3, _("s"))
     elif min_only:
         mins = secs / 60.0
-        return "%.1f %s" % (mins, _("min"))
+        return "%.1f %s" % (mins, _("m"))
     elif secs < 10:
-        return "%.2f %s" % (secs, _("sec"))
+        return "%.2f %s" % (secs, _("s"))
     elif secs < 60:
-        return "%.1f %s" % (secs, _("sec"))
+        return "%.1f %s" % (secs, _("s"))
     elif secs < 240:
-        return "%d %s" % (secs, _("sec"))
+        return "%d %s" % (secs, _("s"))
     mins = secs / 60
     if mins < 360:
-        return "%d %s" % (mins, _("min"))
+        return "%d %s" % (mins, _("m"))
     hours = mins / 60
     if hours < 48:
-        return "%d %s" % (hours, _("hours"))
+        return "%d %s" % (hours, _("h"))
     days = hours / 24.0
     if days < 6:
         d = ("%.1f" % days).rstrip("0").rstrip(".")
-        return "%s %s" % (d, _("days"))
+        return "%s %s" % (d, _("d"))
     elif days < 999:
-        return "%.0f %s" % (days, _("days"))
+        return "%.0f %s" % (days, _("d"))
     else:
         years = days / 365
         if years < 10:
-            return "%.1f %s" % (years, _("years"))
+            return "%.1f %s" % (years, _("y"))
         else:
-            return "%.0f %s" % (years, _("years"))
+            return "%.0f %s" % (years, _("y"))
 
 
 def date_human_readable(timestamp):
     # This can be localized:
     return time.strftime(_("%m/%d/%Y"), time.localtime(timestamp))
+
+def datetime_human_readable(timestamp):
+    # This can be localized:
+    return time.strftime(_("%m/%d/%Y %H:%M:%S"), time.localtime(timestamp))
 
 def date_range_human_readable(start_time, end_time):
     start_time_local = time.localtime(start_time)
@@ -712,106 +666,125 @@ def date_month_human_readable(timestamp):
     return time.strftime(_("%B %Y"), time.localtime(timestamp))
 
 
-def bytes_human_readable(b, base=1024.0, bytefrac=True, unit="B"):
+def calculate_scaled_number(v, base=1024.0, precision=1):
     base = float(base)
-    # Handle negative bytes correctly
-    prefix = ''
-    if b < 0:
-        prefix = '-'
-        b *= -1
 
-    digits = 1
-    if b >= base ** 4:
+    if v >= base ** 4:
         symbol = "T"
-        b /= base ** 4
+        scale = base ** 4
 
-    elif b >= base ** 3:
+    elif v >= base ** 3:
         symbol = "G"
-        b /= base ** 3
+        scale = base ** 3
 
-    elif b >= base ** 2:
+    elif v >= base ** 2:
         symbol = "M"
-        b /= base ** 2
+        scale = base ** 2
 
-    elif b >= base:
+    elif v >= base:
         symbol = "k"
-        b /= base
+        scale = base
 
     else:
         symbol = ""
+        scale = 1
 
+    return symbol, precision, scale
+
+
+def calculate_scaled_bytes(v, base=1024.0, bytefrac=True):
+    digits = 2
     if not bytefrac:
         digits = 0
-    elif b >= 100:
-        digits = 0
-    elif b >= 10:
-        digits = 1
+
+    return calculate_scaled_number(v, base, precision=digits)
+
+
+def bytes_human_readable(b, *args, **kwargs):
+    if b < 0:
+        return "-" + bytes_human_readable(-b, *args, **kwargs)
+
+    if "unit" in kwargs:
+        unit = kwargs.pop("unit")
     else:
-        digits = 2
+        unit = "B"
 
-    return "%%s%%.%df %%s%%s" % digits % (prefix, b, symbol, unit)
+    scale_symbol, places_after_comma, scale_factor = calculate_scaled_bytes(b, *args, **kwargs)
 
-
-
-__builtin__.default_user_localizations = {
-     u'Agent type':                          { "de": u"Art des Agenten", },
-     u'Business critical':                   { "de": u"Geschäftskritisch", },
-     u'Check_MK Agent (Server)':             { "de": u"Check_MK Agent (Server)", },
-     u'Criticality':                         { "de": u"Kritikalität", },
-     u'DMZ (low latency, secure access)':    { "de": u"DMZ (geringe Latenz, hohe Sicherheit", },
-     u'Do not monitor this host':            { "de": u"Diesen Host nicht überwachen", },
-     u'Dual: Check_MK Agent + SNMP':         { "de": u"Dual: Check_MK Agent + SNMP", },
-     u'Legacy SNMP device (using V1)':       { "de": u"Alte SNMP-Geräte (mit Version 1)", },
-     u'Local network (low latency)':         { "de": u"Lokales Netzwerk (geringe Latenz)", },
-     u'Networking Segment':                  { "de": u"Netzwerksegment", },
-     u'No Agent':                            { "de": u"Kein Agent", },
-     u'Productive system':                   { "de": u"Produktivsystem", },
-     u'Test system':                         { "de": u"Testsystem", },
-     u'WAN (high latency)':                  { "de": u"WAN (hohe Latenz)", },
-     u'monitor via Check_MK Agent':          { "de": u"Überwachung via Check_MK Agent", },
-     u'monitor via SNMP':                    { "de": u"Überwachung via SNMP", },
-     u'SNMP (Networking device, Appliance)': { "de": u"SNMP (Netzwerkgerät, Appliance)", },
-}
-
-try:
-    import ast
-    literal_eval = ast.literal_eval
-except ImportError:
-    # python <2.5 compatibility
-    try:
-        from compiler import parse
-        import compiler.ast
-        def literal_eval(node_or_string):
-            _safe_names = {'none': none, 'true': true, 'false': false}
-
-            if isinstance(node_or_string, basestring):
-                node_or_string = parse(node_or_string, mode='eval')
-            if isinstance(node_or_string, compiler.ast.expression):
-                node_or_string = node_or_string.node
-
-            def _convert(node):
-                if isinstance(node, compiler.ast.const) and isinstance(node.value,
-                        (basestring, int, float, long, complex)):
-                     return node.value
-                elif isinstance(node, compiler.ast.tuple):
-                    return tuple(map(_convert, node.nodes))
-                elif isinstance(node, compiler.ast.list):
-                    return list(map(_convert, node.nodes))
-                elif isinstance(node, compiler.ast.dict):
-                    return dict((_convert(k), _convert(v)) for k, v
-                                in node.items)
-                elif isinstance(node, compiler.ast.name):
-                    if node.name in _safe_names:
-                        return _safe_names[node.name]
-                elif isinstance(node, compiler.ast.unarysub):
-                    return -_convert(node.expr)
-                raise valueerror('malformed string')
-
-            return _convert(node_or_string)
-    except:
-        literal_eval = none
+    scaled_value = float(b) / scale_factor
+    if scale_symbol == "" and unit == "B":
+        return u"%.0f %s%s" % (scaled_value, scale_symbol, unit)
+    else:
+        return (u"%%.%df %%s%%s" % places_after_comma) % (scaled_value, scale_symbol, unit)
 
 
+def bytes_human_readable_list(values, *args, **kwargs):
+    if not values:
+        reference = 0
+    else:
+        reference = min([ abs(v) for v in values ])
+
+    if "unit" in kwargs:
+        unit = kwargs.pop("unit")
+    else:
+        unit = "B"
+
+    scale_symbol, places_after_comma, scale_factor = calculate_scaled_bytes(reference, *args, **kwargs)
+
+    units = []
+    scaled_values = []
+    for value in values:
+        scaled_value = float(value) / scale_factor
+        scaled_values.append(("%%.%df" % places_after_comma) % scaled_value)
+
+    return "%s%s" % (scale_symbol, unit), scaled_values
+
+
+def metric_number_with_precision(v, *args, **kwargs):
+    if v < 0:
+        return "-" + metric_number_with_precision(-v, *args, **kwargs)
+
+    subargs = {
+        "base": 1000.0,
+        "precision": kwargs.get("precision", 2),
+    }
+    scale_symbol, places_after_comma, scale_factor = calculate_scaled_number(v, *args, **subargs)
+    scaled_value = float(v) / scale_factor
+    text = ((u"%%.%df %%s" % places_after_comma) % (scaled_value, scale_symbol)).rstrip()
+    if kwargs.get("drop_zeroes"):
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+
+def metric_number_with_precision_list(values, *args, **kwargs):
+    if not values:
+        reference = 0
+    else:
+        reference = min([ abs(v) for v in values ])
+
+    kwargs["base"] = 1000.0
+    scale_symbol, places_after_comma, scale_factor = calculate_scaled_number(reference, *args, **kwargs)
+
+    units = []
+    scaled_values = []
+    for value in values:
+        scaled_value = float(value) / scale_factor
+        scaled_values.append(("%%.%df" % places_after_comma) % scaled_value)
+
+    return "%s" % scale_symbol, scaled_values
+
+
+def file_size_human_readable(file_size):
+    if file_size < 10000:
+        return str(file_size)
+    as_string = str(file_size)
+    result = ""
+    while len(as_string) > 3:
+        result = "." + as_string[-3:] + result
+        as_string = as_string[:-3]
+    result = as_string + result
+    return result
 
 #.
 #   .--Various Constants---------------------------------------------------.
@@ -827,28 +800,6 @@ except ImportError:
 #   '----------------------------------------------------------------------'
 
 seconds_per_day = 86400
-
-weekdays = {
-   0: _("Monday"),
-   1: _("Tuesday"),
-   2: _("Wednesday"),
-   3: _("Thursday"),
-   4: _("Friday"),
-   5: _("Saturday"),
-   6: _("Sunday"),
-}
-
-interface_oper_states = {
-    1: _("up"),
-    2: _("down"),
-    3: _("testing"),
-    4: _("unknown"),
-    5: _("dormant"),
-    6: _("not present"),
-    7: _("lower layer down"),
-    8: _("degraded"),    # artificial, not official
-    9: _("admin down"),  # artificial, not official
-}
 
 interface_port_types = {
     1:   "other",
@@ -1090,3 +1041,48 @@ def dict_choices(types):
         in sorted(types.items()) ]
 
 interface_port_type_choices = dict_choices(interface_port_types)
+
+
+#.
+#   .--Floating Options----------------------------------------------------.
+#   |                _____ _             _   _                             |
+#   |               |  ___| | ___   __ _| |_(_)_ __   __ _                 |
+#   |               | |_  | |/ _ \ / _` | __| | '_ \ / _` |                |
+#   |               |  _| | | (_) | (_| | |_| | | | | (_| |                |
+#   |               |_|   |_|\___/ \__,_|\__|_|_| |_|\__, |                |
+#   |                                                |___/                 |
+#   |                   ___        _   _                                   |
+#   |                  / _ \ _ __ | |_(_) ___  _ __  ___                   |
+#   |                 | | | | '_ \| __| |/ _ \| '_ \/ __|                  |
+#   |                 | |_| | |_) | |_| | (_) | | | \__ \                  |
+#   |                  \___/| .__/ \__|_|\___/|_| |_|___/                  |
+#   |                       |_|                                            |
+#   +----------------------------------------------------------------------+
+#   |  Rendering of filter boxes like (used by availability options and    |
+#   |  Werks).
+#   '----------------------------------------------------------------------'
+
+def begin_floating_options(div_id, is_open):
+    html.write('<div class="view_form" id="%s" %s>'
+            % (div_id, not is_open and 'style="display: none"' or '') )
+    html.write("<table border=0 cellspacing=0 cellpadding=0 class=filterform><tr><td>")
+
+def end_floating_options(reset_url=None):
+    html.write("</td></tr>")
+    html.write("<tr><td>")
+    html.button("apply", _("Apply"), "submit")
+    if reset_url:
+        html.buttonlink(reset_url, _("Reset to defaults"))
+
+    html.write("</td></tr></table>")
+    html.write("</div>")
+
+def render_floating_option(name, height, varprefix, valuespec, value):
+    html.write('<div class="floatfilter %s %s">' % (height, name))
+    html.write('<div class=legend>%s</div>' % valuespec.title())
+    html.write('<div class=content>')
+    valuespec.render_input(varprefix + name, value)
+    html.write("</div>")
+    html.write("</div>")
+
+

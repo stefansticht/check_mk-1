@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -37,7 +37,6 @@ multisite_builtin_views.update({
                   'description': 'A complete list of all host problems, optimized for usage in the dashboard',
                   'group_painters': [],
                   'hard_filters': ['host_scheduled_downtime_depth',
-                                   'summary_host',
                                    'hoststate',
                                    'host_acknowledged',
                                    ],
@@ -47,7 +46,6 @@ multisite_builtin_views.update({
                                       ('hst2', 'on'),
                                       ('hstp', ''),
                                       ('is_host_acknowledged', '0'),
-                                      ('is_summary_host', '0'),
                                       ],
                   'hidden': True,
                   'hidebutton': True,
@@ -87,7 +85,6 @@ multisite_builtin_views.update({
                  'hard_filters': ['service_acknowledged',
                                   'svcstate',
                                   'hoststate',
-                                  'summary_host',
                                   'in_downtime'],
                  'hard_filtervars': [('is_in_downtime', '0'),
                                      ('is_service_acknowledged', '0'),
@@ -99,8 +96,7 @@ multisite_builtin_views.update({
                                      ('hst0', 'on'),
                                      ('hst1', ''),
                                      ('hst2', ''),
-                                     ('hstp', 'on'),
-                                     ('is_summary_host', '0')],
+                                     ('hstp', 'on')],
                  'hidden': True,
                  'hide_filters': [],
                  'layout': 'table',

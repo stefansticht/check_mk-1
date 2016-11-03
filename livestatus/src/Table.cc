@@ -17,137 +17,101 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <string.h>
-
 #include "Table.h"
+#include <ostream>
 #include "Column.h"
 #include "DynamicColumn.h"
-#include "Query.h"
-#include "logger.h"
+#include "Logger.h"
+#include "StringUtils.h"
 
-void Table::addColumn(Column *col)
-{
-    // do not insert column if one with that name
-    // already exists. Delete that column in that
-    // case. (For example needed for TableLog->TableHosts,
-    // which both define host_name.
-    if (column(col->name())) {
+using mk::starts_with;
+using std::string;
+
+Table::Table(Logger *logger) : _logger(logger) {}
+
+Table::~Table() {
+    for (auto &column : _columns) {
+        delete column.second;
+    }
+
+    for (auto &dynamic_column : _dynamic_columns) {
+        delete dynamic_column.second;
+    }
+}
+
+void Table::addColumn(Column *col) {
+    // Do not insert column if one with that name already exists. Delete that
+    // column in that case. (Needed e.g. for TableLog->TableHosts, which both
+    // define host_name.)
+    if (column(col->name()) != nullptr) {
         delete col;
-    }
-    else {
-        _columns.insert(make_pair(col->name(), col));
-    }
-}
-
-
-void Table::addDynamicColumn(DynamicColumn *dyncol)
-{
-    _dynamic_columns.insert(make_pair(dyncol->name(), dyncol));
-}
-
-
-Table::~Table()
-{
-    for (_columns_t::iterator it = _columns.begin();
-            it != _columns.end();
-            ++it)
-    {
-        delete it->second;
-    }
-
-    for (_dynamic_columns_t::iterator it = _dynamic_columns.begin();
-            it != _dynamic_columns.end();
-            ++it)
-    {
-        delete it->second;
+    } else {
+        _columns.emplace(col->name(), col);
     }
 }
 
-
-void Table::addAllColumnsToQuery(Query *q)
-{
-    for (_columns_t::iterator it = _columns.begin();
-            it != _columns.end();
-            ++it)
-    {
-        q->addColumn(it->second);
-    }
+void Table::addDynamicColumn(DynamicColumn *dyncol) {
+    _dynamic_columns.emplace(dyncol->name(), dyncol);
 }
 
-
-Column *Table::column(const char *colname)
-{
-    // We allow the name of the table to be
-    // prefixed to the column name. So if we
-    // detect this prefix, we simply remove it.
-    int prefix_len = strlen(prefixname()); // replace 's' with '_'
-
-    // Multisite seems to query "service_service_description". We can fix this
-    // in newer versions, but need to be compatible. So we need a "while" here,
-    // not just an "if".
-    while (!strncmp(colname, prefixname(), prefix_len - 1) && colname[prefix_len - 1] == '_')
-    {
-        colname += prefix_len;
+Column *Table::column(string colname) {
+    // Strip away a sequence of prefixes.
+    while (starts_with(colname, namePrefix())) {
+        colname = colname.substr(namePrefix().size());
     }
 
-    // If the colum name contains a ':' then we have a dynamic
-    // column with column arguments
-    if (strchr(colname, ':'))
-        return dynamicColumn(colname);
+    auto sep = colname.find(':');
+    if (sep != string::npos) {
+        return dynamicColumn(colname.substr(0, sep), colname.substr(sep + 1));
+    }
 
-
-    // First try exact match
-    _columns_t::iterator it = _columns.find(string(colname));
-    if (it != _columns.end())
+    // First try exact match...
+    auto it = _columns.find(colname);
+    if (it != _columns.end()) {
         return it->second;
-
-    // Now we try to readd the removed prefix. That way we tackle the
-    // problem with the column "service_period". Here the prefix service_
-    // is part of the actual name of the column!
-    string with_prefix(prefixname(), prefix_len - 1);
-    with_prefix += "_";
-    with_prefix += colname;
-
-    it = _columns.find(with_prefix);
-    if (it != _columns.end())
-        return it->second;
-    else
-        return 0;
-}
-
-
-Column *Table::dynamicColumn(const char *colname_with_args)
-{
-    const char *sep_pos = strchr(colname_with_args, ':');
-    string name(colname_with_args, sep_pos - colname_with_args);
-
-    const char *argstring = sep_pos + 1;
-
-    _dynamic_columns_t::iterator it = _dynamic_columns.find(name);
-    if (it != _dynamic_columns.end())
-        return it->second->createColumn(argstring);
-
-    else
-        return 0;
-}
-
-
-bool Table::hasColumn(Column *col)
-{
-    // this is not very efficient but seldomly used
-    for (_columns_t::iterator it = _columns.begin();
-            it != _columns.end();
-            ++it)
-    {
-        if (col == it->second)
-            return true;
     }
-    return false;
+
+    // ... then try to match with the prefix.
+    it = _columns.find(namePrefix() + colname);
+    if (it != _columns.end()) {
+        return it->second;
+    }
+
+    // No luck.
+    return nullptr;
 }
 
+Column *Table::dynamicColumn(const string &name, const string &rest) {
+    auto it = _dynamic_columns.find(name);
+    if (it == _dynamic_columns.end()) {
+        Warning(_logger) << "Unknown dynamic column '" << name << "'";
+        return nullptr;
+    }
 
+    auto sep_pos = rest.find(':');
+    if (sep_pos == string::npos) {
+        Warning(_logger) << "Missing separator in dynamic column '" << name
+                         << "'";
+        return nullptr;
+    }
+
+    string name2 = rest.substr(0, sep_pos);
+    if (name2.empty()) {
+        Warning(_logger) << "Empty column name for dynamic column '" << name
+                         << "'";
+        return nullptr;
+    }
+
+    return it->second->createColumn(name2, rest.substr(sep_pos + 1));
+}
+
+bool Table::isAuthorized(contact * /*unused*/, void * /*unused*/) {
+    return true;
+}
+
+void *Table::findObject(const string & /*unused*/) { return nullptr; }

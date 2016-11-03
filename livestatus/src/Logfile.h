@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,65 +25,73 @@
 #ifndef Logfile_h
 #define Logfile_h
 
-#include <sys/types.h>
-#include <stdio.h>
-#include <stdint.h>
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
 #include <map>
-
-using namespace std;
-
-#define MAX_LOGLINE 65536
-
-class LogEntry;
-class Query;
+#include <string>
+class CommandsHolder;
 class LogCache;
+class Query;
+class LogEntry;
+class Logger;
+
+#ifdef CMC
 class World;
+#endif
 
-typedef map<uint64_t, LogEntry *> logfile_entries_t; // key is time_t . lineno
+typedef std::map<uint64_t, LogEntry *>
+    logfile_entries_t;  // key is time_t . lineno
 
-class Logfile
-{
+class Logfile {
 private:
-    char      *_path;
-    time_t     _since;         // time of first entry
-    bool       _watch;         // true only for current logfile
-    ino_t      _inode;         // needed to detect switching
-    fpos_t     _read_pos;      // read until this position
-    uint32_t   _lineno;        // read until this line
+    const CommandsHolder &_commands_holder;
+    std::string _path;
+    time_t _since;     // time of first entry
+    bool _watch;       // true only for current logfile
+    fpos_t _read_pos;  // read until this position
+    uint32_t _lineno;  // read until this line
 
-    logfile_entries_t  _entries;
-    char       _linebuffer[MAX_LOGLINE];
-    World     *_world;         // CMC: world our references point into
-
+    logfile_entries_t _entries;
+#ifdef CMC
+    World *_world;  // CMC: world our references point into
+#endif
+    Logger *const _logger;
 
 public:
-    Logfile(const char *path, bool watch);
+    Logfile(Logger *logger, const CommandsHolder &commands_holder,
+            std::string path, bool watch);
     ~Logfile();
 
-    char *path() { return _path; }
-    char *readIntoBuffer(int *size);
-    void load(LogCache *LogCache, time_t since, time_t until, unsigned logclasses);
+    std::string path() { return _path; }
+#ifdef CMC
+    char *readIntoBuffer(size_t *size);
+#endif
+    void load(LogCache *logcache, time_t since, time_t until,
+              unsigned logclasses);
     void flush();
     time_t since() { return _since; }
     unsigned classesRead() { return _logclasses_read; }
     long numEntries() { return _entries.size(); }
-    logfile_entries_t* getEntriesFromQuery(Query *query, LogCache *lc, time_t since, time_t until, unsigned);
-    bool answerQuery(Query *query, LogCache *lc, time_t since, time_t until, unsigned);
-    bool answerQueryReverse(Query *query, LogCache *lc, time_t since, time_t until, unsigned);
+    logfile_entries_t *getEntriesFromQuery(Query *query, LogCache *logcache,
+                                           time_t since, time_t until,
+                                           unsigned);
+    bool answerQuery(Query *query, LogCache *logcache, time_t since,
+                     time_t until, unsigned);
+    bool answerQueryReverse(Query *query, LogCache *logcache, time_t since,
+                            time_t until, unsigned);
 
     long freeMessages(unsigned logclasses);
     void updateReferences();
 
-    unsigned   _logclasses_read; // only these types have been read
-
+    unsigned _logclasses_read;  // only these types have been read
 
 private:
-    void loadRange(FILE *file, unsigned missing_types, LogCache *,
-                   time_t since, time_t until, unsigned logclasses);
-    bool processLogLine(uint32_t, unsigned);
+    void loadRange(FILE *file, unsigned missing_types, LogCache *, time_t since,
+                   time_t until, unsigned logclasses);
+    bool processLogLine(uint32_t, const char *linebuffer, unsigned);
     uint64_t makeKey(time_t, unsigned);
 };
 
-
-#endif // Logfile_h
-
+#endif  // Logfile_h

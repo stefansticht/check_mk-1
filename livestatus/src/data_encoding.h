@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,8 +25,8 @@
 #ifndef data_encoding_h
 #define data_encoding_h
 
-#define ENCODING_UTF8   0
-#define ENCODING_LATIN1 1
-#define ENCODING_MIXED  2
+#include "config.h"  // IWYU pragma: keep
 
-#endif // data_encoding_h
+enum class Encoding { utf8, latin1, mixed };
+
+#endif  // data_encoding_h

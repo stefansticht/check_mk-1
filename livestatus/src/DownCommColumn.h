@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,29 +25,40 @@
 #ifndef DownCommColumn_h
 #define DownCommColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <memory>
+#include <string>
+#include "Column.h"
 #include "ListColumn.h"
-#include "TableContacts.h"
+#include "nagios.h"
+class DowntimeOrComment;
+class DowntimesOrComments;
+class RowRenderer;
 
-class TableDownComm;
-
-class DownCommColumn : public ListColumn
-{
+class DownCommColumn : public ListColumn {
+    const DowntimesOrComments &_holder;
     bool _is_downtime;
     bool _with_info;
-    bool _is_service; // and not host
-    bool _with_extra_info; // provides date and type
+    bool _is_service;       // and not host
+    bool _with_extra_info;  // provides date and type
+
+    bool match(DowntimeOrComment *dt, void *data);
+
 public:
-    DownCommColumn(string name, string description, int indirect_offset, bool is_downtime, bool is_service, bool with_info, bool with_extra_info)
-        : ListColumn(name, description, indirect_offset), _is_downtime(is_downtime), _is_service(is_service), _with_info(with_info), _with_extra_info(with_extra_info) {}
-    int type() { return COLTYPE_LIST; }
-    void output(void *, Query *);
-    void *getNagiosObject(char *name);
-    bool isEmpty(void *data);
-    bool isNagiosMember(void *data, void *member);
+    DownCommColumn(const std::string &name, const std::string &description,
+                   int indirect_offset, const DowntimesOrComments &holder,
+                   bool is_downtime, bool is_service, bool with_info,
+                   bool with_extra_info, int extra_offset = -1)
+        : ListColumn(name, description, indirect_offset, extra_offset)
+        , _holder(holder)
+        , _is_downtime(is_downtime)
+        , _with_info(with_info)
+        , _is_service(is_service)
+        , _with_extra_info(with_extra_info) {}
+    ColumnType type() override { return ColumnType::list; }
+    std::unique_ptr<Contains> makeContains(const std::string &name) override;
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    bool isEmpty(void *data) override;
 };
 
-
-#endif // DownCommColumn_h
-
+#endif  // DownCommColumn_h

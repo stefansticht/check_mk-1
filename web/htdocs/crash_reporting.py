@@ -19,15 +19,18 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import subprocess, base64, time, pprint, traceback, tarfile, cStringIO, sys
+import i18n
+import sites
 from lib import *
 from valuespec import *
-import table, defaults, config, userdb, forms
+import table, config, forms
+import cmk.crash_reporting
 
 try:
     import simplejson as json
@@ -42,43 +45,42 @@ def page_crashed(what):
 
         tardata = get_crash_report_archive_as_string(site, host, service)
     else:
-        tardata = create_gui_crash_report()
+        tardata = create_gui_crash_report(what)
 
     info = get_crash_info(tardata)
 
-    if what == "gui":
-        title = _("Internal error")
-    else:
+    if what == "check":
         title = _("Crashed Check Reporting")
+    else:
+        title = _("Internal error")
 
     html.header(title, stylesheets=["status", "pages"])
 
     show_context_buttons(what)
 
-    if html.check_transaction():
-        details = handle_report_form(tardata)
+    if html.has_var("_report") and html.check_transaction():
+        details = handle_report_form(tardata, what)
     else:
         details = {}
 
     if what == "gui":
         html.show_error("<b>%s:</b> %s" % (_("Internal error"), sys.exc_info()[1]))
-        html.write("<p>%s</p>" %
-                    _("An internal error occured while processing your request. "
-                     "You can report this issue to the Check_MK team to help "
-                     "fixing this issue. Please use the form below for reporting."))
+        html.p(_("An internal error occured while processing your request. "
+                 "You can report this issue to the Check_MK team to help "
+                 "fixing this issue. Please use the form below for reporting."))
 
     if info:
         warn_about_local_files(info)
-        show_report_form(details)
+        show_report_form(what, details)
         show_crash_report(info)
         show_crash_report_details(info)
     else:
         report_url = mailto_url = html.makeuri([
-            ("subject", "Check_MK Crash Report - " + defaults.check_mk_version),
-        ], filename="mailto:" + config.crash_report_target)
+            ("subject", "Check_MK Crash Report - " + get_version(what)),
+        ], filename="mailto:" + get_crash_report_target(what))
         html.message(_("This crash report is in a legacy format and can not be submitted "
                        "automatically. Please download it manually and send it to <a href=\"%s\">%s</a>")
-                                % (report_url , config.crash_report_target))
+                                % (report_url , get_crash_report_target(what)))
         show_old_dump_trace(tardata)
 
     show_agent_output(tardata)
@@ -124,9 +126,9 @@ def get_crash_report_archive_as_string(site, host, service):
             "Columns: long_plugin_output\n" % (
             lqencode(host), lqencode(service))
 
-    html.live.set_only_sites([site])
-    data = html.live.query_value(query)
-    html.live.set_only_sites()
+    sites.live().set_only_sites([site])
+    data = sites.live().query_value(query)
+    sites.live().set_only_sites()
 
     if not data.startswith("Crash dump:\\n"):
         raise MKGeneralException("No crash dump is available for this service.")
@@ -147,16 +149,18 @@ def get_crash_info(tardata):
 
 
 def fetch_file_from_tar(tardata, filename):
-    p = subprocess.Popen(['tar', 'xzf', '-', '--to-stdout', filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    p = subprocess.Popen(['tar', 'xzf', '-', '--to-stdout', filename],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         close_fds=True)
     result = p.communicate(tardata)
     return result[0]
 
 
 def output_box(title, content):
-    html.write('<h3>%s</h3>' % title)
-    html.write('<div class=log_output>%s</div>'
-               % html.attrencode(content).replace("\n", "<br>").replace(' ', '&nbsp;'))
-
+    html.h3(title)
+    html.open_div(class_="log_output")
+    html.write(html.attrencode(content).replace("\n", "<br>").replace(' ', '&nbsp;'))
+    html.close_div()
 
 def vs_crash_report():
     return Dictionary(
@@ -176,7 +180,7 @@ def vs_crash_report():
     )
 
 
-def handle_report_form(tardata):
+def handle_report_form(tardata, what):
     details = {}
     try:
         vs = vs_crash_report()
@@ -187,10 +191,10 @@ def handle_report_form(tardata):
         url_encoded_params = html.urlencode_vars(details.items() + [
             ("crashdump", base64.b64encode(tardata)),
         ])
-        html.write("<div id=\"pending_msg\" style=\"display:none\">")
+        html.open_div(id_="pending_msg", style="display:none")
         html.message(_("Submitting crash report..."))
-        html.write("</div>")
-        html.write("<div id=\"success_msg\" style=\"display:none\">")
+        html.close_div()
+        html.open_div(id_="success_msg", style="display:none")
         html.message(HTML(_(
             "Your crash report has been submitted (ID: ###ID###). Thanks for your participation, "
             "it is very important for the quality of Check_MK.<br><br>"
@@ -208,14 +212,14 @@ def handle_report_form(tardata):
             "report.<br>If you are interested in the details about support, "
             "you find details on <a href=\"http://mathias-kettner.com/"
             "checkmk_support_contract.html\" target=_blank>our website</a>.")))
-        html.write("</div>")
-        html.write("<div id=\"fail_msg\" style=\"display:none\">")
+        html.close_div()
+        html.open_div(id_="fail_msg", style="display:none")
         report_url = mailto_url = html.makeuri([
-            ("subject", "Check_MK Crash Report - " + defaults.check_mk_version),
-        ], filename="mailto:" + config.crash_report_target)
+            ("subject", "Check_MK Crash Report - " + get_version(what)),
+        ], filename="mailto:" + get_crash_report_target(what))
         html.show_error(_("Failed to send the crash report. Please download it manually and send it "
-                          "to <a href=\"%s\">%s</a>") % (report_url , config.crash_report_target))
-        html.write("</div>")
+                          "to <a href=\"%s\">%s</a>") % (report_url , get_crash_report_target(what)))
+        html.close_div()
         html.javascript("submit_crash_report('https://mathias-kettner.de/crash_report.php', " \
                                             "'%s');" % url_encoded_params)
     except MKUserError, e:
@@ -223,6 +227,23 @@ def handle_report_form(tardata):
         html.add_user_error(e.varname, action_message)
 
     return details
+
+
+# TODO: Would be cleaner to override if we used OOP
+def get_crash_report_target(what):
+    if what == "cma":
+        return "feedback@check-mk.org"
+    else:
+        return config.crash_report_target
+
+
+# TODO: Would be cleaner to override if we used OOP
+def get_version(what):
+    if what == "cma":
+        import cma
+        return cma.version()
+    else:
+        return cmk.__version__
 
 
 def warn_about_local_files(info):
@@ -242,11 +263,9 @@ def warn_about_local_files(info):
                   "this should be working.")))
 
 
-def show_report_form(details):
-    users = userdb.load_users()
-    user = users.get(config.user_id, {})
-    details.setdefault("name", user.get("alias"))
-    details.setdefault("mail", user.get("mail"))
+def show_report_form(what, details):
+    if what == "gui":
+        add_gui_user_infos_to_details(details)
 
     html.begin_form("report", method = "GET")
     html.show_user_errors()
@@ -254,48 +273,85 @@ def show_report_form(details):
     vs.render_input("_report", details)
     vs.set_focus("report")
     forms.end()
-    html.button("report", _("Submit Report"))
+    html.button("_report", _("Submit Report"))
     html.hidden_fields()
     html.end_form()
 
 
+def add_gui_user_infos_to_details(details):
+    import userdb
+    users = userdb.load_users()
+    user = users.get(config.user.id, {})
+    details.setdefault("name", user.get("alias"))
+    details.setdefault("mail", user.get("mail"))
+
+
+def _crash_row(title, infotext, odd=True, legend=False, pre=False):
+    trclass = "data odd0" if odd else "data even0"
+    tdclass = "left legend" if legend else "left"
+    html.open_tr(class_=trclass)
+    html.td(title, class_=tdclass)
+    if pre:
+        html.td( html.render_pre(infotext) )
+    else:
+        html.td(infotext)
+    html.close_tr()
+
+
 def show_crash_report(info):
-    html.write("<h2>%s</h2>" % _("Crash Report"))
-    html.write("<table class=\"data\">")
-    html.write("<tr class=\"data even0\"><td class=\"left legend\">%s</td>" % _("Crash Type"))
-    html.write("<td>%s</td></tr>" % html.attrencode(info["crash_type"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Time"))
-    html.write("<td>%s</td></tr>" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(info["time"])))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Operating System"))
-    html.write("<td>%s</td></tr>" % html.attrencode(info["os"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Check_MK Version"))
-    html.write("<td>%s</td></tr>" % html.attrencode(info["version"]))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Exception"))
-    html.write("<td><pre>%s (%s)</pre></td></tr>" % (html.attrencode(info["exc_type"]),
-                                                     html.attrencode(info["exc_value"])))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Traceback"))
-    html.write("<td><pre>%s</pre></td></tr>" % html.attrencode(format_traceback(info["exc_traceback"])))
-    html.write("</table>")
+
+    html.h2(_("Crash Report"))
+    html.open_table(class_="data")
+
+    _crash_row(_("Crash Type"), info["crash_type"], odd=False,  legend=True)
+    _crash_row(_("Time"), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(info["time"])), odd=True)
+    _crash_row(_("Operating System"), info["os"], False)
+    if info["crash_type"] == "cma":
+        version_title = _("CMA Version")
+    else:
+        version_title = _("Check_MK Version")
+    _crash_row(version_title, info["version"], True)
+    _crash_row(_("Python Version"), info.get("python_version", _("Unknown")), False)
+    _crash_row(_("Exception"), "%s (%s)" % (info["exc_type"], info["exc_value"]), odd=True, pre=True)
+    _crash_row(_("Traceback"), format_traceback(info["exc_traceback"]), odd=False, pre=True)
+    if "local_vars" in info:
+        _crash_row(_("Local Variables"), format_local_vars(info["local_vars"]), odd=True, pre=True)
+    joined_paths = "<br>".join([ html.attrencode(p) for p in info.get("python_paths", [_("Unknown")]) ])
+    _crash_row(_("Python Module Paths"), joined_paths, odd=False)
+
+    html.close_table()
+
+
+# Local vars are a base64 encoded repr of the python dict containing the local vars of
+# the exception context. Decode it!
+def format_local_vars(local_vars):
+    return base64.b64decode(local_vars)
 
 
 def show_crashed_check_details(info):
-    details = info["details"]
-    html.write("<h2>%s</h2>" % _("Details"))
-    html.write("<table class=\"data\">")
-    html.write("<tr class=\"data even0\"><td class=\"left legend\">%s</td>" % _("Host"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["host"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Check Type"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["check_type"]))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Uses SNMP"))
-    html.write("<td><pre>%s</pre></td></tr>" % (details.get("uses_snmp", False) and _("Yes") or _("No")))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Check Item"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["item"]))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Description"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["description"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("Parameters"))
-    html.write("<td><pre>%s</pre></td></tr>" % html.attrencode(format_params(details["params"])))
+    def format_bool(val):
+        return {
+            True  : _("Yes"),
+            False : _("No"),
+            None  : _("Unknown"),
+        }[val]
 
-    html.write("</table>")
+    details = info["details"]
+
+    html.h2(_("Details"))
+    html.open_table(class_="data")
+
+    _crash_row(_("Host"), details["host"], odd=False, legend=True)
+    _crash_row(_("Is Cluster Host"), format_bool(details.get("is_cluster")), odd=True)
+    _crash_row(_("Check Type"), details["check_type"], odd=False)
+    _crash_row(_("Manual Check"), format_bool(details.get("manual_check")), odd=True, pre=True)
+    _crash_row(_("Uses SNMP"), format_bool(details.get("uses_snmp")), odd=False, pre=True)
+    _crash_row(_("Inline-SNMP"), format_bool(details.get("inline_snmp")), odd=True, pre=True)
+    _crash_row(_("Check Item"), details["item"], odd=False)
+    _crash_row(_("Description"), details["description"], odd=True)
+    _crash_row(_("Parameters"), format_params(details["params"]), odd=False, pre=True)
+
+    html.close_table()
 
 
 def format_traceback(tb):
@@ -308,26 +364,26 @@ def format_params(params):
 
 def show_gui_crash_details(info):
     details = info["details"]
-    html.write("<h2>%s</h2>" % _("Details"))
-    html.write("<table class=\"data\">")
-    html.write("<tr class=\"data even0\"><td class=\"left legend\">%s</td>" % _("Page"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["page"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("HTTP Parameters"))
-    html.write("<td>")
-    html.debug_vars(vars=details["vars"], hide_with_mouse=False)
-    html.write("</td></tr>")
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Username"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["username"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("User-Agent"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["user_agent"]))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Mobile GUI"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["is_mobile"]))
-    html.write("<tr class=\"data odd0\"><td class=\"left\">%s</td>" % _("SSL"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["is_ssl_request"]))
-    html.write("<tr class=\"data even0\"><td class=\"left\">%s</td>" % _("Language"))
-    html.write("<td>%s</td></tr>" % html.attrencode(details["language"]))
 
-    html.write("</table>")
+    html.h2(_("Details"))
+    html.open_table(class_="data")
+
+    _crash_row(_("Page"), details["page"], odd=False, legend=True)
+    _crash_row(_("Request Method"), details.get("request_method", _("Unknown")))
+    html.open_tr(class_="data even0")
+    html.td(_("HTTP Parameters"), class_="left")
+    html.open_td()
+    html.debug_vars(vars=details["vars"], hide_with_mouse=False)
+    html.close_td()
+    html.close_tr()
+    _crash_row(_("Referer"), details.get("referer", _("Unknown")))
+    _crash_row(_("Username"), details["username"], odd=False)
+    _crash_row(_("User Agent"), details["user_agent"])
+    _crash_row(_("Mobile GUI"), details["is_mobile"], odd=False)
+    _crash_row(_("SSL"), details["is_ssl_request"])
+    _crash_row(_("Language"), details["language"], odd=False)
+
+    html.close_table()
 
 
 def show_old_dump_trace(tardata):
@@ -350,31 +406,21 @@ def show_agent_output(tardata):
         output_box(_("Agent output"), agent_output)
 
 
-# Slightly duplicate code with modules/check_mk_base.py. Maybe create some kind of central library?
-def create_crash_dump_info_file(tar):
-    exc_type, exc_value, exc_traceback = sys.exc_info()
-
-    crash_info = {
-        "crash_type"    : "gui",
-        "time"          : time.time(),
-        "os"            : get_os_info(),
-        "version"       : defaults.check_mk_version,
-        "exc_type"      : exc_type.__name__,
-        "exc_value"     : "%s" % exc_value,
-        "exc_traceback" : traceback.extract_tb(exc_traceback),
-        "details"    : {
-            "page"           : html.myfile+".py",
-            "vars"           : html.vars,
-            "username"       : html.user,
-            "user_agent"     : html.get_user_agent(),
-            "is_mobile"      : html.is_mobile(),
-            "is_ssl_request" : html.is_ssl_request(),
-            "language"       : config.get_language(),
-        },
-    }
+def create_crash_dump_info_file(tar, what):
+    crash_info = cmk.crash_reporting.create_crash_info(what, details={
+        "page"           : html.myfile+".py",
+        "vars"           : html.vars,
+        "username"       : config.user.id,
+        "user_agent"     : html.get_user_agent(),
+        "referer"        : html.get_referer(),
+        "is_mobile"      : html.is_mobile(),
+        "is_ssl_request" : html.is_ssl_request(),
+        "language"       : i18n.get_current_language(),
+        "request_method" : html.request_method(),
+    }, version=get_version(what))
 
     content = cStringIO.StringIO()
-    content.write(json.dumps(crash_info))
+    content.write(cmk.crash_reporting.crash_info_to_string(crash_info))
     content.seek(0)
 
     tarinfo = tarfile.TarInfo(name="crash.info")
@@ -384,34 +430,11 @@ def create_crash_dump_info_file(tar):
     tar.addfile(tarinfo=tarinfo, fileobj=content)
 
 
-def get_os_info():
-    if defaults.omd_root:
-        return file(defaults.omd_root+"/share/omd/distro.info").readline().split("=", 1)[1].strip()
-    elif os.path.exists("/etc/redhat-release"):
-        return file("/etc/redhat-release").readline().strip()
-    elif os.path.exists("/etc/SuSE-release"):
-        return file("/etc/SuSE-release").readline().strip()
-    else:
-        info = {}
-        for f in [ "/etc/os-release", "/etc/lsb-release" ]:
-            if os.path.exists(f):
-                for line in file(f).readlines():
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        info[k.strip()] = v.strip()
-                break
-
-        if info:
-            return info
-        else:
-            return "UNKNOWN"
-
-
-def create_gui_crash_report():
+def create_gui_crash_report(what):
     c = cStringIO.StringIO()
     tar = tarfile.open(mode="w:gz", fileobj=c)
 
-    create_crash_dump_info_file(tar)
+    create_crash_dump_info_file(tar, what)
 
     tar.close()
     s = c.getvalue()

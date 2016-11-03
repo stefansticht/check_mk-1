@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -26,15 +26,17 @@
 #include "nagios.h"
 #include "pnp4nagios.h"
 
-int32_t ServiceSpecialIntColumn::getValue(void *data, Query *)
-{
-    data = shiftPointer(data);
-    if (!data) return 0;
+int32_t ServiceSpecialIntColumn::getValue(void *row,
+                                          contact * /* auth_user */) {
+    void *data = shiftPointer(row);
+    if (data == nullptr) {
+        return 0;
+    }
 
-    service *svc = (service *)data;
+    service *svc = static_cast<service *>(data);
     switch (_type) {
         case SSIC_PNP_GRAPH_PRESENT:
             return pnpgraph_present(svc->host_ptr->name, svc->description);
     }
-    return -1; // never reached
+    return -1;  // never reached
 }

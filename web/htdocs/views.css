@@ -62,10 +62,13 @@ div.floatfilter {
     border-style: solid;
     border-color: #acc #22404d #22414d #8ab;
     box-shadow: 0.5px 0.5px 1px #444;
-    background-image: url("images/nform_background.png");
-    background-repeat: repeat;
+    background-color: rgba(160, 181, 190, 0.6);
     border-radius: 5px;
     color: black;
+}
+
+body.main.screenshotmode div.floatfilter {
+    background-color: #5893af;
 }
 
 div.floatfilter input[type=text].neg {
@@ -86,8 +89,7 @@ div.floatfilter .legend {
     margin-bottom: 1px;
     width: 300px;
     height: 17px;
-    background-image: url("images/form_background.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
     padding: 3px 5px 0px 5px;
     border-radius: 5px 5px 0px 0px;
 }
@@ -165,31 +167,6 @@ table.filtertime td {
     vertical-align: middle;
 }
 
-
-div.togglebutton.filters         { background-image: url("images/button_filters_lo.png"); }
-div.togglebutton.filters:hover   { background-image: url("images/button_filters_hi.png"); }
-div.togglebutton.filters.down       { background-image: url("images/button_filters_down_lo.png"); }
-div.togglebutton.filters.down:hover { background-image: url("images/button_filters_down_hi.png"); }
-div.togglebutton.filters.off      { background-image: url("images/button_filters_off.png"); }
-
-div.togglebutton.filters_set         { background-image: url("images/button_filters_set_lo.png"); }
-div.togglebutton.filters_set:hover   { background-image: url("images/button_filters_set_hi.png"); }
-div.togglebutton.filters_set.down       { background-image: url("images/button_filters_set_down_lo.png"); }
-div.togglebutton.filters_set.down:hover { background-image: url("images/button_filters_set_down_hi.png"); }
-div.togglebutton.filters_set.off      { background-image: url("images/button_filters_set_off.png"); }
-
-div.togglebutton.painteroptions         { background-image: url("images/button_painteroptions_lo.png"); }
-div.togglebutton.painteroptions:hover   { background-image: url("images/button_painteroptions_hi.png"); }
-div.togglebutton.painteroptions.down       { background-image: url("images/button_painteroptions_down_lo.png"); }
-div.togglebutton.painteroptions.down:hover { background-image: url("images/button_painteroptions_down_hi.png"); }
-div.togglebutton.painteroptions.off      { background-image: url("images/button_painteroptions_off.png"); }
-
-div.togglebutton.commands         { background-image: url("images/button_commands_lo.png"); }
-div.togglebutton.commands:hover   { background-image: url("images/button_commands_hi.png"); }
-div.togglebutton.commands.down       { background-image: url("images/button_commands_down_lo.png"); }
-div.togglebutton.commands.down:hover { background-image: url("images/button_commands_down_hi.png"); }
-div.togglebutton.commands.off      { background-image: url("images/button_commands_off.png"); }
-
 div.optiondial {
     cursor: pointer;
     height: 20px;
@@ -227,11 +204,9 @@ div.optiondial.refresh {
 }
 
 div.optiondial.num_columns { background-image: url("images/dial_num_columns.png"); }
-/* div.optiondial.num_columns:hover { background-image: url("images/dial_num_columns_hi.png"); }  */
 div.optiondial.num_columns.off { background-image: url("images/dial_num_columns_off.png"); }
 
 div.optiondial.refresh { background-image: url("images/dial_refresh.png"); }
-/* div.optiondial.refresh:hover { background-image: url("images/dial_refresh_hi.png"); }  */
 div.optiondial.refresh.off { background-image: url("images/dial_refresh_off.png"); }
 
 div.view_form {
@@ -256,6 +231,12 @@ td.fillup {
 td.groupheader {
     margin: 0;
     padding: 0;
+}
+
+table.data tr.data > td.gap,
+table.data tr > td.last_col,
+table.data tr > th.last_col {
+    border-right: 0;
 }
 
 td.gap, table.data .checkbox_hover.gap {
@@ -304,7 +285,6 @@ table.tiled td {
 }
 .tile.sstate0, .tile.hhstate0 {
     border-color: #0f0;
-    /* background-color: #afa; */
 }
 .tile.sstate1 {
     border-color: #ff0;
@@ -552,8 +532,6 @@ table.data.availability tr.summary td {
 }
 
 table.data td.flapping, table.timeline td.flapping, div.avlegend.timeline div.state.flapping {
-    /* background-image: url("images/bg_flapping.png");
-    background-repeat: repeat; */
     background-color: #f0f;
 }
 
@@ -660,7 +638,7 @@ div.timelinerange div.timelinechoord {
 table.timelineevents {
     width: 800px;
 }
-table.timelineevents tr.hilite {
+table.data.oddeven.timelineevents > tbody > tr.hilite {
     background-color: #6ab;
     color: white;
 }
@@ -686,8 +664,7 @@ table.data.timewarp {
 }
 
 div.avlegend {
-    background-image: url("images/white_20percent.png");
-    background-repeat: repeat;
+    background-color: rgba(255, 255, 255, 0.2);
     padding: 5px 15px;
     border-radius: 5px;
     margin-top: 10px;
@@ -829,4 +806,3 @@ td.if_state.if_not_available {
     color: black;
     background-color: #cccccc;
 }
-

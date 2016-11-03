@@ -13,9 +13,3 @@ item:
 inventory:
  One check for each cpu module is created by the inventory.
 
-perfdata:
- The actual utilization, together with it's warn and crit levels
-
-[parameters]
-parameters (dict): with the element
-{"levels"}: (float, float): levels of CPU utilization for {WARN} and {CRIT} in percent

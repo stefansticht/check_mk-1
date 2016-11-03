@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -93,7 +93,11 @@ def check_ibm_svc_mdiskgrp(item, params, info):
             status, message, perfdata = df_check_filesystem_list(item, params, fslist)
             yield status, message, perfdata
 
+            mb = 1024 * 1024
+
             # Compute provisioning
+            if not capacity:
+                return # provisioning does not make sense when capacity is 0
             provisioning = 100.0 * virtual_capacity / capacity
             if "provisioning_levels" in params:
                 warn, crit = params["provisioning_levels"]
@@ -111,7 +115,6 @@ def check_ibm_svc_mdiskgrp(item, params, info):
 
             # Note: Performance data is now (with new metric system) normed to
             # canonical units - i.e. 1 byte in this case.
-            mb = 1024 * 1024
             yield 0, "Provisioning: %s" % get_percent_human_readable(provisioning), \
               [ ( "fs_provisioning", virtual_capacity*mb, warn_mb, crit_mb, 0, capacity * mb) ]
 

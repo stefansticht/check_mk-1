@@ -1,4 +1,5 @@
 #!/bin/bash
+# Check_MK Agent for Linux
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -18,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -74,16 +75,68 @@ if type timeout >/dev/null 2>&1 ; then
     export -f waitmax
 fi
 
+if [ -f $MK_CONFDIR/encryption.cfg ] ; then
+    source $MK_CONFDIR/encryption.cfg
+fi
+
+if [ "$ENCRYPTED" == "yes" ] ; then
+    echo -n "00" # protocol version
+    exec > >(openssl enc -aes-256-cbc -k $PASSPHRASE -nosalt)
+fi
+
+
+#
+# CHECK SECTIONS
+#
+
+function section_mem()
+{
+    echo '<<<mem>>>'
+    egrep -v '^Swap:|^Mem:|total:' < /proc/meminfo
+}
+
+function section_cpu()
+{
+    echo '<<<cpu>>>'
+    if [ $(uname -m) = "armv7l" ]; then
+        CPU_REGEX='^processor'
+    else
+        CPU_REGEX='^CPU|^processor'
+    fi
+    echo "$(cat /proc/loadavg) $(grep -E $CPU_REGEX < /proc/cpuinfo | wc -l)"
+}
+
+
+function run_mrpe() {
+    local descr=$1
+    shift
+    local cmdline="$@"
+
+    echo '<<<mrpe>>>'
+
+    PLUGIN=${cmdline%% *}
+    OUTPUT=$(eval "$cmdline")
+
+    echo -n "(${PLUGIN##*/}) $descr $? $OUTPUT" | tr \\n \\1
+    echo
+}
+
+export -f run_mrpe
 
 # Runs a command asynchronous by use of a cache file. Usage:
 # run_cached [-s] NAME MAXAGE
 #   -s creates the section header <<<$NAME>>>
+#   -m mrpe-mode: stores exit code with the cache
 #   NAME is the name of the section (also used as cache file name)
 #   MAXAGE is the maximum cache livetime in seconds
 function run_cached () {
     local NOW=$(date +%s)
     local section=
+    local mrpe=0
+    local append_age=0
     if [ "$1" = -s ] ; then local section="echo '<<<$2:cached($NOW,$3)>>>' ; " ; shift ; fi
+    if [ "$1" = -m ] ; then local mrpe=1 ; shift ; fi
+    if [ "$1" = -a ] ; then local append_age=1 ; shift ; fi
     local NAME=$1
     local MAXAGE=$2
     shift 2
@@ -92,8 +145,10 @@ function run_cached () {
     if [ ! -d $MK_VARDIR/cache ]; then mkdir -p $MK_VARDIR/cache ; fi
     CACHEFILE="$MK_VARDIR/cache/$NAME.cache"
 
-    # Check if the creation of the cache takes suspiciously long and return
-    # nothing if the age (access time) of $CACHEFILE.new is twice the MAXAGE
+    # Check if the creation of the cache takes suspiciously long and kill the
+    # process if the age (access time) of $CACHEFILE.new is twice the MAXAGE.
+    # Output the evantually already cached section anyways and start the cache
+    # update again.
     if [ -e "$CACHEFILE.new" ] ; then
         local CF_ATIME=$(stat -c %X "$CACHEFILE.new")
         if [ $((NOW - CF_ATIME)) -ge $((MAXAGE * 2)) ] ; then
@@ -101,31 +156,90 @@ function run_cached () {
             # it is still running. This avoids overlapping processes!
             fuser -k -9 "$CACHEFILE.new" >/dev/null 2>&1
             rm -f "$CACHEFILE.new"
-            return
         fi
     fi
+
 
     # Check if cache file exists and is recent enough
     if [ -s "$CACHEFILE" ] ; then
         local MTIME=$(stat -c %Y "$CACHEFILE")
-        if [ $((NOW - MTIME)) -le $MAXAGE ] ; then local USE_CACHEFILE=1 ; fi
+        local AGE=$((NOW - MTIME))
+        if [ $AGE -le $MAXAGE ] ; then local USE_CACHEFILE=1 ; fi
         # Output the file in any case, even if it is
         # outdated. The new file will not yet be available
-        cat "$CACHEFILE"
+        if [ $append_age -eq 1 ] ; then
+            # insert the cached-string before the pipe (first -e)
+            # or, if no pipe found (-e t) append it (third -e),
+            # but only once and on the second line (2!b) (first line is section header,
+            # all further lines are long output)
+            cat "$CACHEFILE" | sed -e "2s/|/ (Cached: ${AGE}\/${MAXAGE}s)|/" -e t -e "2s/$/ (Cached: ${AGE}\/${MAXAGE}s)/"
+        else
+            cat "$CACHEFILE"
+        fi
     fi
 
     # Cache file outdated and new job not yet running? Start it
-    if [ -z "$USE_CACHEFILE" -a ! -e "$CACHEFILE.new" ] ; then
+    if [ -z "$USE_CACHEFILE" ] && [ ! -e "$CACHEFILE.new" ] ; then
         # When the command fails, the output is throws away ignored
-        echo "set -o noclobber ; exec > \"$CACHEFILE.new\" || exit 1 ; $CMDLINE && mv \"$CACHEFILE.new\" \"$CACHEFILE\" || rm -f \"$CACHEFILE\" \"$CACHEFILE.new\"" | nohup bash >/dev/null 2>&1 &
+        if [ $mrpe -eq 1 ] ; then
+            echo "set -o noclobber ; exec > \"$CACHEFILE.new\" || exit 1 ; run_mrpe $NAME $CMDLINE && mv \"$CACHEFILE.new\" \"$CACHEFILE\" || rm -f \"$CACHEFILE\" \"$CACHEFILE.new\"" | nohup /bin/bash >/dev/null 2>&1 &
+        else
+            echo "set -o noclobber ; exec > \"$CACHEFILE.new\" || exit 1 ; $CMDLINE && mv \"$CACHEFILE.new\" \"$CACHEFILE\" || rm -f \"$CACHEFILE\" \"$CACHEFILE.new\"" | nohup /bin/bash >/dev/null 2>&1 &
+        fi
     fi
 }
 
 # Make run_cached available for subshells (plugins, local checks, etc.)
 export -f run_cached
 
+# Implements Real-Time Check feature of the Check_MK agent which can send
+# some section data in 1 second resolution. Useful for fast notifications and
+# detailed graphing (if you configure your RRDs to this resolution).
+function run_real_time_checks()
+{
+    PIDFILE=$MK_VARDIR/real_time_checks.pid
+    echo $$ > $PIDFILE
+
+    . $MK_CONFDIR/real_time_checks.cfg
+
+    if [ "$PASSPHRASE" != "" ] ; then
+        # new mechanism to set the passphrase has priority
+        RTC_SECRET=$PASSPHRASE
+    fi
+
+    while true; do
+        # terminate when pidfile is gone or other Real-Time Check process started or configured timeout
+        if [ ! -e $PIDFILE ] || [ $(<$PIDFILE) -ne $$ ] || [ $RTC_TIMEOUT -eq 0 ]; then
+            exit 1
+        fi
+
+        for SECTION in $RTC_SECTIONS; do
+            if [ "$ENCRYPTED_RT" != "no" ] ; then
+                PROTOCOL=00
+            else
+                PROTOCOL=99
+            fi
+            # Be aware of maximum packet size. Maybe we need to check the size of the section
+            # output and do some kind of nicer error handling.
+            # 2 bytes: protocol version, 10 bytes: timestamp, rest: encrypted data
+            # dd is used to concatenate the output of all commands to a single write/block => udp packet
+            { echo -n $PROTOCOL ;
+              date +%s | tr -d '\n' ;
+              if [ "$ENCRYPTED_RT" != "no" ] ; then
+                  export RTC_SECRET=$RTC_SECRET ; section_$SECTION | openssl enc -aes-256-cbc -pass env:RTC_SECRET -nosalt ;
+              else
+                  section_$SECTION ;
+              fi
+            } | dd bs=9999 iflag=fullblock 2>/dev/null >/dev/udp/$REMOTE/$RTC_PORT
+        done
+
+        sleep 1
+        RTC_TIMEOUT=$((RTC_TIMEOUT-1))
+    done
+}
+
 echo '<<<check_mk>>>'
-echo Version: 1.2.7i3
+echo Version: 1.4.0i2
 echo AgentOS: linux
 echo Hostname: $HOSTNAME
 echo AgentDirectory: $MK_CONFDIR
@@ -151,7 +265,7 @@ fi
 echo '<<<df>>>'
 # The exclusion list is getting a bit of a problem. -l should hide any remote FS but seems
 # to be all but working.
-excludefs="-x smbfs -x cifs -x iso9660 -x udf -x nfsv4 -x nfs -x mvfs -x zfs"
+excludefs="-x smbfs -x cifs -x iso9660 -x udf -x nfsv4 -x nfs -x mvfs -x zfs -x prl_fs"
 df -PTlk $excludefs | sed 1d
 
 # df inodes information
@@ -213,20 +327,13 @@ grep ^/dev < /proc/mounts
 
 # processes including username, without kernel processes
 echo '<<<ps>>>'
-ps ax -o user,vsz,rss,cputime,etime,pid,command --columns 10000 | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4\/\5,\6) /'
+ps ax -o user:32,vsz,rss,cputime,etime,pid,command --columns 10000 | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4\/\5,\6) /'
 
 # Memory usage
-echo '<<<mem>>>'
-egrep -v '^Swap:|^Mem:|total:' < /proc/meminfo
+section_mem
 
 # Load and number of processes
-echo '<<<cpu>>>'
-if [ $(uname -m) = "armv7l" ]; then
-    CPU_REGEX='^processor'
-else
-    CPU_REGEX='^CPU|^processor'
-fi
-echo "$(cat /proc/loadavg) $(grep -E $CPU_REGEX < /proc/cpuinfo | wc -l)"
+section_cpu
 
 # Uptime
 echo '<<<uptime>>>'
@@ -234,6 +341,14 @@ cat /proc/uptime
 
 
 # New variant: Information about speed and state in one section
+if type ip > /dev/null
+then
+    echo '<<<lnx_if>>>'
+    echo "[start_iplink]"
+        ip link
+    echo "[end_iplink]"
+fi
+
 echo '<<<lnx_if:sep(58)>>>'
 sed 1,2d /proc/net/dev
 if type ethtool > /dev/null
@@ -250,7 +365,9 @@ fi
 # Current state of bonding interfaces
 if [ -e /proc/net/bonding ] ; then
     echo '<<<lnx_bonding:sep(58)>>>'
-    pushd /proc/net/bonding > /dev/null ; head -v -n 1000 * ; popd
+    pushd /proc/net/bonding > /dev/null
+    head -v -n 1000 *
+    popd > /dev/null
 fi
 
 # Same for Open vSwitch bonding
@@ -278,7 +395,7 @@ fi
 # Performancecounter Platten
 echo '<<<diskstat>>>'
 date +%s
-egrep ' (x?[shv]d[a-z]*|cciss/c[0-9]+d[0-9]+|emcpower[a-z]+|dm-[0-9]+|VxVM.*|mmcblk.*) ' < /proc/diskstats
+egrep ' (x?[shv]d[a-z]*|cciss/c[0-9]+d[0-9]+|emcpower[a-z]+|dm-[0-9]+|VxVM.*|mmcblk.*|dasd[a-z]*|bcache[0-9]+) ' < /proc/diskstats
 if type dmsetup >/dev/null ; then
     echo '[dmsetup_info]'
     dmsetup info -c --noheadings --separator ' ' -o name,devno,vg_name,lv_name
@@ -297,7 +414,9 @@ cat /proc/vmstat /proc/stat
 # Hardware sensors via IPMI (need ipmitool)
 if type ipmitool > /dev/null
 then
-    run_cached -s ipmi 300 "ipmitool sensor list | grep -v 'command failed' | sed -e 's/ *| */|/g' -e 's/ /_/g' -e 's/_*"'$'"//' -e 's/|/ /g' | egrep -v '^[^ ]+ na ' | grep -v ' discrete '"
+    run_cached -s "ipmi:sep(124)" 300 "waitmax 300 ipmitool sensor list | grep -v 'command failed' | egrep -v '^[^ ]+ na ' | grep -v ' discrete '"
+    # readable discrete sensor states
+    run_cached -s "ipmi_discrete:sep(124)" 300 "waitmax 300 ipmitool sdr elist compact"
 fi
 
 
@@ -312,7 +431,7 @@ then
     else
         IPMI_FORMAT=""
     fi
-    # At least with ipmi-sensoirs 0.7.16 this group is Power_Unit instead of "Power Unit"
+    # At least with ipmi-sensors 0.7.16 this group is Power_Unit instead of "Power Unit"
     run_cached -s ipmi_sensors 300 "for class in Temperature Power_Unit Fan
     do
         ipmi-sensors $IPMI_FORMAT --sdr-cache-directory /var/cache -g "$class" | sed -e 's/ /_/g' -e 's/:_\?/ /g' -e 's@ \([^(]*\)_(\([^)]*\))@ \2_\1@'
@@ -439,7 +558,7 @@ fi
 
 # Status of CUPS printer queues
 if type lpstat > /dev/null 2>&1; then
-    if pgrep -x cups > /dev/null 2>&1; then
+    if pgrep -f "\bcupsd" > /dev/null 2>&1; then
         # first define a function to check cups
         function cups_queues () {
             CPRINTCONF=/etc/cups/printers.conf
@@ -478,7 +597,7 @@ fi
 # for the resource state
 if [ -S /var/run/heartbeat/crm/cib_ro -o -S /var/run/crm/cib_ro ] || pgrep crmd > /dev/null 2>&1; then
   echo '<<<heartbeat_crm>>>'
-  crm_mon -1 -r | grep -v ^$ | sed 's/^ //; /^\sResource Group:/,$ s/^\s//; s/^\s/_/g'
+  TZ=UTC crm_mon -1 -r | grep -v ^$ | sed 's/^ //; /^\sResource Group:/,$ s/^\s//; s/^\s/_/g'
 fi
 if type cl_status > /dev/null 2>&1; then
   echo '<<<heartbeat_rscstatus>>>'
@@ -498,28 +617,77 @@ if type cl_status > /dev/null 2>&1; then
 fi
 
 # Postfix mailqueue monitoring
-#
-# we determine the number of mails and their size in several postfix mail queues
-if type postconf >/dev/null ; then
-    echo '<<<postfix_mailq>>>'
-    postfix_queue_dir=$(postconf -h queue_directory)
+# Determine the number of mails and their size in several postfix mail queues
+function read_postfix_queue_dirs {
+    postfix_queue_dir=$1
+    if [ -n "$postfix_queue_dir" ]; then
+        echo '<<<postfix_mailq>>>'
+        if [ ! -z "$2" ]; then
+            echo "[[[${2}]]]"
+        fi
+        for queue in deferred active
+        do
+            count=$(find $postfix_queue_dir/$queue -type f | wc -l)
+            size=$(du -s $postfix_queue_dir/$queue | awk '{print $1 }')
+            if [ -z "$size" ]; then
+                size=0
+            fi
+            if [ -z "$count" ]; then
+                echo "Mail queue is empty"
+            else
+                echo "QUEUE_${queue} $size $count"
+            fi
+        done
+    fi
+}
 
-    for queue in deferred active
-    do
-        count=$(find $postfix_queue_dir/$queue -type f | wc -l)
-        size=$(du -s $postfix_queue_dir/$queue | awk '{print $1 }')
-        echo "QUEUE_${queue} $size $count"
-    done
+# Postfix mailqueue monitoring
+# Determine the number of mails and their size in several postfix mail queues
+if type postconf >/dev/null ; then
+    # Check if multi_instance_directories exists in main.cf and is not empty
+    # always takes the last entry, multiple entries possible
+    multi_instances_dirs=$(postconf -c /etc/postfix 2>/dev/null | grep ^multi_instance_directories | sed 's/.*=[[:space:]]*//g')
+    if [ ! -z "$multi_instances_dirs" ]; then
+        for queue_dir in $multi_instances_dirs
+        do
+            if [ -n "$queue_dir" ]; then
+                postfix_queue_dir=$(postconf -c $queue_dir 2>/dev/null | grep ^queue_directory | sed 's/.*=[[:space:]]*//g')
+                read_postfix_queue_dirs $postfix_queue_dir $queue_dir
+            fi
+        done
+
+    else
+        postfix_queue_dir=$(postconf -h queue_directory 2>/dev/null)
+        read_postfix_queue_dirs $postfix_queue_dir
+    fi
+
 elif [ -x /usr/sbin/ssmtp ] ; then
     echo '<<<postfix_mailq>>>'
     mailq 2>&1 | sed 's/^[^:]*: \(.*\)/\1/' | tail -n 6
+
 fi
+
+# postfix would write to stderr but only if it's a tty
+if type postmulti >/dev/null ; then
+    echo "<<<postfix_mailq_status:sep(58)>>>"
+    script -qfc 'postmulti -p status' /dev/null
+fi
+
 
 # Check status of qmail mailqueue
 if type qmail-qstat >/dev/null
 then
    echo "<<<qmail_stats>>>"
    qmail-qstat
+fi
+
+# Nullmailer queue monitoring
+if type nullmailer-send >/dev/null && [ -d /var/spool/nullmailer/queue ]
+then
+    echo '<<<nullmailer_mailq>>>'
+    COUNT=$(find /var/spool/nullmailer/queue -type f | wc -l)
+    SIZE=$(du -s /var/spool/nullmailer/queue | awk '{print $1 }')
+    echo "$SIZE $COUNT"
 fi
 
 # Check status of OMD sites and Check_MK Notification spooler
@@ -548,9 +716,6 @@ then
     done
 fi
 
-# Status of Check_MK Notification Spooler
-
-
 
 # Welcome the ZFS check on Linux
 # We do not endorse running ZFS on linux if your vendor doesnt support it ;)
@@ -558,6 +723,20 @@ fi
 if type zpool >/dev/null; then
    echo "<<<zpool_status>>>"
    zpool status -x
+fi
+
+
+# Veritas Cluster Server
+# Software is always installed in /opt/VRTSvcs.
+# Secure mode must be off to allow root to execute commands
+if [ -x /opt/VRTSvcs/bin/haclus ]
+then
+    echo "<<<veritas_vcs>>>"
+    vcshost=$(hostname | cut -d. -f1)
+    /opt/VRTSvcs/bin/haclus -display -localclus | grep -e ClusterName -e ClusState
+    /opt/VRTSvcs/bin/hasys -display -attribute SysState
+    /opt/VRTSvcs/bin/hagrp -display -sys $vcshost -attribute State -localclus
+    /opt/VRTSvcs/bin/hares -display -sys $vcshost -attribute State -localclus
 fi
 
 
@@ -585,7 +764,50 @@ then
     do
         if [ -S "/omd/sites/$site/tmp/run/live" ] ; then
             echo "[$site]"
-            echo -e "GET status" | waitmax 3 /omd/sites/$site/bin/unixcat /omd/sites/$site/tmp/run/live
+            echo -e "GET status" | \
+                waitmax 3 /omd/sites/$site/bin/unixcat /omd/sites/$site/tmp/run/live
+        fi
+    done
+    echo '<<<mkeventd_status:sep(0)>>>'
+    for site in *
+    do
+        if [ -S "/omd/sites/$site/tmp/run/mkeventd/status" ] ; then
+            echo "[\"$site\"]"
+            echo -e "GET status\nOutputFormat: json" \
+                | waitmax 3 /omd/sites/$site/bin/unixcat /omd/sites/$site/tmp/run/mkeventd/status
+        fi
+    done
+fi
+
+# Collect states of configured Check_MK site backup jobs
+if ls /omd/sites/*/var/check_mk/backup/*.state >/dev/null 2>&1; then
+    echo "<<<mkbackup>>>"
+    for F in /omd/sites/*/var/check_mk/backup/*.state; do
+        SITE=${F#/*/*/*}
+        SITE=${SITE%%/*}
+
+        JOB_IDENT=${F%.state}
+        JOB_IDENT=${JOB_IDENT##*/}
+
+        if [ "$JOB_IDENT" != "restore" ]; then
+            echo "[[[site:$SITE:$JOB_IDENT]]]"
+            cat $F
+            echo
+        fi
+    done
+fi
+
+# Collect states of configured CMA backup jobs
+if type mkbackup >/dev/null && ls /var/lib/mkbackup/*.state >/dev/null 2>&1; then
+    echo "<<<mkbackup>>>"
+    for F in /var/lib/mkbackup/*.state; do
+        JOB_IDENT=${F%.state}
+        JOB_IDENT=${JOB_IDENT##*/}
+
+        if [ "$JOB_IDENT" != "restore" ]; then
+            echo "[[[system:$JOB_IDENT]]]"
+            cat $F
+            echo
         fi
     done
 fi
@@ -599,7 +821,11 @@ if pushd $MK_VARDIR/job >/dev/null; then
     for username in *
     do
         if [ -d "$username" ] && cd "$username" ; then
-            su "$username" -c "head -n -0 -v *"
+            if [ $EUID -eq 0 ]; then
+                su "$username" -c "head -n -0 -v *"
+            else
+                head -n -0 -v *
+            fi
             cd ..
         fi
     done
@@ -624,17 +850,70 @@ if type trd >/dev/null; then
    trd -s
 fi
 
+# HTTP Accelerator Statistics
+if type varnishstat >/dev/null; then
+   echo "<<<varnish>>>"
+   varnishstat -1
+fi
+
+# Proxmox Cluster
+if type pvecm > /dev/null 2>&1 ; then
+    echo "<<<pvecm_status:sep(58)>>>"
+    pvecm status
+    echo "<<<pvecm_nodes>>>"
+    pvecm nodes
+fi
+
+# Start new liveupdate process in background on each agent execution. Starting
+# a new live update process will terminate the old one automatically after
+# max. 1 sec.
+if [ -e $MK_CONFDIR/real_time_checks.cfg ]; then
+    if [ -z $REMOTE ]; then
+        echo "ERROR: \$REMOTE not specified. Not starting Real-Time Checks." >&2
+    elif ! type openssl >/dev/null; then
+        echo "ERROR: openssl command is missing. Not starting Real-Time Checks." >&2
+    else
+        run_real_time_checks >/dev/null &
+    fi
+fi
+
 # MK's Remote Plugin Executor
 if [ -e "$MK_CONFDIR/mrpe.cfg" ]
 then
-    echo '<<<mrpe>>>'
     grep -Ev '^[[:space:]]*($|#)' "$MK_CONFDIR/mrpe.cfg" | \
     while read descr cmdline
     do
-        PLUGIN=${cmdline%% *}
-        OUTPUT=$(eval "$cmdline")
-        echo -n "(${PLUGIN##*/}) $descr $? $OUTPUT" | tr \\n \\1
-        echo
+        interval=
+        args="-m"
+        # NOTE: Due to an escaping-related bug in some old bash versions
+        # (3.2.x), we have to use an intermediate variable for the pattern.
+        pattern='\(([^\)]*)\)[[:space:]](.*)'
+        if [[ $cmdline =~ $pattern ]]
+        then
+            parameters=${BASH_REMATCH[1]}
+            cmdline=${BASH_REMATCH[2]}
+
+            # split multiple parameter assignments
+            for par in $(echo $parameters | tr ":" "\n")
+            do
+                # split each assignment
+                key=$(echo $par | cut -d= -f1)
+                value=$(echo $par | cut -d= -f2)
+
+                if [ "$key" = "interval" ] ; then
+                    interval=$value
+                elif [ "$key" = "appendage" ] ; then
+                    args="$args -a"
+                fi
+            done
+        fi
+
+        if [ -z "$interval" ]
+        then
+            run_mrpe $descr "$cmdline"
+        else
+            run_cached $args $descr $interval "$cmdline"
+        fi
     done
 fi
 
@@ -652,19 +931,41 @@ then
 
             # mrpe includes
             if [ "$type" == "mrpe" ] ; then
-                echo "<<<mrpe>>>"
                 grep -Ev '^[[:space:]]*($|#)' "$include" | \
                 while read descr cmdline
                 do
-                    PLUGIN=${cmdline%% *}
+                    interval=
+                    # NOTE: Due to an escaping-related bug in some old bash
+                    # versions (3.2.x), we have to use an intermediate variable
+                    # for the pattern.
+                    pattern='\(([^\)]*)\)[[:space:]](.*)'
+                    if [[ $cmdline =~ $pattern ]]
+                    then
+                        parameters=${BASH_REMATCH[1]}
+                        cmdline=${BASH_REMATCH[2]}
 
-                    if [ -n "$PREFIX" ] ; then
-                        cmdline="$PREFIX\"$cmdline\""
+                        # split multiple parameter assignments
+                        for par in $(echo $parameters | tr ":" "\n")
+                        do
+                            # split each assignment
+                            IFS='=' read key value <<< $par
+                            if [ "$key" = "interval" ]
+                            then
+                                interval=$value
+                            # no other parameters supported currently
+                            fi
+                        done
                     fi
 
-                    OUTPUT=$(eval "$cmdline")
-                    echo -n "(${PLUGIN##*/}) $descr $? $OUTPUT" | tr \\n \\1
-                    echo
+                    if [ -n "$PREFIX" ] ; then
+                        cmdline="$PREFIX\'$cmdline\'"
+                    fi
+                    if [ -z "$interval" ]
+                    then
+                        run_mrpe $descr "$cmdline"
+                    else
+                        run_cached -m $descr $interval "$cmdline"
+                    fi
                 done
 
             # local and plugin includes
@@ -689,17 +990,22 @@ then
     done
 fi
 
+function is_valid_plugin () {
+    [[ -f "$1" && -x "$1" && ! "$1" =~ \.dpkg-(new|old|temp)$ ]] && true || false
+}
+
+
 # Local checks
 echo '<<<local>>>'
 if cd $LOCALDIR ; then
     for skript in $(ls) ; do
-        if [ -f "$skript" -a -x "$skript" ] ; then
+        if is_valid_plugin "$skript" ; then
             ./$skript
         fi
     done
     # Call some plugins only every X'th second
     for skript in [1-9]*/* ; do
-        if [ -x "$skript" ] ; then
+        if is_valid_plugin "$skript" ; then
             run_cached local_${skript//\//\\} ${skript%/*} "$skript"
         fi
     done
@@ -708,13 +1014,13 @@ fi
 # Plugins
 if cd $PLUGINSDIR ; then
     for skript in $(ls) ; do
-        if [ -f "$skript" -a -x "$skript" ] ; then
+        if is_valid_plugin "$skript" ; then
             ./$skript
         fi
     done
     # Call some plugins only every Xth second
     for skript in [1-9]*/* ; do
-        if [ -x "$skript" ] ; then
+        if is_valid_plugin "$skript" ; then
             run_cached plugins_${skript//\//\\} ${skript%/*} "$skript"
         fi
     done
@@ -728,6 +1034,7 @@ then
 
     for file in *
     do
+        test "$file" = "*" && break
         # output every file in this directory. If the file is prefixed
         # with a number, then that number is the maximum age of the
         # file in seconds. If the file is older than that, it is ignored.

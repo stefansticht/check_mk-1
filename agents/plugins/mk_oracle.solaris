@@ -18,7 +18,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -27,6 +27,7 @@
 
 # This plugin is a port of the linux agent plugin. It has been
 # tested with solaris 10.
+# This plugin is deprecated. Please use the mk_oracle plugin instead.
 
 # Get list of all running databases
 SIDS=$(UNIX95=true ps -ef -o args | sed -n '/^ora_pmon_/p;/^xe_pmon_/p' | sed -n '/^[a-z]*_pmon_\([^ ]*\)/s//\1/p')
@@ -146,7 +147,7 @@ for SID in $SIDS; do
     # to update the information for this instance.
     if [ -z "$CACHE_FILE_UPTODATE" -a ! -e "$CACHE_FILE.new" ]
     then
-        nohup bash -c "
+        nohup /bin/bash -c "
             set -o noclobber
             function sqlplus ()
             {

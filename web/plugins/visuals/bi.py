@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -39,7 +39,7 @@ class BIGroupFilter(Filter):
         html.select(htmlvar, [ ("", "") ] + [(g, g) for g in bi.aggregation_groups()])
 
     def selected_group(self):
-        return html.var(self.htmlvars[0])
+        return html.get_unicode_input(self.htmlvars[0])
 
     def filter_table(self, rows):
         group = self.selected_group()
@@ -49,7 +49,7 @@ class BIGroupFilter(Filter):
             return [ row for row in rows if row[self.column] == group ]
 
     def heading_info(self):
-        return html.var(self.htmlvars[0])
+        return html.get_unicode_input(self.htmlvars[0])
 
 declare_filter( 90,  BIGroupFilter())
 
@@ -75,14 +75,19 @@ class BITextFilter(Filter):
         html.text_input(self.htmlvars[0])
 
     def heading_info(self):
-        return html.var_utf8(self.htmlvars[0])
+        return html.get_unicode_input(self.htmlvars[0])
 
     def filter_table(self, rows):
-        val = html.var_utf8(self.htmlvars[0])
+        val = html.get_unicode_input(self.htmlvars[0])
         if not val:
             return rows
         if self.how == "regex":
-            reg = re.compile(val.lower())
+            try:
+                reg = re.compile(val.lower())
+            except re.error, e:
+                html.add_user_error(None, "Invalid regular expression: %s" % e)
+                return rows
+
             return [ row for row in rows if reg.search(row[self.column].lower()) ]
         else:
             return [ row for row in rows if row[self.column] == val ]
@@ -135,11 +140,12 @@ class BIServiceFilter(Filter):
         html.text_input(self.htmlvars[2])
 
     def heading_info(self):
-        return html.var_utf8(self.htmlvars[1]) + " / " + html.var_utf8(self.htmlvars[2])
+        return html.get_unicode_input(self.htmlvars[1], "") \
+               + " / " + html.get_unicode_input(self.htmlvars[2], "")
 
     def service_spec(self):
         if html.has_var(self.htmlvars[2]):
-            return html.var_utf8(self.htmlvars[0]), html.var_utf8(self.htmlvars[1]), html.var_utf8(self.htmlvars[2])
+            return html.get_unicode_input(self.htmlvars[0]), html.get_unicode_input(self.htmlvars[1]), html.get_unicode_input(self.htmlvars[2])
 
     # Used for linking
     def variable_settings(self, row):
@@ -177,9 +183,9 @@ class BIStatusFilter(Filter):
             if self.code != 'a' and varend == 'n':
                 continue # no unset for read and effective state
             if varend == 'n':
-                html.write("<br>")
+                html.br()
             var = self.prefix + varend
-            html.checkbox(var, defval, label = text)
+            html.checkbox(var, defval, label=text)
 
     def filter_table(self, rows):
         jeaders = []

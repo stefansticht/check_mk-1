@@ -19,10 +19,12 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
+
+import cmk.paths
 
 register_rulegroup("inventory",
     _("Hardware/Software-Inventory"),
@@ -39,10 +41,24 @@ register_rule(group,
                       title = _("State when software changes are detected"),
                       default_value = 0,
                 )),
+                ( "sw_missing",
+                  MonitoringState(
+                      title = _("State when software packages info is missing"),
+                      default_value = 0,
+                )),
                 ( "hw_changes",
                   MonitoringState(
                       title = _("State when hardware changes are detected"),
                       default_value = 0,
+                )),
+                ( "fail_status",
+                  MonitoringState(
+                      title = _("State when inventory fails"),
+                      help = _("The check takes this state in case the inventory cannot be "
+                               "updated because of any possible reason. A common use is "
+                               "setting this to OK for workstations that can be switched "
+                               "off - so you will get no notifications in that case."),
+                      default_value = 1,
                 )),
             ]
         ),
@@ -55,7 +71,7 @@ register_rule(group,
                "<b>Note:</b> in order to get any useful "
                "result for agent based hosts make sure that you have installed "
                "the agent plugin <tt>mk_inventory</tt> on these hosts."),
-        forth = lambda x: { }, # convert from legacy None
+        forth = lambda x: x != None and x or {}, # convert from legacy None
     ),
     match = "all",
 )
@@ -71,7 +87,7 @@ register_rule(group,
                   help = _("Please specify the path to the export file. The text <tt>&lt;HOST&gt;</tt> "
                            "will be replaced with the host name the inventory has been done for. "
                            "If you use a relative path then that will be relative to Check_MK's directory "
-                           "for variable data, which is <tt>%s</tt>.") % defaults.var_dir,
+                           "for variable data, which is <tt>%s</tt>.") % cmk.paths.var_dir,
                   allow_empty = False,
                   size = 64,
                   default_value = "csv-export/<HOST>.csv",

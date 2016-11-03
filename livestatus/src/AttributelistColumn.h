@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,37 +25,51 @@
 #ifndef AttributelistColumn_h
 #define AttributelistColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <cstdint>
+#include <string>
+#include "Column.h"
 #include "IntColumn.h"
-#include "nagios.h"
+#include "opids.h"
+class Filter;
+class RowRenderer;
 
-/* Since this column can be of type COLTYPE_INT, it must
-   be a subclass of IntColumn, since StatsColumn assumes
-   Columns of the type COLTYPE_INT to be of that type.
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+/* Since this column can be of type COLTYPE_INT, it must be a subclass of
+   IntColumn, since StatsColumn assumes Columns of the type COLTYPE_INT to be of
+   that type.
  */
 
-class AttributelistColumn : public IntColumn
-{
+class AttributelistColumn : public IntColumn {
+public:
+    AttributelistColumn(const std::string &name, const std::string &description,
+                        int offset, int indirect_offset, bool show_list,
+                        int extra_offset = -1, int extra_extra_offset = -1)
+        : IntColumn(name, description, indirect_offset, extra_offset,
+                    extra_extra_offset)
+        , _offset(offset)
+        , _show_list(show_list) {}
+
+    // API of Column
+    ColumnType type() override {
+        return _show_list ? ColumnType::list : ColumnType::int_;
+    }
+    std::string valueAsString(void *row, contact * /* auth_user */) override;
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
+
+    // API of IntColumn
+    int32_t getValue(void *row, contact *auth_user) override;
+
+private:
     int _offset;
     bool _show_list;
-public:
-    AttributelistColumn(string name, string description, int offset, int indirect_offset, bool show_list)
-        : IntColumn(name, description, indirect_offset), _offset(offset), _show_list(show_list) {}
-
-    /* API of Column */
-    int type() { return _show_list ? COLTYPE_LIST : COLTYPE_INT; }
-    virtual string valueAsString(void *data, Query *);
-    void output(void *, Query *);
-    Filter *createFilter(int opid, char *value);
-
-    /* API of IntColumn */
-    virtual int32_t getValue(void *data, Query *) { return getValue(data); }
-
-    unsigned long getValue(void *data);
 };
 
-
-
-#endif // AttributelistColumn_h
-
+#endif  // AttributelistColumn_h

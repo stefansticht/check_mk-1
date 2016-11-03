@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -222,7 +222,7 @@ def inventory_icom_repeater_temp(parsed):
 
 
 def check_icom_repeater_temp(_no_item, params, parsed):
-    return check_temperature(parsed["temp"], params,
+    return check_temperature(parsed["temp"], params, "icom_repeater_temp",
                                 dev_unit = parsed["temp_devunit"],
                                 dev_status = parsed["temp_devstatus"])
 
@@ -231,7 +231,7 @@ check_info["icom_repeater.temp"] = {
     "inventory_function"        : inventory_icom_repeater_temp,
     "default_levels_variable"   : "icom_repeater_temp_default_levels",
     "check_function"            : check_icom_repeater_temp,
-    "service_description"       : "Temperature",
+    "service_description"       : "Temperature %s",
     "has_perfdata"              : True,
     "group"                     : "temperature",
     "includes"                  : [ "temperature.include" ],

@@ -17,41 +17,57 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "Column.h"
-#include "logger.h"
+#include <stdexcept>
+#include <utility>
+#include "Logger.h"
 
+using std::runtime_error;
+using std::string;
 
-Column::Column(string name, string description, int indirect_offset)
-  : _name(name)
-  , _description(description)
-  , _indirect_offset(indirect_offset)
-  , _extra_offset(-1)
-{
-}
+Column::Column(string name, string description, int indirect_offset,
+               int extra_offset, int extra_extra_offset)
+    : _logger(Logger::getLogger("cmk.livestatus"))
+    , _name(std::move(name))
+    , _description(std::move(description))
+    , _indirect_offset(indirect_offset)
+    , _extra_offset(extra_offset)
+    , _extra_extra_offset(extra_extra_offset) {}
 
-void *Column::shiftPointer(void *data)
-{
-    if (!data)
-        return 0;
-
+void *Column::shiftPointer(void *data) const {
+    if (data == nullptr) {
+        return nullptr;
+    }
     if (_indirect_offset >= 0) {
-        // add one indirection level
-        // indirect_offset is place in structure, where
-        // pointer to real object is
-        data = *((void **)((char *)data + _indirect_offset));
-        if (!data)
-            return 0;
+        data = *(reinterpret_cast<void **>(reinterpret_cast<char *>(data) +
+                                           _indirect_offset));
     }
 
-    // one optional extra level of indirection
-    if (_extra_offset >= 0)
-        data = *((void **)((char *)data + _extra_offset));
+    if (data == nullptr) {
+        return nullptr;
+    }
+    if (_extra_offset >= 0) {
+        data = *(reinterpret_cast<void **>(reinterpret_cast<char *>(data) +
+                                           _extra_offset));
+    }
+
+    if (data == nullptr) {
+        return nullptr;
+    }
+    if (_extra_extra_offset >= 0) {
+        data = *(reinterpret_cast<void **>(reinterpret_cast<char *>(data) +
+                                           _extra_extra_offset));
+    }
 
     return data;
 }
 
+Filter *Column::createFilter(RelationalOperator /*unused*/,
+                             const std::string & /*unused*/) {
+    throw runtime_error("filtering on column " + _name + " not supported");
+}

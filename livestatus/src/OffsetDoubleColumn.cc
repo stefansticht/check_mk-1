@@ -17,23 +17,20 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include "nagios.h"
 #include "OffsetDoubleColumn.h"
+#include <cstring>
 
-double OffsetDoubleColumn::getValue(void *data)
-{
-    if (!data)
+double OffsetDoubleColumn::getValue(void *data) {
+    char *p = static_cast<char *>(shiftPointer(data));
+    if (p == nullptr) {
         return 0;
-
-    char *p = (char *)shiftPointer(data);
-    if (p)
-        return *(double *)(p + _offset);
-    else
-        return 0;
+    }
+    double d;
+    memcpy(&d, p + _offset, sizeof(d));
+    return d;
 }
-

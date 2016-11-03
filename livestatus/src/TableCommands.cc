@@ -17,45 +17,43 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <cstddef>
-
-#define NSCORE
-#include "nagios.h"
-#include "Query.h"
-#include "OffsetStringColumn.h"
 #include "TableCommands.h"
+#include <cstddef>
+#include "CommandsHolder.h"
+#include "OffsetSStringColumn.h"
+#include "Query.h"
 
+using std::string;
 
-
-extern command *command_list;
-
-TableCommands::TableCommands()
-{
-    addColumns(this, "", -1);
+TableCommands::TableCommands(const CommandsHolder &commands_holder,
+                             Logger *logger)
+    : Table(logger), _commands_holder(commands_holder) {
+    addColumns(this, "", 0);
 }
 
+string TableCommands::name() const { return "commands"; }
 
-void TableCommands::addColumns(Table *table, string prefix, int indirect_offset)
-{
-    command cmd;
-    char *ref = (char *)&cmd;
-    table->addColumn(new OffsetStringColumn(prefix + "name",
-                "The name of the command", (char *)(&cmd.name) - ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "line",
-                "The shell command line", (char *)(&cmd.command_line) - ref, indirect_offset));
+string TableCommands::namePrefix() const { return "command_"; }
+
+// static
+void TableCommands::addColumns(Table *table, const string &prefix, int offset) {
+    table->addColumn(new OffsetSStringColumn(
+        prefix + "name", "The name of the command",
+        offset + offsetof(CommandsHolder::Command, _name)));
+    table->addColumn(new OffsetSStringColumn(
+        prefix + "line", "The shell command line",
+        offset + offsetof(CommandsHolder::Command, _command_line)));
 }
 
-
-void TableCommands::answerQuery(Query *query)
-{
-    command *cmd = command_list;
-    while (cmd) {
-        if (!query->processDataset(cmd)) break;
-        cmd = cmd->next;
+void TableCommands::answerQuery(Query *query) {
+    for (auto &cmd : _commands_holder.commands()) {
+        if (!query->processDataset(&cmd)) {
+            break;
+        }
     }
 }

@@ -17,63 +17,68 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "ServicegroupsColumn.h"
-#include "nagios.h"
-#include "Query.h"
+#include "Renderer.h"
 
-objectlist *ServicegroupsColumn::getData(void *data)
-{
-    if (data) {
+using std::make_unique;
+using std::string;
+using std::unique_ptr;
+
+objectlist *ServicegroupsColumn::getData(void *data) {
+    if (data != nullptr) {
         data = shiftPointer(data);
-        if (data)
-            return *(objectlist **)((char *)data + _offset);
-    }
-    return 0;
-}
-
-void ServicegroupsColumn::output(void *data, Query *query)
-{
-    query->outputBeginList();
-    objectlist *list = getData(data);
-    if (list) {
-        bool first = true;
-        while (list) {
-            servicegroup *sg = (servicegroup *)list->object_ptr;
-            if (!first)
-                query->outputListSeparator();
-            else
-                first = false;
-            query->outputString(sg->group_name);
-            list = list->next;
+        if (data != nullptr) {
+            return *reinterpret_cast<objectlist **>(
+                reinterpret_cast<char *>(data) + _offset);
         }
     }
-    query->outputEndList();
+    return nullptr;
 }
 
-void *ServicegroupsColumn::getNagiosObject(char *name)
-{
-    return find_servicegroup(name);
-}
-
-bool ServicegroupsColumn::isNagiosMember(void *data, void *nagobject)
-{
-    // data is already shifted
-    objectlist *list = *(objectlist **)((char *)data + _offset);
-    while (list) {
-        if (list->object_ptr == nagobject)
-            return true;
-        list = list->next;
+void ServicegroupsColumn::output(void *row, RowRenderer &r,
+                                 contact * /* auth_user */) {
+    ListRenderer l(r);
+    for (objectlist *list = getData(row); list != nullptr; list = list->next) {
+        servicegroup *sg = reinterpret_cast<servicegroup *>(list->object_ptr);
+        l.output(string(sg->group_name));
     }
-    return false;
 }
 
-bool ServicegroupsColumn::isEmpty(void *data)
-{
-    objectlist *list = *(objectlist **)((char *)data + _offset);
-    return list == 0;
+unique_ptr<ListColumn::Contains> ServicegroupsColumn::makeContains(
+    const string &name) {
+    class ContainsServiceGroup : public Contains {
+    public:
+        ContainsServiceGroup(servicegroup *element, int offset)
+            : _element(element), _offset(offset) {}
+
+        bool operator()(void *row) override {
+            // row is already shifted
+            for (objectlist *list = *reinterpret_cast<objectlist **>(
+                     reinterpret_cast<char *>(row) + _offset);
+                 list != nullptr; list = list->next) {
+                if (list->object_ptr == _element) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+    private:
+        servicegroup *const _element;
+        int _offset;
+    };
+
+    return make_unique<ContainsServiceGroup>(
+        find_servicegroup(const_cast<char *>(name.c_str())), _offset);
+}
+
+bool ServicegroupsColumn::isEmpty(void *data) {
+    objectlist *list = *reinterpret_cast<objectlist **>(
+        reinterpret_cast<char *>(data) + _offset);
+    return list == nullptr;
 }

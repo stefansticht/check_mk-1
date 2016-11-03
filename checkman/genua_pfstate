@@ -15,23 +15,9 @@ description:
  genuas regular enterprise id 3717 as well as the id 3137 which was
  introduced in a bug in some versions of genuscreen.
 
-perfdata:
- The number of used PF states
-
 inventory:
  The inventory process checks if the device has a system description OID
  of .1.3.6.1.2.1.1.2.0 and if the name of this OID contains "genuscreen"
  (case insensitive). If it also contains valid pf state output, the device is
  inventorized.
-
-[parameters]
-parameters(dict): parameters is a dictionary with one key
-
- {"used"}: a tuple of lower warning and critical values for the number
-    of used PF states
-
-[configuration]
-genua_pfstate_default_levels(dict): This variable is preset to
-
- {{ "used": ( None, None) }}
 

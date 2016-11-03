@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,36 +25,27 @@
 #ifndef CustomVarsColumn_h
 #define CustomVarsColumn_h
 
-#include "config.h"
-
-#include "Column.h"
+#include "config.h"  // IWYU pragma: keep
 #include <string>
+#include "Column.h"
 #include "nagios.h"
+#include "opids.h"
+class Filter;
 
-using namespace std;
-
-#define CVT_VARNAMES 0
-#define CVT_VALUES   1
-#define CVT_DICT     2
-
-class CustomVarsColumn : public Column
-{
-    int _offset; // within data structure (differs from host/service)
-    int _what;
-
+class CustomVarsColumn : public Column {
 public:
-    CustomVarsColumn(string name, string description, int offset, int indirect_offset, int what)
-        : Column(name, description, indirect_offset),  _offset(offset), _what(what) {}
-    int type() { return _what == CVT_DICT ? COLTYPE_DICT : COLTYPE_LIST; }
-    void output(void *, Query *);
-    Filter *createFilter(int opid, char *value);
-    bool contains(void *data, const char *value);
-    char *getVariable(void *data, const char *varname);
-private:
-    customvariablesmember *getCVM(void *data);
+    CustomVarsColumn(std::string name, std::string description, int offset,
+                     int indirect_offset, int extra_offset = -1);
+    virtual ~CustomVarsColumn();
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
+    virtual bool contains(void *row, const std::string &value) = 0;
+    std::string getVariable(void *row, const std::string &varname);
+
+protected:
+    const int _offset;  // within data structure (differs from host/service)
+
+    customvariablesmember *getCVM(void *row);
 };
 
-
-#endif // CustomVarsColumn_h
-
-
+#endif  // CustomVarsColumn_h

@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2016             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -24,27 +24,22 @@
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
+#<<<solaris_mem>>>
+#Memory: 64G phys mem, 28G free mem, 8198M total swap, 8198M free swap
 
-# <<<statgrab_mem>>>
-# mem.cache 0
-# mem.free 166014599168
-# mem.total 274877906944
-# mem.used 108863307776
-# swap.free 87748075520
-# swap.total 203939356672
-# swap.used 116191281152
+# solaris_mem a parse function with the following output:
+# {
+#    'MemFree': 2070528,
+#    'MemTotal': 25165824,
+#    'SwapFree': 3802112,
+#    'SwapTotal': 4194304
+# }
 
-def inv_solaris_mem(info):
+def inv_solaris_mem(parsed):
     node = inv_tree("hardware.memory.")
-    for key, value in info:
-        if key == "mem.total":
-            node["total_ram_usable"] = int(value)
-        if key == "swap.total":
-            node["total_swap"] = int(value)
+    node["total_ram_usable"] = parsed["MemFree"]
+    node["total_swap"] = parsed["SwapTotal"]
 
-
-inv_info['statgrab_mem'] = {
+inv_info['solaris_mem'] = {
    "inv_function"           : inv_solaris_mem,
 }
-
-

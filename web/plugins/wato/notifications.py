@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -72,6 +72,7 @@ register_notification_parameters(
                       ( "ack_comment",  _("Acknowledgement Comment") ),
                       ( "perfdata",     _("Performance Data") ),
                       ( "graph",        _("Performance Graphs") ),
+                      ( "notesurl",     _("Custom Host/Service Notes URL") ),
                       ( "context",      _("Complete variable list (for testing)" ) ),
                     ],
                     default_value = [ "perfdata", "graph", "abstime", "address", "longoutput" ],
@@ -90,7 +91,7 @@ register_notification_parameters(
                                     "<tt>https</tt> and end with <tt>/check_mk/</tt>."),
                     size = 64,
                     default_value = "http://" + socket.gethostname() + "/" + (
-                        defaults.omd_site and defaults.omd_site + "/" or "") + "check_mk/",
+                        config.omd_site() and config.omd_site() + "/" or "") + "check_mk/",
                 )
             ),
             ( "no_floating_graphs",
@@ -114,7 +115,68 @@ register_notification_parameters(
                     title = _("Notification sort order for bulk notifications"),
                     default = "oldest_first"
                 )
-            )
+            ),
+            ('smtp',
+             Dictionary(
+                 title = _("Enable synchronous delivery via SMTP"),
+                 help = _("Configuring this to have the notification plugin connect directly to "
+                          "the smtp server. This has the advantage of providing better error "
+                          "messages in case of an error but it does require more configuration "
+                          "and is strictly synchronous so we advice use only on enterprise "
+                          "installations using the notification spooler."),
+                 elements = [
+                     ("smarthosts",
+                      ListOfStrings(
+                          title = _("Smarthosts"),
+                          orientation = "horizontal"
+                      )),
+                     ("port",
+                      Integer(
+                          title = _("Port"),
+                          default_value = 25
+                      )),
+                     ("auth",
+                      Dictionary(
+                          title = _("Authentication"),
+                          elements = [
+                              ("method",
+                               DropdownChoice(
+                                   title = _("Authmethod"),
+                                   choices = [
+                                       ("plaintext", _("Plaintext"))
+                                   ]
+                               )),
+                              ("user",
+                               TextAscii(
+                                   title = _("User")
+                               )),
+                              ("password",
+                               Password(
+                                   title = _("Password")
+                               ))
+                          ],
+                          optional_keys = []
+                      )),
+                     ("encryption",
+                      DropdownChoice(
+                          title = ("Encryption"),
+                          choices = [
+                              ("ssl_tls", _("SSL/TLS")),
+                              ("starttls", _("STARTTLS"))
+                          ]
+                      )),
+                 ],
+                 optional_keys = ["auth", "encryption"]
+             )
+            ),
+            ("insert_html_section",
+                TextAreaUnicode(
+                    title = _("Insert HTML section between body and table"),
+                    default_value = "<HTMLTAG>CONTENT</HTMLTAG>",
+                    cols = 40,
+                    rows = "auto",
+                ),
+            ),
         ]
     )
 )
@@ -249,7 +311,7 @@ register_notification_parameters(
                 ),
             ),
             ( "community",
-                TextAscii(
+                Password(
                     title = _("SNMP Community"),
                     help = _("SNMP Community for the SNMP trap")
                 )
@@ -299,7 +361,7 @@ register_notification_parameters("pushover", Dictionary(
                               "<tt>https</tt> and end with <tt>/check_mk/</tt>."),
               size = 64,
               default_value = "http://" + socket.gethostname() + "/" + (
-                      defaults.omd_site and defaults.omd_site + "/" or "") + "check_mk/",
+                      config.omd_site() and config.omd_site() + "/" or "") + "check_mk/",
         )),
         ("priority", DropdownChoice(
             title = _("Priority"),

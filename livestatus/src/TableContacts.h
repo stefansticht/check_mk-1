@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,19 +25,23 @@
 #ifndef TableContacts_h
 #define TableContacts_h
 
-#include "config.h"
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Table.h"
-#include "nagios.h"
+class Logger;
+class Query;
 
-class TableContacts : public Table
-{
+class TableContacts : public Table {
 public:
-    TableContacts();
-    const char *name() { return "contacts"; }
-    void *findObject(char *objectspec);
-    void addColumns(Table *, string prefix, int indirect_offset);
-    void answerQuery(Query *query);
+    explicit TableContacts(Logger *logger);
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+    void *findObject(const std::string &objectspec) override;
+
+    static void addColumns(Table *, const std::string &prefix,
+                           int indirect_offset);
 };
 
-#endif // TableContacts_h
-
+#endif  // TableContacts_h

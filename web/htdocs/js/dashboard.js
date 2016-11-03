@@ -343,7 +343,9 @@ function dashboard_scheduler(initial) {
     if (timestamp % 60 == 0)
         update_header_timer();
 
-    setTimeout(function() { dashboard_scheduler(0); }, 1000);
+    g_reload_timer = setTimeout(function() {
+        dashboard_scheduler(0);
+    }, 1000);
 }
 
 function dashboard_update_contents(id, response_text) {
@@ -435,8 +437,24 @@ function toggle_dashboard_edit() {
     // Remove/Add edit=1 parameter from URL to make page reload handling correct
     // Only a solution for browsers with history.replaceState support. Sadly
     // we have no F5/reload fix for others...
+    //
+    // window.parent is either a reference to the current window (when opened as dedicated page)
+    // or the whole browser window if opened within a frame. The URL is either directly:
+    // http://[HOST]/[SITE]/check_mk/dashboard.py?name=main&edit=1
+    // or when opened within a frame it is:
+    // http://[HOST]/[SITE]/check_mk/index.py?start_url=%2F[SITE]%2Fcheck_mk%2Fdashboard.py%3Fname%3Dmain&edit=1
+    // The new URL computation needs to deal with it.
     if (window.parent.history.replaceState) {
-        new_url = makeuri({'edit': g_editing ? '1' : '0'}, window.parent.location.href);
+        var url = window.parent.location.href;
+        if (url.indexOf("start_url") !== -1) {
+            var frame_url = decodeURIComponent(getUrlParam("start_url", url));
+            frame_url = makeuri({'edit': g_editing ? '1' : '0'}, frame_url);
+            new_url = makeuri({'start_url': frame_url}, url);
+        }
+        else {
+            new_url = makeuri({'edit': g_editing ? '1' : '0'}, url);
+        }
+
         window.parent.history.replaceState({}, document.title, new_url);
     }
 

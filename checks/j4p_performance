@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -125,7 +125,7 @@ def check_j4p_performance_mem(item, params, info):
     total = heap + non_heap
     perfdata = [ ("heap",    heap,     warn, crit),
                  ("nonheap", non_heap, warn, crit) ]
-    infotext = "%.0f MB total (%.0f MB heap, %.0f MB non-heap), levels at %.0f/%.0f" % (total, heap, non_heap, warn, crit)
+    infotext = "%.0f MB total (%.0f MB heap, %.0f MB non-heap) (warn/crit at %.0f/%.0f)" % (total, heap, non_heap, warn, crit)
     if total >= crit:
         return (2, infotext, perfdata)
     elif total >= warn:
@@ -225,7 +225,6 @@ def check_j4p_performance_app_state(item, _unused, info):
 check_info["j4p_performance.app_state"] = {'check_function': check_j4p_performance_app_state,
  'default_levels_variable': None,
  'group': 'j4p_performance.app_state',
- 'has_perfdata': False,
  'inventory_function': lambda i: inventory_j4p_performance_apps(i, "app_state"),
  'node_info': False,
  'service_description': 'JMX %s State',

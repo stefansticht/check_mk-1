@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,17 +25,31 @@
 #ifndef TimePointerColumn_h
 #define TimePointerColumn_h
 
+#include "config.h"  // IWYU pragma: keep
+#include <string>
+#include "Column.h"
 #include "IntPointerColumn.h"
+#include "opids.h"
+class Filter;
+class RowRenderer;
 
-class TimePointerColumn : public IntPointerColumn
-{
+#ifdef CMC
+#include "cmc.h"
+#else
+#include "nagios.h"
+#endif
+
+class TimePointerColumn : public IntPointerColumn {
 public:
-    TimePointerColumn(string name, string description, int* number)
-        : IntPointerColumn(name, description, number) {}
-    void output(void *data, Query *query);
-    int type() { return COLTYPE_TIME; }
-    Filter *createFilter(int operator_id, char *value);
+    TimePointerColumn(const std::string &name, const std::string &description,
+                      int *number, int indirect_offset = -1,
+                      int extra_offset = -1)
+        : IntPointerColumn(name, description, number, indirect_offset,
+                           extra_offset) {}
+    void output(void *row, RowRenderer &r, contact *auth_user) override;
+    ColumnType type() override { return ColumnType::time; }
+    Filter *createFilter(RelationalOperator relOp,
+                         const std::string &value) override;
 };
 
-
-#endif // TimePointerColumn_h
+#endif  // TimePointerColumn_h

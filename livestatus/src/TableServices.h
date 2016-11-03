@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,33 +25,45 @@
 #ifndef TableServices_h
 #define TableServices_h
 
-#include "config.h"
-
-#include <set>
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Table.h"
-#include "nagios.h"
+#include "nagios.h"  // IWYU pragma: keep
+#ifdef CMC
+#include <mutex>
+#include "Notes.h"
+class Core;
+#else
+class DowntimesOrComments;
+class Logger;
+#endif
+class Query;
 
-using namespace std;
-class TableHosts;
-class TableContacts;
-class TableDowntimes;
-
-class TableServices : public Table
-{
-    bool _by_group;
-    bool _by_hostgroup; // alternative to _by_group
-
+class TableServices : public Table {
 public:
-    TableServices(bool by_group, bool by_hostgroup);
-    const char *name() { return _by_group ? "servicesbygroup" : \
-        (_by_hostgroup ? "servicesbyhostgroup" : "services"); }
-    const char *prefixname() { return "services"; }
-    bool isAuthorized(contact *, void *);
-    void *findObject(char *objectspec);
-    void add(service *svc);
-    void answerQuery(Query *);
-    void addColumns(Table *, string prefix, int indirect_offset, bool add_hosts);
+#ifdef CMC
+    TableServices(const Downtimes &downtimes_holder,
+                  const Comments &comments_holder,
+                  std::recursive_mutex &holder_lock, Core *core);
+    static void addColumns(Table *, const std::string &prefix,
+                           int indirect_offset, bool add_hosts,
+                           const Downtimes &downtimes_holder,
+                           const Comments &comments_holder,
+                           std::recursive_mutex &holder_lock, Core *core);
+#else
+    TableServices(const DowntimesOrComments &downtimes_holder,
+                  const DowntimesOrComments &comments_holder, Logger *logger);
+    static void addColumns(Table *, const std::string &prefix,
+                           int indirect_offset, bool add_hosts,
+                           const DowntimesOrComments &downtimes_holder,
+                           const DowntimesOrComments &comments_holder);
+#endif
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *) override;
+    bool isAuthorized(contact *, void *) override;
+    void *findObject(const std::string &objectspec) override;
 };
 
-
-#endif // TableServices_h
+#endif  // TableServices_h

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,21 @@
 #ifndef OffsetStringColumn_h
 #define OffsetStringColumn_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "StringColumn.h"
 
-class OffsetStringColumn : public StringColumn
-{
+class OffsetStringColumn : public StringColumn {
     int _offset;
+
 public:
-    OffsetStringColumn(string name, string description, int offset, int indirect_offset = -1)
-        : StringColumn(name, description, indirect_offset), _offset(offset) {}
-    char *getValue(void *data);
-    int offset() { return _offset; }
+    OffsetStringColumn(const std::string& name, const std::string& description,
+                       int offset, int indirect_offset = -1,
+                       int extra_offset = -1)
+        : StringColumn(name, description, indirect_offset, extra_offset)
+        , _offset(offset) {}
+    std::string getValue(void* data) const override;
+    int offset() const { return _offset; }
 };
 
-
-#endif // OffsetStringColumn_h
-
+#endif  // OffsetStringColumn_h

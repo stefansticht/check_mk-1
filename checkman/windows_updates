@@ -16,18 +16,3 @@ description:
 inventory:
  One service named {System Updates} is being created for each host.
 
-perfdata:
- Two values important and optional which contain the number of pending updates.
-
-[parameters]
-imp_warn (int): Number of pending important updates to raise a WARNING state.
-                Can be set to None for disabling the level.
-imp_crit (int): Number of pending important updates to raise a CRITICAL state
-                Can be set to None for disabling the level.
-opt_warn (int): Number of pending optional updates to raise a WARNING state
-                Can be set to None for disabling the level.
-opt_crit (int): Number of pending optional updates to raise a CRITICAL state
-                Can be set to None for disabling the level.
-
-[configuration]
-windows_updates_default_params (tuple of four ints): Default value is set to {(None, None, None, None)}

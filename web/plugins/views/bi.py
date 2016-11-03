@@ -19,12 +19,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import bi
+from cmk.defines import short_service_state_name
 
 #     ____        _
 #    |  _ \  __ _| |_ __ _ ___  ___  _   _ _ __ ___ ___  ___
@@ -37,7 +38,7 @@ import bi
 multisite_datasources["bi_aggregations"] = {
     "title"       : _("BI Aggregations"),
     "table"       : bi.table,
-    "infos"       : [ "aggr" ],
+    "infos"       : [ "aggr", "aggr_group", ],
     "keys"        : [],
     "idkeys"      : [ 'aggr_name' ],
 }
@@ -45,7 +46,7 @@ multisite_datasources["bi_aggregations"] = {
 multisite_datasources["bi_host_aggregations"] = {
     "title"       : _("BI Aggregations affected by one host"),
     "table"       : bi.host_table,
-    "infos"       : [ "host", "aggr" ],
+    "infos"       : [ "aggr", "host", "aggr_group" ],
     "keys"        : [],
     "idkeys"      : [ 'aggr_name' ],
 }
@@ -55,7 +56,7 @@ multisite_datasources["bi_host_aggregations"] = {
 multisite_datasources["bi_hostname_aggregations"] = {
     "title"       : _("BI Hostname Aggregations"),
     "table"       : bi.hostname_table,
-    "infos"       : [ "host", "aggr" ],
+    "infos"       : [ "aggr", "host", "aggr_group" ],
     "keys"        : [],
     "idkeys"      : [ 'aggr_name' ],
 }
@@ -64,7 +65,7 @@ multisite_datasources["bi_hostname_aggregations"] = {
 multisite_datasources["bi_hostnamebygroup_aggregations"] = {
     "title"       : _("BI Aggregations for Hosts by Hostgroups"),
     "table"       : bi.hostname_by_group_table,
-    "infos"       : [ "host", "aggr", "hostgroup" ],
+    "infos"       : [ "aggr", "host", "hostgroup", "aggr_group" ],
     "keys"        : [],
     "idkeys"      : [ 'aggr_name' ],
 }
@@ -85,12 +86,12 @@ def paint_bi_icons(row):
     html.icon_button(single_url, _("Show only this aggregation"), "showbi")
     avail_url = single_url + "&mode=availability"
     html.icon_button(avail_url, _("Analyse availability of this aggregation"), "availability")
-    if row["aggr_effective_state"]["in_downtime"]:
-	html.icon(_("This aggregation is currently in a scheduled downtime."), "downtime")
+    if row["aggr_effective_state"]["in_downtime"] != 0:
+        html.icon(_("A service or host in this aggregation is in downtime."), "derived_downtime")
     if row["aggr_effective_state"]["acknowledged"]:
-	html.icon(_("The critical problems that make this aggregation non-OK have been acknowledged."), "ack")
+        html.icon(_("The critical problems that make this aggregation non-OK have been acknowledged."), "ack")
     if not row["aggr_effective_state"]["in_service_period"]:
-	html.icon(_("This aggregation is currently out of its service period."), "outof_serviceperiod")
+        html.icon(_("This aggregation is currently out of its service period."), "outof_serviceperiod")
     code = html.drain()
     html.unplug()
     return "buttons", code
@@ -119,7 +120,7 @@ def paint_aggr_state_short(state, assumed = False):
     if state == None:
         return "", ""
     else:
-        name = nagios_short_state_names[state["state"]]
+        name = short_service_state_name(state["state"], "")
         classes = "state svcstate state%s" % state["state"]
         if assumed:
             classes += " assumed"
@@ -247,7 +248,7 @@ multisite_painter_options["aggr_wrap"] = {
 }
 
 def paint_aggr_tree_ltr(row, mirror):
-    wrap = get_painter_option("aggr_wrap")
+    wrap = painter_options.get("aggr_wrap")
 
     if wrap == "wrap":
         td = '<td'
@@ -268,13 +269,14 @@ def paint_aggr_tree_ltr(row, mirror):
         for node in tree[3]:
             if not node[2].get("hidden"):
                 leaves += gen_table(node, height - 1, show_host)
-        h = '<div class="aggr tree">' + bi.aggr_render_node(tree, tree[2]["title"], '', show_host) + "</div>"
+        h = '<div class="aggr tree">' \
+            + bi.aggr_render_node(tree, tree[2]["title"], show_host) + "</div>"
         if leaves:
             leaves[0][2].append((len(leaves), h))
         return leaves
 
     tree = row["aggr_treestate"]
-    if get_painter_option("aggr_onlyproblems") == "1":
+    if painter_options.get("aggr_onlyproblems") == "1":
         tree = bi.filter_tree_only_problems(tree)
     depth = bi.status_tree_depth(tree)
     leaves = gen_table(tree, depth, row["aggr_hosts"] > 1)
@@ -299,10 +301,15 @@ def paint_aggr_tree_ltr(row, mirror):
     h += '</table>'
     return "aggrtree", h
 
+
 def paint_aggregated_tree_state(row):
-    treetype = get_painter_option("aggr_treetype")
-    expansion_level = int(get_painter_option("aggr_expand"))
-    only_problems = get_painter_option("aggr_onlyproblems") == "1"
+    if html.is_api_call():
+        return bi.render_tree_json(row)
+
+    treetype        = painter_options.get("aggr_treetype")
+    expansion_level = int(painter_options.get("aggr_expand"))
+    only_problems   = painter_options.get("aggr_onlyproblems") == "1"
+
     if treetype == "foldable":
         return bi.render_tree_foldable(row,  False,  False, expansion_level, only_problems, lazy=True)
     elif treetype == "boxes":
@@ -313,6 +320,7 @@ def paint_aggregated_tree_state(row):
         return paint_aggr_tree_ltr(row, False)
     elif treetype == "top-down":
         return paint_aggr_tree_ltr(row, True)
+
 
 multisite_painters["aggr_treestate"] = {
     "title"   : _("Aggregation: complete tree"),

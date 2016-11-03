@@ -20,16 +20,6 @@ item:
  of the kernel counter in question as found in {/proc/stat} or
  {/proc/vmstat}.
 
-examples:
- # Monitor major page faults, set levels to 200 and 400 per second
- # Do this on all hosts with the tag "lnx"
- checks += [
-   ( ["lnx"], ALL_HOSTS, "kernel", "Major Page Faults", (200, 400) )
- ]
-
-perfdata:
- One variable: the current value of the counter.
-
 inventory:
  Per default one check for {"Major Page Faults"},
  {"Context Switches"} and {"Process Creations"}
@@ -38,18 +28,4 @@ inventory:
  to a list of strings with those counters that should be inventorized.
  Use {ignored_services} if you need a host-specific configuration
  of the inventory.
-
-examples:
-  # Make inventory create only checks for pgmajfault
-  inventory_kernel_counters = [ "pgmajfault", "pgpgin", "pgpgout" ]
-
-[parameters]
-warning (int): The rate per second which triggers a warning. A value of {None} disables the level.
-
-critical (int): The rate per second which triggers a critical state. A value of {None} disables the level.
-
-[configuration]
-inventory_kernel_counters (list of strings): List of performance counters the inventory should create checks for. Default is {[ "pgmajfault", "ctxt", "processes" ]}.
-
-kernel_default_levels (int, int): Default levels for newly inventorized checks. Default is {(None, None)}, which disables the levels and makes the check always OK.
 

@@ -3,17 +3,9 @@ SITE=${SITE:-$(cat ../.site 2>/dev/null || true)}
 SITE=${SITE:-$(omd sites --bare | head -n 1)}
 
 set -e
-if [ ! -f configure ]; then
-    aclocal && autoheader && automake --add-missing && autoconf
-fi
-
-if [ ! -f Makefile ]; then
-    ./configure
-fi
-
-make CFLAGS=-g -j 8
-
-
+make -C .. livestatus/config.h
+make -j8
 sudo install src/livestatus.o /omd/sites/$SITE/lib/mk-livestatus/livestatus.o
+(cd api/python ; .f12 )
 echo "Restarting site $SITE"
 sudo omd restart $SITE nagios

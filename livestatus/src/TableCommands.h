@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,25 @@
 #ifndef TableCommands_h
 #define TableCommands_h
 
-#include "config.h"
-
-#include <set>
+#include "config.h"  // IWYU pragma: keep
+#include <string>
 #include "Table.h"
-#include "nagios.h"
+class CommandsHolder;
+class Logger;
+class Query;
 
-class TableCommands : public Table
-{
+class TableCommands : public Table {
 public:
-    TableCommands();
-    const char *name() { return "commands"; }
-    void answerQuery(Query *query);
-    void addColumns(Table *table, string prefix, int indirect_offset);
+    TableCommands(const CommandsHolder &commands_holder, Logger *logger);
+
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+
+    static void addColumns(Table *table, const std::string &prefix, int offset);
+
+private:
+    const CommandsHolder &_commands_holder;
 };
 
-#endif // TableCommands_h
-
+#endif  // TableCommands_h

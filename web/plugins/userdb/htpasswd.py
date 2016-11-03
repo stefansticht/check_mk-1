@@ -19,14 +19,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import crypt
-import defaults
-
+import cmk.paths
 
 def encrypt_password(password, salt = None):
     import md5crypt
@@ -75,7 +74,7 @@ class HtpasswdUserConnector(UserConnector):
     def load_htpasswd(self):
         creds = {}
 
-        for line in open(defaults.htpasswd_file, 'r'):
+        for line in open(cmk.paths.htpasswd_file, 'r'):
             if ':' in line:
                 username, pwhash = line.split(':', 1)
                 creds[username.decode("utf-8")] = pwhash.rstrip('\n')
@@ -100,13 +99,13 @@ class HtpasswdUserConnector(UserConnector):
         # users from htpasswd are lost. If you start managing users with
         # WATO, you should continue to do so or stop doing to for ever...
         # Locked accounts get a '!' before their password. This disable it.
-        filename = defaults.htpasswd_file + '.new'
+        filename = cmk.paths.htpasswd_file + '.new'
         rename_file = True
         try:
             out = create_user_file(filename, "w")
         except:
             rename_file = False
-            out = create_user_file(defaults.htpasswd_file, "w")
+            out = create_user_file(cmk.paths.htpasswd_file, "w")
 
         for id, user in users.items():
             # only process users which are handled by htpasswd connector

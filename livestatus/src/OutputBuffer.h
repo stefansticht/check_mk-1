@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,55 +25,65 @@
 #ifndef OutputBuffer_h
 #define OutputBuffer_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <cstddef>
 #include <string>
-using namespace std;
+#include <vector>
+class Logger;
 
-#define INITIAL_OUTPUT_BUFFER_SIZE 1
+class OutputBuffer {
+public:
+    enum class ResponseCode {
+        ok = 200,
+        invalid_header = 400,
+        unauthorized = 403,
+        not_found = 404,
+        limit_exceeded = 413,
+        incomplete_request = 451,
+        invalid_request = 452,
+        unknown_column = 450,
+    };
 
-#define RESPONSE_CODE_OK                 200
-#define RESPONSE_CODE_INVALID_HEADER     400
-#define RESPONSE_CODE_UNAUTHORIZED       403
-#define RESPONSE_CODE_NOT_FOUND          404
-#define RESPONSE_CODE_LIMIT_EXCEEDED     413
-#define RESPONSE_CODE_INCOMPLETE_REQUEST 451
-#define RESPONSE_CODE_INVALID_REQUEST    452
-#define RESPONSE_CODE_UNKNOWN_COLUMN     450
+    enum class ResponseHeader { off, fixed16 };
 
-class OutputBuffer
-{
+    explicit OutputBuffer(Logger *logger);
+    ~OutputBuffer();
+
+    void add(const std::string &str);
+    void add(const std::vector<char> &blob);
+
+    void reset();
+    void flush(int fd, int *termination_flag);
+    size_t size() { return _writepos - _buffer; }
+
+    void setResponseHeader(ResponseHeader r) { _response_header = r; }
+
+    void setDoKeepalive(bool d) { _do_keepalive = d; }
+    bool doKeepalive() { return _do_keepalive; }
+
+    void setError(ResponseCode code, const std::string &message);
+
+    Logger *getLogger() const { return _logger; }
+
+private:
     char *_buffer;
     char *_writepos;
     char *_end;
     unsigned _max_size;
-    int _response_header;
-    unsigned _response_code;
-    string _error_message;
+    ResponseHeader _response_header;
+    ResponseCode _response_code;
+    std::string _error_message;
     bool _do_keepalive;
+    Logger *const _logger;
 
-public:
-    OutputBuffer();
-    ~OutputBuffer();
-    const char *buffer() { return _buffer; }
-    unsigned size() { return _writepos - _buffer; }
-    void addChar(char c);
-    void addString(const char *);
-    void addBuffer(const char *, unsigned);
-    void reset();
-    void flush(int fd, int *termination_flag);
-    void setResponseHeader(int r) { _response_header = r; }
-    int responseHeader() { return _response_header; }
-    void setDoKeepalive(bool d) { _do_keepalive = d; }
-    bool doKeepalive() { return _do_keepalive; }
-    void setError(unsigned code, const char *format, ...);
-    bool hasError() { return _error_message != ""; }
+    // We use dynamically allocated memory => disable copy/assignment
+    // TODO: Just use vector instead of all this manual fiddling...
+    OutputBuffer(const OutputBuffer &) = delete;
+    OutputBuffer &operator=(const OutputBuffer &) = delete;
 
-private:
+    void addBuffer(const char *, size_t);
     void needSpace(unsigned);
-    void writeData(int fd, int *, const char *, int);
+    void writeData(int fd, int *, const char *, size_t);
 };
 
-
-#endif // OutputBuffer_h
-
+#endif  // OutputBuffer_h

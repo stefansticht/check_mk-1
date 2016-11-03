@@ -35,28 +35,3 @@ inventory:
  {impi_ignore_nr} to {True} then these sensors will
  be ignored.
 
-perfdata:
- In summary mode only the current ambient temperature
- will be output - if available. In detailed mode each
- sensors outputs its current value.
-
-examples:
- # Ignore sensors in state 'nr'
- ipmi_ignore_nr = True
-
- # Make inventory produce detailed IPMI checks
- ipmi_summarize = False
-
- # Ignore certain types of sensors
- ipmi_ignored_sensors = [ "Power_Meter", "Virtual_Fan" ]
-
-[configuration]
-ipmi_ignore_nr (boolean): If set to {True}, sensors
- with the state {nr} will be ignored. Default is {False}.
-ipmi_summarize (boolean): If set to {False}, the inventory
- will create a separate service for each IPMI device. Default
- is {True}.
-ipmi_ignored_sensors(list): A list of sensors names that should
- be ignored when doing inventory (for non-summarized mode) or
- during check for summarized mode). The check does a {prefix}
- match on the names.

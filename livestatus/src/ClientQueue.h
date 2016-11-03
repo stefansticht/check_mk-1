@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,28 +25,25 @@
 #ifndef ClientQueue_h
 #define ClientQueue_h
 
-#include "config.h"
-
+#include "config.h"  // IWYU pragma: keep
+#include <condition_variable>
 #include <deque>
-#include <pthread.h>
+#include <memory>
+#include <mutex>
 
-using namespace std;
-
-class ClientQueue
-{
-    typedef deque<int> _queue_t;
-    _queue_t _queue;
+class ClientQueue {
 public:
     ClientQueue();
     ~ClientQueue();
     void addConnection(int);
     int popConnection();
-    void wakeupAll();
+    void terminate();
 
-    pthread_mutex_t _lock;
-    pthread_cond_t _signal;
+private:
+    std::deque<int> _queue;
+    std::mutex _mutex;
+    std::condition_variable _cond;
+    bool _should_terminate;
 };
 
-
-#endif // ClientQueue_h
-
+#endif  // ClientQueue_h

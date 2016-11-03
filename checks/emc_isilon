@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -56,7 +56,6 @@ check_info["emc_isilon.clusterhealth"] = {
     "check_function"        : check_emc_isilon_clusterhealth,
     "inventory_function"    : inventory_emc_isilon_clusterhealth,
     "service_description"   : "Cluster Health",
-    "has_perfdata"          : False,
     "snmp_info"             : emc_isilon_info,
     "snmp_scan_function"    : emc_isilon_scan
 }
@@ -84,7 +83,6 @@ check_info["emc_isilon.nodehealth"] = {
     "check_function"        : check_emc_isilon_nodehealth,
     "inventory_function"    : inventory_emc_isilon_nodehealth,
     "service_description"   : "Node Health",
-    "has_perfdata"          : False,
     "snmp_info"             : emc_isilon_info,
     "snmp_scan_function"    : emc_isilon_scan
 }
@@ -107,7 +105,6 @@ check_info["emc_isilon.nodes"] = {
     "check_function"        : check_emc_isilon_nodes,
     "inventory_function"    : inventory_emc_isilon_nodes,
     "service_description"   : "Nodes",
-    "has_perfdata"          : False,
     "snmp_info"             : emc_isilon_info,
     "snmp_scan_function"    : emc_isilon_scan
 }
@@ -125,7 +122,6 @@ check_info["emc_isilon.names"] = {
     "check_function"        : check_emc_isilon_names,
     "inventory_function"    : inventory_emc_isilon_names,
     "service_description"   : "Isilon Info",
-    "has_perfdata"          : False,
     "snmp_info"             : emc_isilon_info,
     "snmp_scan_function"    : emc_isilon_scan
 }

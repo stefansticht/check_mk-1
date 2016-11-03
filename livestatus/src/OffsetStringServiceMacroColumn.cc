@@ -17,27 +17,21 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "OffsetStringServiceMacroColumn.h"
-#include "nagios.h"
 
-host *OffsetStringServiceMacroColumn::getHost(void *data)
-{
+host *OffsetStringServiceMacroColumn::getHost(void *data) {
     service *svc = getService(data);
-    if (svc)
+    if (svc != nullptr) {
         return svc->host_ptr;
-    else
-        return 0;
+    }
+    return nullptr;
 }
 
-service *OffsetStringServiceMacroColumn::getService(void *data)
-{
-    data = shiftPointer(data);
-    return (service *)data;
+service *OffsetStringServiceMacroColumn::getService(void *data) {
+    return static_cast<service *>(shiftPointer(data));
 }
-
-

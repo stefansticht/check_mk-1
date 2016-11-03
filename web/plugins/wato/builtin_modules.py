@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -71,15 +71,26 @@ modules += [
       ( "pattern_editor", _("Logfile Pattern Analyzer"), "analyze", "pattern_editor",
         _("Analyze logfile pattern rules and validate logfile patterns against custom text.")),
 
-      ( "bi_aggregations", _("BI - Business Intelligence"), "aggr", "bi_rules",
+      ( "bi_packs", _("BI - Business Intelligence"), "aggr", "bi_rules",
       _("Configuration of Check_MK's Business Intelligence component.")),
 
       ( "sites",  _("Distributed Monitoring"), "sites", "sites",
       _("Distributed monitoring via Multsite, distributed configuration via WATO")),
 
-      ( "snapshot", _("Backup & Restore"), "backup", "snapshots",
-        _("Make snapshots of your configuration, download, upload and restore snapshots.")),
+      ( "backup", _("Backup"), "backup", "backups",
+        _("Make backups of your whole site and restore previous backups.")),
+
+      ( "passwords", _("Passwords"), "passwords", "passwords",
+        _("Store and share passwords for later use in checks.")),
 
       ( "icons", _("Custom Icons"), "icons", "icons",
         _("Upload your own icons that can be used in views or custom actions")),
 ]
+
+# Register the builtin agent download page on the top level of WATO only when the agent bakery
+# does not exist (e.g. when using CRE)
+if "agents" not in modes:
+    modules.append(
+        ("download_agents", _("Monitoring Agents"), "download_agents", "download_agents",
+         _("Downloads the Check_MK monitoring agents"))
+    )

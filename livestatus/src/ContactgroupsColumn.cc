@@ -17,63 +17,66 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "ContactgroupsColumn.h"
-#include "nagios.h"
-#include "Query.h"
+#include "Renderer.h"
 
-void ContactgroupsColumn::output(void *data, Query *query)
-{
-    query->outputBeginList();
+using std::make_unique;
+using std::string;
+using std::unique_ptr;
 
-    if (data) {
-        data = shiftPointer(data);
-        if (data) {
-            contactgroupsmember *cgm = *(contactgroupsmember **)((char *)data + _offset);
-            bool first = true;
-            while (cgm) {
-                contactgroup *cg = (contactgroup *)cgm->group_ptr;
-                if (!first)
-                    query->outputListSeparator();
-                else
-                    first = false;
-                query->outputString(cg->group_name);
-                cgm = cgm->next;
-            }
+void ContactgroupsColumn::output(void *row, RowRenderer &r,
+                                 contact * /* auth_user */) {
+    ListRenderer l(r);
+    if (auto data = static_cast<char *>(shiftPointer(row))) {
+        for (contactgroupsmember *cgm =
+                 *reinterpret_cast<contactgroupsmember **>(data + _offset);
+             cgm != nullptr; cgm = cgm->next) {
+            l.output(string(cgm->group_ptr->group_name));
         }
     }
-
-    query->outputEndList();
 }
 
-void *ContactgroupsColumn::getNagiosObject(char *name)
-{
-    return find_contactgroup(name);
+unique_ptr<ListColumn::Contains> ContactgroupsColumn::makeContains(
+    const string &name) {
+    class ContainsContactGroup : public Contains {
+    public:
+        ContainsContactGroup(contactgroup *element, int offset)
+            : _element(element), _offset(offset) {}
+
+        bool operator()(void *row) override {
+            if (_element == nullptr || row == nullptr) {
+                return false;
+            }
+
+            // row is already shifted (_indirect_offset is taken into account),
+            // but _offset needs still to be accounted for
+            for (contactgroupsmember *cgm =
+                     *reinterpret_cast<contactgroupsmember **>(
+                         reinterpret_cast<char *>(row) + _offset);
+                 cgm != nullptr; cgm = cgm->next) {
+                if (cgm->group_ptr == _element) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+    private:
+        contactgroup *const _element;
+        int _offset;
+    };
+
+    return make_unique<ContainsContactGroup>(
+        find_contactgroup(const_cast<char *>(name.c_str())), _offset);
 }
 
-bool ContactgroupsColumn::isNagiosMember(void *data, void *nagobject)
-{
-    if (!nagobject || !data)
-        return false;
-
-    // data is already shifted (_indirect_offset is taken into account)
-    // But _offset needs still to be accounted for
-    contactgroupsmember *cgm = *(contactgroupsmember **)((char *)data + _offset);
-
-    while (cgm) {
-        if (cgm->group_ptr == nagobject)
-            return true;
-        cgm = cgm->next;
-    }
-    return false;
-}
-
-bool ContactgroupsColumn::isEmpty(void *data)
-{
-    contactgroupsmember *cgm = *(contactgroupsmember **)((char *)data + _offset);
-    return cgm == 0;
+bool ContactgroupsColumn::isEmpty(void *data) {
+    contactgroupsmember *cgm = *reinterpret_cast<contactgroupsmember **>(
+        reinterpret_cast<char *>(data) + _offset);
+    return cgm == nullptr;
 }

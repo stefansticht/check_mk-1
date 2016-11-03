@@ -17,52 +17,58 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "ServiceSpecialDoubleColumn.h"
+#include <cstring>
+#include <ctime>
 #include "nagios.h"
-#include "logger.h"
-#include "time.h"
 
-extern int      interval_length;
+extern int interval_length;
 
-double ServiceSpecialDoubleColumn::getValue(void *data)
-{
+double ServiceSpecialDoubleColumn::getValue(void *data) {
     data = shiftPointer(data);
-    if (!data) return 0;
+    if (data == nullptr) {
+        return 0;
+    }
 
-    service *svc = (service *)data;
+    service *svc = static_cast<service *>(data);
     switch (_type) {
-        case SSDC_STALENESS:
-        {
-            time_t check_result_age = time(0) - svc->last_check;
-            if (svc->check_interval != 0)
-                return check_result_age / (svc->check_interval * interval_length);
+        case SSDC_STALENESS: {
+            time_t check_result_age = time(nullptr) - svc->last_check;
+            if (svc->check_interval != 0) {
+                return check_result_age /
+                       (svc->check_interval * interval_length);
+            }
 
             // check_mk PASSIVE CHECK without check interval uses
             // the check interval of its check-mk service
-            bool is_cmk_passive = !strncmp(svc->check_command_ptr->name, "check_mk-", 9);
+            bool is_cmk_passive =
+                strncmp(svc->check_command_ptr->name, "check_mk-", 9) == 0;
             if (is_cmk_passive) {
                 host *host = svc->host_ptr;
-                service *tmp_svc;
-                servicesmember *svc_member = host->services;
-                while (svc_member != 0) {
-                    tmp_svc = svc_member->service_ptr;
-                    if (!strncmp(tmp_svc->check_command_ptr->name, "check-mk", 9)) {
-                        return check_result_age / ((tmp_svc->check_interval == 0 ? 1 : tmp_svc->check_interval) * interval_length);
+                for (servicesmember *svc_member = host->services;
+                     svc_member != nullptr; svc_member = svc_member->next) {
+                    service *tmp_svc = svc_member->service_ptr;
+                    if (strncmp(tmp_svc->check_command_ptr->name, "check-mk",
+                                9) == 0) {
+                        return check_result_age /
+                               ((tmp_svc->check_interval == 0
+                                     ? 1
+                                     : tmp_svc->check_interval) *
+                                interval_length);
                     }
-                    svc_member = svc_member->next;
                 }
-                return 1; // Shouldnt happen! We always expect a check-mk service
-            }
-            else // Other non-cmk passive and active checks without check_interval
-            {
-                return check_result_age / interval_length;
-            }
+                return 1;  // Shouldnt happen! We always expect a check-mk
+                           // service
+            }              // Other non-cmk passive and active checks without
+                           // check_interval
+
+            return check_result_age / interval_length;
         }
     }
-    return -1; // Never reached
+    return -1;  // Never reached
 }

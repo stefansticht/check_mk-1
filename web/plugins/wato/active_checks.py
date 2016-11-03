@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -70,106 +70,111 @@ check_icmp_params = [
        )),
 ]
 
+imap_parameters = Dictionary(
+    title = "IMAP",
+    optional_keys = [],
+    elements = [
+        ('server', TextAscii(
+            title = _('IMAP Server'),
+            allow_empty = False,
+            help = _('You can specify a hostname or IP address different from the IP address '
+                     'of the host this check will be assigned to.')
+        )),
+        ('ssl', CascadingDropdown(
+            title = _('SSL Encryption'),
+            default_value = (False, 143),
+            choices = [
+                (False, _('Use no encryption'),
+                 Optional(Integer(
+                     allow_empty = False,
+                     default_value = 143,
+                 ),
+                     title = _('TCP Port'),
+                     help = _('By default the standard IMAP Port 143 is used.'),
+                 )),
+                (True, _('Encrypt IMAP communication using SSL'),
+                 Optional(Integer(
+                     allow_empty = False,
+                     default_value = 993,
+                 ),
+                     title = _('TCP Port'),
+                     help = _('By default the standard IMAP/SSL Port 993 is used.'),
+                 )),
+            ],
+        )),
+        ('auth', Tuple(
+            title = _('Authentication'),
+            elements = [
+                TextAscii(
+                    title = _('Username'),
+                    allow_empty = False,
+                    size = 24
+                ),
+                IndividualOrStoredPassword(
+                    title = _('Password'),
+                    allow_empty = False,
+                    size = 12
+                ),
+            ],
+        )),
+    ],
+)
+
+pop3_parameters = Dictionary(
+    optional_keys = ['server'],
+    elements = [
+        ('server', TextAscii(
+            title = _('POP3 Server'),
+            allow_empty = False,
+            help = _('You can specify a hostname or IP address different from the IP address '
+                     'of the host this check will be assigned to.')
+        )),
+        ('ssl', CascadingDropdown(
+            title = _('SSL Encryption'),
+            default_value = (False, 110),
+            choices = [
+                (False, _('Use no encryption'),
+                 Optional(Integer(
+                     allow_empty = False,
+                     default_value = 110,
+                 ),
+                     title = _('TCP Port'),
+                     help = _('By default the standard POP3 Port 110 is used.'),
+                 )),
+                (True, _('Encrypt POP3 communication using SSL'),
+                 Optional(Integer(
+                     allow_empty = False,
+                     default_value = 995,
+                 ),
+                     title = _('TCP Port'),
+                     help = _('By default the standard POP3/SSL Port 995 is used.'),
+                 )),
+            ],
+        )),
+        ('auth', Tuple(
+            title = _('Authentication'),
+            elements = [
+                TextAscii(
+                    title = _('Username'),
+                    allow_empty = False,
+                    size = 24
+                ),
+                IndividualOrStoredPassword(
+                    title = _('Password'),
+                    allow_empty = False,
+                    size = 12
+                ),
+            ],
+        )),
+    ],
+)
+
 mail_receiving_params = [
     ('fetch', CascadingDropdown(
         title = _('Mail Receiving'),
         choices = [
-            ('IMAP', _('IMAP'), Dictionary(
-                optional_keys = ['server'],
-                elements = [
-                    ('server', TextAscii(
-                        title = _('IMAP Server'),
-                        allow_empty = False,
-                        help = _('You can specify a hostname or IP address different from the IP address '
-                                 'of the host this check will be assigned to.')
-                    )),
-                    ('ssl', CascadingDropdown(
-                        title = _('SSL Encryption'),
-                        default_value = (False, 143),
-                        choices = [
-                            (False, _('Use no encryption'),
-                                Optional(Integer(
-                                    allow_empty = False,
-                                    default_value = 143,
-                                ),
-                                title = _('TCP Port'),
-                                help = _('By default the standard IMAP Port 143 is used.'),
-                            )),
-                            (True, _('Encrypt IMAP communication using SSL'),
-                                Optional(Integer(
-                                    allow_empty = False,
-                                    default_value = 993,
-                                ),
-                                title = _('TCP Port'),
-                                help = _('By default the standard IMAP/SSL Port 993 is used.'),
-                            )),
-                        ],
-                    )),
-                    ('auth', Tuple(
-                        title = _('Authentication'),
-                        elements = [
-                            TextAscii(
-                                title = _('Username'),
-                                allow_empty = False,
-                                size = 24
-                            ),
-                            Password(
-                                title = _('Password'),
-                                allow_empty = False,
-                                size = 12
-                            ),
-                        ],
-                    )),
-                ],
-            )),
-            ('POP3', _('POP3'), Dictionary(
-                optional_keys = ['server'],
-                elements = [
-                    ('server', TextAscii(
-                        title = _('POP3 Server'),
-                        allow_empty = False,
-                        help = _('You can specify a hostname or IP address different from the IP address '
-                                 'of the host this check will be assigned to.')
-                    )),
-                    ('ssl', CascadingDropdown(
-                        title = _('SSL Encryption'),
-                        default_value = (False, 110),
-                        choices = [
-                            (False, _('Use no encryption'),
-                                Optional(Integer(
-                                    allow_empty = False,
-                                    default_value = 110,
-                                ),
-                                title = _('TCP Port'),
-                                help = _('By default the standard POP3 Port 110 is used.'),
-                            )),
-                            (True, _('Encrypt POP3 communication using SSL'),
-                                Optional(Integer(
-                                    allow_empty = False,
-                                    default_value = 995,
-                                ),
-                                title = _('TCP Port'),
-                                help = _('By default the standard POP3/SSL Port 995 is used.'),
-                            )),
-                        ],
-                    )),
-                    ('auth', Tuple(
-                        title = _('Authentication'),
-                        elements = [
-                            TextAscii(
-                                title = _('Username'),
-                                allow_empty = False,
-                                size = 24
-                            ),
-                            Password(
-                                title = _('Password'),
-                                allow_empty = False,
-                                size = 12
-                            ),
-                        ],
-                    )),
-                ],
-            )),
+            ('IMAP', _('IMAP'), imap_parameters),
+            ('POP3', _('POP3'), pop3_parameters),
         ]
     ))
 ]
@@ -181,6 +186,10 @@ register_rule(group,
         title = _("Check SSH service"),
         help = _("This rulset allow you to configure a SSH check for a host"),
         elements = [
+            ( "description",
+                TextUnicode(
+                    title = _("Service Description"),
+            )),
             ("port",
                Integer(
                     title = _("TCP port number"),
@@ -240,6 +249,14 @@ register_rule(group,
     ),
     match = "all",
 )
+
+# Several active checks just had crit levels as one integer
+def transform_cert_days(cert_days):
+    if type(cert_days) != tuple:
+        return (cert_days, 0)
+    else:
+        return cert_days
+
 
 register_rule(group,
     "active_checks:ftp",
@@ -303,11 +320,17 @@ register_rule(group,
 
                  ),
                  ( "cert_days",
-                   Integer(
-                       title = _("SSL certificate validation"),
-                       help = _("Minimum number of days a certificate has to be valid"),
-                       unit = _("days"),
-                       default_value = 30)
+                   Transform(
+                       Tuple(
+                           title = _("SSL certificate validation"),
+                           help = _("Minimum number of days a certificate has to be valid"),
+                           elements = [
+                               Integer(title = _("Warning at or below"), minvalue = 0, unit = _("days")),
+                               Integer(title = _("Critical at or below"), minvalue = 0, unit = _("days")),
+                           ],
+                       ),
+                       forth = transform_cert_days,
+                   ),
                  ),
             ]),
             forth = lambda x: type(x) == tuple and x[1] or x,
@@ -331,7 +354,7 @@ register_rule(group,
            Dictionary(
                title = _("Optional parameters"),
                elements = [
-                   ("name", 
+                   ("name",
                         TextUnicode(
                             title = _("Alternative Service description"),
                             help = _("The service description will be this name instead <i>DNS Servername</i>"),
@@ -408,48 +431,75 @@ register_rule(group,
         optional_keys = [ "levels", "levels_low", "perfdata", "port", "procedure" ],
         elements = [
             ( "description",
-              TextUnicode(title = _("Service Description"),
-                 help = _("The name of this active service to be displayed."),
-                 allow_empty = False,
-            )),
+                TextUnicode(
+                    title = _("Service Description"),
+                    help  = _("The name of this active service to be displayed."),
+                    allow_empty = False,
+                )
+            ),
             ( "dbms",
-               DropdownChoice(
-                   title = _("Type of Database"),
-                   choices = [
-                      ("mysql",    _("MySQL")),
-                      ("postgres", _("PostgreSQL")),
-                      ("mssql",    _("MSSQL")),
-                      ("oracle",   _("Oracle")),
-                      ("db2",      _("DB2")),
-                   ],
-                   default_value = "postgres",
-               ),
+                DropdownChoice(
+                    title   = _("Type of Database"),
+                    choices = [
+                        ("mysql",    _("MySQL")),
+                        ("postgres", _("PostgreSQL")),
+                        ("mssql",    _("MSSQL")),
+                        ("oracle",   _("Oracle")),
+                        ("db2",      _("DB2")),
+                    ],
+                    default_value = "postgres",
+                ),
             ),
             ( "port",
-               Integer(title = _("Database Port"), allow_empty = True,
-                      help = _('The port the DBMS listens to'))
+                Integer(
+                    title = _("Database Port"),
+                    help  = _('The port the DBMS listens to'),
+                    allow_empty = True,
+                )
             ),
             ( "name",
-               TextAscii(title = _("Database Name"), allow_empty = False,
-                      help = _('The name of the database on the DBMS'))
+                TextAscii(
+                    title = _("Database Name"),
+                    help  = _('The name of the database on the DBMS'),
+                    allow_empty = False,
+                )
             ),
             ( "user",
-               TextAscii(title = _("Database User"), allow_empty = False,
-                      help = _('The username used to connect to the database'))
+                TextAscii(
+                    title = _("Database User"),
+                    help = _('The username used to connect to the database'),
+                    allow_empty = False,
+                )
             ),
             ( "password",
-               Password(title = _("Database Password"), allow_empty = False,
-                      help = _('The password used to connect to the database'))
+                IndividualOrStoredPassword(
+                    title = _("Database Password"),
+                    help = _('The password used to connect to the database'),
+                    allow_empty = False,
+                )
             ),
             ( "sql",
-              TextAscii(title = _("SQL-statement or procedure name"), allow_empty = False,
-                      help = _('The SQL-statement or procedure name which is executed on the DBMS. It must return '
-                               'a result table with one row and at least two columns. The first column must be '
-                               'an integer and is interpreted as the state (0 is OK, 1 is WARN, 2 is CRIT). '
-                               'Alternatively the first column can be interpreted as number value and you can '
-                               'define levels for this number. The '
-                               'second column is used as check output. The third column is optional and can '
-                               'contain performance data.'))
+                Alternative(
+                    title = _("Query or SQL statement"),
+                    elements = [
+                        TextAscii(
+                            title = _("SQL statement or procedure name"),
+                            help  = _('The SQL-statement or procedure name which is executed on the DBMS. It must return '
+                                      'a result table with one row and at least two columns. The first column must be '
+                                      'an integer and is interpreted as the state (0 is OK, 1 is WARN, 2 is CRIT). '
+                                      'Alternatively the first column can be interpreted as number value and you can '
+                                      'define levels for this number. The '
+                                      'second column is used as check output. The third column is optional and can '
+                                      'contain performance data.')
+                        ),
+                        UploadOrPasteTextFile(
+                            title = _("Import Query"),
+                            file_title = _("File including Query"),
+                            default_mode = "upload",
+                        ),
+                    ],
+                    allow_empty = False,
+                )
             ),
             ( "procedure",
             Dictionary(
@@ -462,10 +512,11 @@ register_rule(group,
                     "are required, they may be specified below."),
                 elements = [
                         ("useprocs",
-                        FixedValue(
-                            value = True,
-                            totext = _("procedure call is used"),
-                        )),
+                            FixedValue(
+                                value = True,
+                                totext = _("procedure call is used"),
+                            )
+                        ),
                         ("input",
                         TextAscii(
                             title = _("Input Parameters"),
@@ -477,23 +528,29 @@ register_rule(group,
                 ),
             ),
             ( "levels",
-            Tuple(
-                title = _("Upper levels for first output item"),
-                elements = [
-                    Float( title = _("Warning if above")),
-                    Float( title = _("Critical if above"))
-                ])
+                Tuple(
+                    title = _("Upper levels for first output item"),
+                    elements = [
+                        Float( title = _("Warning if above")),
+                        Float( title = _("Critical if above"))
+                    ]
+                )
             ),
             ( "levels_low",
-            Tuple(
-                title = _("Lower levels for first output item"),
-                elements = [
-                    Float( title = _("Warning if below")),
-                    Float( title = _("Critical if below"))
-                ])
+                Tuple(
+                    title = _("Lower levels for first output item"),
+                    elements = [
+                        Float( title = _("Warning if below")),
+                        Float( title = _("Critical if below"))
+                    ]
+                )
             ),
             ( "perfdata",
-              FixedValue(True, totext=_("Store output value into RRD database"), title = _("Performance Data"), ),
+                FixedValue(
+                    title  = _("Performance Data"),
+                    totext =_("Store output value into RRD database"),
+                    value  = True,
+                ),
             )
         ]
     ),
@@ -622,11 +679,17 @@ register_rule(group,
 
                     ),
                     ( "cert_days",
-                      Integer(
-                          title = _("SSL certificate validation"),
-                          help = _("Minimum number of days a certificate has to be valid"),
-                          unit = _("days"),
-                          default_value = 30)
+                      Transform(
+                          Tuple(
+                              title = _("SSL certificate validation"),
+                              help = _("Minimum number of days a certificate has to be valid"),
+                              elements = [
+                                  Integer(title = _("Warning at or below"), minvalue = 0, unit = _("days")),
+                                  Integer(title = _("Critical at or below"), minvalue = 0, unit = _("days")),
+                              ],
+                          ),
+                          forth = transform_cert_days,
+                      ),
                     ),
 
                     ( "quit_string",
@@ -682,11 +745,17 @@ register_rule(group,
 
         ]))
 
-# cert_days was only an integer for warning level until version 1.2.7
-def transform_check_http_cert_days(cert_days):
-    if type(cert_days) != tuple:
-        cert_days = (cert_days, 0)
-    return cert_days
+ip_address_family_element = ("address_family",
+        DropdownChoice(
+            title = _("IP Address Family"),
+            choices = [
+                (None,   _("Primary Address Family") ),
+                ('ipv4', _("Enforce IPv4") ),
+                ('ipv6', _("Enforce IPv6") ),
+            ],
+            default_value = None
+        ),
+    )
 
 register_rule(group,
     "active_checks:http",
@@ -750,13 +819,20 @@ register_rule(group,
                                     default_value = 80
                                 )
                             ),
-                            ( "ssl",
-                                FixedValue(
-                                    value = True,
-                                    totext = _("use SSL/HTTPS"),
-                                    title = _("Use SSL/HTTPS for the connection.")
-                                )
-                            ),
+                            ip_address_family_element,
+                            ("ssl", Transform(
+                                DropdownChoice(
+                                    title = _("Use SSL/HTTPS for the connection"),
+                                    choices = [
+                                        ("auto",  _("Use SSL with auto negotiation")),
+                                        ("1",     _("Use SSL, enforce TLSv1")),
+                                        ("2",     _("Use SSL, enforce SSLv2")),
+                                        ("3",     _("Use SSL, enforce SSLv3")),
+                                    ],
+                                    default_value = "auto",
+                                ),
+                                forth = lambda x: x == True and "auto" or x,
+                            )),
                             ( "sni",
                                 FixedValue(
                                     value = True,
@@ -812,11 +888,9 @@ register_rule(group,
                                             size = 12,
                                             allow_empty = False
                                         ),
-                                        Password(
+                                        IndividualOrStoredPassword(
                                             title = _("Password"),
-                                            size = 12,
-                                            allow_empty = False
-                                        ),
+                                        )
                                     ]
                                 )
                             ),
@@ -830,10 +904,8 @@ register_rule(group,
                                             size = 12,
                                             allow_empty = False
                                         ),
-                                        Password(
+                                        IndividualOrStoredPassword(
                                             title = _("Password"),
-                                            size = 12,
-                                            allow_empty = False
                                         ),
                                     ]
                                 )
@@ -879,7 +951,10 @@ register_rule(group,
                                         orientation = "vertical",
                                         show_titles = False,
                                         elements = [
-                                            RegExp(label = _("Regular expression: ")),
+                                            RegExp(
+                                                label = _("Regular expression: "),
+                                                mode = RegExp.infix,
+                                            ),
                                             Checkbox(label = _("Case insensitive")),
                                             Checkbox(label = _("return CRITICAL if found, OK if not")),
                                             Checkbox(label = _("Multiline string matching")),
@@ -918,6 +993,7 @@ register_rule(group,
                                         ( "DELETE", "DELETE" ),
                                         ( "HEAD", "HEAD" ),
                                         ( "CONNECT", "CONNECT" ),
+                                        ( "PROPFIND", "PROPFIND" ),
                                     ]
                                 )
                             ),
@@ -954,6 +1030,14 @@ register_rule(group,
                                              "to the checked URL and this clickable."),
                                 )
                             ),
+                            ("extended_perfdata", FixedValue(
+                                value = True,
+                                totext = _("Extended perfdata"),
+                                title = _("Record additional performance data"),
+                                help = _("This option makes the HTTP check produce more detailed performance data values "
+                                         "like the connect time, header time, time till first byte received and the "
+                                         "transfer time."),
+                            )),
                         ]
                     ),
 
@@ -972,13 +1056,13 @@ register_rule(group,
                                             Integer(title = _("Critical at or below"), minvalue = 0, unit = _("days")),
                                         ],
                                     ),
-                                    forth = transform_check_http_cert_days,
+                                    forth = transform_cert_days,
                                 ),
                             ),
                             ( "cert_host",
                                 TextAscii(
-                                    title = _("Check Cerficate of different IP / DNS Name"),
-                                    help = _("For each SSL cerficate on a host, a different IP address is needed. "
+                                    title = _("Check Certificate of different IP / DNS Name"),
+                                    help = _("For each SSL certificate on a host, a different IP address is needed. "
                                              "Here, you can specify the address if it differs from the  "
                                              "address from the host primary address."),
                                 ),
@@ -991,6 +1075,7 @@ register_rule(group,
                                     default_value = 443,
                                 ),
                             ),
+                            ip_address_family_element,
                             ( "sni",
                                 FixedValue(
                                     value = True,
@@ -1121,6 +1206,11 @@ register_rule(group,
     match = 'all'
 )
 
+def transform_smtp_address_family(val):
+    if "ip_version" in val:
+        val["address_family"] = val.pop("ip_version")
+    return val
+
 register_rule(group,
     "active_checks:smtp",
     Tuple(
@@ -1134,138 +1224,131 @@ register_rule(group,
                 help = _("The service description will be <b>SMTP</b> plus this name. If the name starts with "
                          "a caret (<tt>^</tt>), the service description will not be prefixed with <tt>SMTP</tt>." ),
                 allow_empty = False),
-            Dictionary(
-               title = _("Optional parameters"),
-               elements = [
-                   ( "hostname",
-                     TextAscii(
-                         title = _("DNS Hostname or IP address"),
-                         allow_empty = False,
-                         help = _("You can specify a hostname or IP address different from the IP address "
-                                  "of the host as configured in your host properties."))),
-                   ( "port",
-                     Transform(
-                         Integer(
-                             title = _("TCP Port to connect to"),
-                             help = _("The TCP Port the SMTP server is listening on. "
-                                      "The default is <tt>25</tt>."),
-                             size = 5,
-                             minvalue = 1,
-                             maxvalue = 65535,
-                             default_value = "25",
-                         ),
-                         forth = int,
-                      )
-                   ),
-                   ( "ip_version",
-                     Alternative(
-                         title = _("IP-Version"),
-                         elements = [
-                            FixedValue(
-                                "ipv4",
-                                totext = "",
-                                title = _("IPv4")
-                            ),
-                            FixedValue(
-                                "ipv6",
-                                totext = "",
-                                title = _("IPv6")
-                            ),
-                         ],
-                     ),
-                   ),
-                   ( "expect",
-                     TextAscii(
-                         title = _("Expected String"),
-                         help = _("String to expect in first line of server response. "
-                                  "The default is <tt>220</tt>."),
-                         size = 8,
-                         allow_empty = False,
-                         default_value = "220",
-                     )
-                   ),
-                   ('commands',
-                     ListOfStrings(
-                         title = _("SMTP Commands"),
-                         help = _("SMTP commands to execute."),
-                     )
-                   ),
-                   ('command_responses',
-                     ListOfStrings(
-                         title = _("SMTP Responses"),
-                         help = _("Expected responses to the given SMTP commands."),
-                     )
-                   ),
-                   ("from",
-                     TextAscii(
-                         title = _("FROM-Address"),
-                         help = _("FROM-address to include in MAIL command, required by Exchange 2000"),
-                         size = 20,
-                         allow_empty = True,
-                         default_value = "",
-                     )
-                   ),
-                   ("fqdn",
-                     TextAscii(
-                         title = _("FQDN"),
-                         help = _("FQDN used for HELO"),
-                         size = 20,
-                         allow_empty = True,
-                         default_value = "",
-                     )
-                   ),
-                   ("cert_days",
-                      Integer(
-                          title = _("Minimum Certificate Age"),
-                          help = _("Minimum number of days a certificate has to be valid."),
-                          unit = _("days"),
-                      )
-                   ),
-                   ("starttls",
-                      FixedValue(
-                          True,
-                          totext = _("STARTTLS enabled."),
-                          title = _("Use STARTTLS for the connection.")
-                      )
-                   ),
-                   ( "auth",
-                     Tuple(
-                         title = _("Enable SMTP AUTH (LOGIN)"),
-                         help = _("SMTP AUTH type to check (default none, only LOGIN supported)"),
-                         elements = [
-                             TextAscii(
-                                 title = _("Username"),
-                                 size = 12,
-                                 allow_empty = False),
-                             Password(
-                                 title = _("Password"),
-                                 size = 12,
-                                 allow_empty = False),
-                         ]
-                     )
-                   ),
-                   ("response_time",
-                     Tuple(
-                         title = _("Expected response time"),
-                         elements = [
+            Transform(
+                Dictionary(
+                   title = _("Optional parameters"),
+                   elements = [
+                       ( "hostname",
+                         TextAscii(
+                             title = _("DNS Hostname or IP address"),
+                             allow_empty = False,
+                             help = _("You can specify a hostname or IP address different from the IP address "
+                                      "of the host as configured in your host properties."))),
+                       ( "port",
+                         Transform(
                              Integer(
-                                 title = _("Warning if above"),
-                                 unit = _("sec")
+                                 title = _("TCP Port to connect to"),
+                                 help = _("The TCP Port the SMTP server is listening on. "
+                                          "The default is <tt>25</tt>."),
+                                 size = 5,
+                                 minvalue = 1,
+                                 maxvalue = 65535,
+                                 default_value = "25",
                              ),
-                             Integer(
-                                 title = _("Critical if above"),
-                                 unit = _("sec")
+                             forth = int,
+                          )
+                       ),
+                       ip_address_family_element,
+                       ( "expect",
+                         TextAscii(
+                             title = _("Expected String"),
+                             help = _("String to expect in first line of server response. "
+                                      "The default is <tt>220</tt>."),
+                             size = 8,
+                             allow_empty = False,
+                             default_value = "220",
+                         )
+                       ),
+                       ('commands',
+                         ListOfStrings(
+                             title = _("SMTP Commands"),
+                             help = _("SMTP commands to execute."),
+                         )
+                       ),
+                       ('command_responses',
+                         ListOfStrings(
+                             title = _("SMTP Responses"),
+                             help = _("Expected responses to the given SMTP commands."),
+                         )
+                       ),
+                       ("from",
+                         TextAscii(
+                             title = _("FROM-Address"),
+                             help = _("FROM-address to include in MAIL command, required by Exchange 2000"),
+                             size = 20,
+                             allow_empty = True,
+                             default_value = "",
+                         )
+                       ),
+                       ("fqdn",
+                         TextAscii(
+                             title = _("FQDN"),
+                             help = _("FQDN used for HELO"),
+                             size = 20,
+                             allow_empty = True,
+                             default_value = "",
+                         )
+                       ),
+                       ( "cert_days",
+                         Transform(
+                             Tuple(
+                                 title = _("Minimum Certificate Age"),
+                                 help = _("Minimum number of days a certificate has to be valid"),
+                                 elements = [
+                                     Integer(title = _("Warning at or below"), minvalue = 0, unit = _("days")),
+                                     Integer(title = _("Critical at or below"), minvalue = 0, unit = _("days")),
+                                 ],
                              ),
-                         ])
-                    ),
-                    ( "timeout",
-                      Integer(
-                          title = _("Seconds before connection times out"),
-                          unit = _("sec"),
-                          default_value = 10,
-                      )
-                    ),
-                ])
+                             forth = transform_cert_days,
+                       )),
+                       ("starttls",
+                          FixedValue(
+                              True,
+                              totext = _("STARTTLS enabled."),
+                              title = _("Use STARTTLS for the connection.")
+                          )
+                       ),
+                       ( "auth",
+                         Tuple(
+                             title = _("Enable SMTP AUTH (LOGIN)"),
+                             help = _("SMTP AUTH type to check (default none, only LOGIN supported)"),
+                             elements = [
+                                 TextAscii(
+                                     title = _("Username"),
+                                     size = 12,
+                                     allow_empty = False),
+                                 Password(
+                                     title = _("Password"),
+                                     size = 12,
+                                     allow_empty = False),
+                             ]
+                         )
+                       ),
+                       ("response_time",
+                         Tuple(
+                             title = _("Expected response time"),
+                             elements = [
+                                 Integer(
+                                     title = _("Warning if above"),
+                                     unit = _("sec")
+                                 ),
+                                 Integer(
+                                     title = _("Critical if above"),
+                                     unit = _("sec")
+                                 ),
+                             ])
+                        ),
+                        ( "timeout",
+                          Integer(
+                              title = _("Seconds before connection times out"),
+                              unit = _("sec"),
+                              default_value = 10,
+                          )
+                        ),
+                    ]
+                ),
+                forth=transform_smtp_address_family,
+            )
         ]
     ),
     match = 'all'
@@ -1340,21 +1423,19 @@ register_rule(group,
 def PluginCommandLine(addhelp = ""):
     return TextAscii(
           title = _("Command line"),
-          help = _("Please enter the complete shell command including "
-                   "path name and arguments to execute. You can use monitoring "
-                   "macros here. The most important are:<ul>"
-                   "<li><tt>$HOSTADDRESS$</tt>: The IP address of the host</li>"
-                   "<li><tt>$HOSTNAME$</tt>: The name of the host</li>"
-                   "<li><tt>$USER1$</tt>: user macro 1 (usually path to shipped plugins)</li>"
-                   "<li><tt>$USER2$</tt>: user marco 2 (usually path to your own plugins)</li>"
-                   "</ul>"
-                   "If you are using OMD, you can omit the path and just specify "
-                   "the command (e.g. <tt>check_foobar</tt>). This command will be "
-                   "searched first in the local plugins directory "
-                   "(<tt>~/local/lib/nagios/plugins</tt>) and then in the shipped plugins "
-                   "directory (<tt>~/lib/nagios/plugins</tt>) within your site directory."),
+          help = _("Please enter the complete shell command including path name and arguments to execute. "
+                   "If the plugin you like to execute is located in either <tt>~/local/lib/nagios/plugins</tt> "
+                   "or <tt>~/lib/nagios/plugins</tt> within your site directory, you can strip the path name and "
+                   "just configure the plugin file name as command <tt>check_foobar</tt>.") + monitoring_macro_help(),
           size = "max",
+          validate = validate_custom_check_command_line,
        )
+
+
+def validate_custom_check_command_line(value, varprefix):
+    if "--pwstore=" in value:
+        raise MKUserError(varprefix, _("You are not allowed to use passwords from the password store here."))
+
 
 register_rule(group,
     "custom_checks",
@@ -1377,7 +1458,8 @@ register_rule(group,
             ( "command_line",
               PluginCommandLine(addhelp = _("<br><br>"
                    "<b>Passive checks</b>: Do no specify a command line if you want "
-                   "to define passive checks.")),
+                   "to define passive checks."),
+              ),
             ),
             ( "command_name",
               TextAscii(
@@ -1453,17 +1535,18 @@ register_rule(group,
         elements = [
             TextAscii(
                 title = _("Base URL (OMD Site)"),
-                help = _("The base URL to the monitoring instance. For example <tt>http://mycheckmk01/mysite</tt>. You can use "
-                         "macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this URL to make them be replaced by "
-                         "the hosts values."),
+                help = _("The base URL to the monitoring instance. For example <tt>http://mycheckmk01/mysite</tt>. "
+                         "You can use macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this URL to "
+                         "make them be replaced by the hosts values."),
                 size = 60,
                 allow_empty = False
             ),
             TextAscii(
                 title = _("Aggregation Name"),
-                help = _("The name of the aggregation to fetch. It will be added to the service description. You can use "
-                         "macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this parameter to make them be replaced by "
-                         "the hosts values."),
+                help = _("The name of the aggregation to fetch. It will be added to the service description. You can "
+		         "use macros like <tt>$HOSTADDRESS$</tt> and <tt>$HOSTNAME$</tt> within this parameter to "
+                         "make them be replaced by the hosts values. The aggregation name is the title in the "
+			 "top-level-rule of your BI pack."),
                 allow_empty = False
             ),
             TextAscii(
@@ -1476,7 +1559,7 @@ register_rule(group,
             Password(
                 title = _("Password / Secret"),
                 help = _("Valid automation secret or password for the user, depending on the chosen "
-                         "authentication mode."),
+                         "authentication mode. Be aware that this mode has to be enabled on the monitoring instance. " 			       "Otherwise authentication will fail."),
                 allow_empty = False
             ),
             Dictionary(
@@ -1515,6 +1598,15 @@ register_rule(group,
                             ( "ok", _("Force to be OK") ),
                             ( "warn", _("Force to be WARN, if aggregate is not OK") ),
                           ]
+                    )),
+                    ("track_downtimes",
+                     Checkbox(
+                        title = _("Track downtimes"),
+                        label = _("Automatically track downtimes of aggregation"),
+                        help = _("If this is active, the check will automatically go into downtime "
+                                "whenever the aggregation does. This downtime is also cleaned up "
+                                "automatically when the aggregation leaves downtime. "
+                                "Downtimes you set manually for this check are unaffected."),
                     )),
                 ]
             ),
@@ -1580,6 +1672,7 @@ register_rule(group,
                     )),
                     ("expect_regex", RegExp(
                         title = _("Regular expression to expect in content"),
+                        mode = RegExp.infix,
                     )),
                     ("form_name", TextAscii(
                         title = _("Name of the form to populate and submit"),
@@ -1715,12 +1808,18 @@ register_rule(group,
                  'the SMTP protocol and then tries to receive these mails back by querying the '
                  'inbox of a IMAP or POP3 mailbox. With this check you can verify that your whole '
                  'mail delivery progress is working.'),
-        optional_keys = ['smtp_server', 'smtp_tls', 'smtp_port', 'smtp_auth', 'connect_timeout', 'delete_messages', 'duration'],
+        optional_keys = ['subject', 'smtp_server', 'smtp_tls', 'smtp_port', 'smtp_auth', 'imap_tls', 'connect_timeout', 'delete_messages', 'duration'],
         elements = [
             ('item', TextUnicode(
                 title = _('Name'),
                 help = _('The service description will be <b>Mail Loop</b> plus this name'),
                 allow_empty = False
+            )),
+            ('subject', TextAscii(
+                title = _('Subject'),
+                allow_empty = False,
+                help = _('Here you can specify the subject text '
+                         'instead of default text \'Check_MK-Mail-Loop\'.'),
             )),
             ('smtp_server', TextAscii(
                 title = _('SMTP Server'),
@@ -1731,6 +1830,10 @@ register_rule(group,
             ('smtp_tls', FixedValue(True,
                 title = _('Use TLS over SMTP'),
                 totext = _('Encrypt SMTP communication using TLS'),
+            )),
+            ('imap_tls', FixedValue(True,
+                title = _('Use TLS for IMAP authentification'),
+                totext = _('IMAP authentification uses TLS'),
             )),
             ('smtp_port', Integer(
                 title = _('SMTP TCP Port to connect to'),
@@ -1746,7 +1849,7 @@ register_rule(group,
                         allow_empty = False,
                         size = 24
                     ),
-                    Password(
+                    IndividualOrStoredPassword(
                         title = _('Password'),
                         allow_empty = False,
                         size = 12
@@ -1874,6 +1977,7 @@ register_rule(group,
                         title = _('Only process mails with matching subject'),
                         help = _('Use this option to not process all messages found in the inbox, '
                                  'but only the those whose subject matches the given regular expression.'),
+                        mode = RegExp.prefix,
                     )),
                     ('facility', DropdownChoice(
                         title = _("Events: Syslog facility"),
@@ -1928,6 +2032,50 @@ register_rule(group,
                 ]
             )),
         ]
+    ),
+    match = 'all'
+)
+
+register_rule(group,
+    'active_checks:mailboxes',
+    Dictionary(
+        title = _('Check IMAP Mailboxes'),
+        help = _('This check monitors count and age of mails in mailboxes.'),
+        elements = [
+            ('service_description',
+              TextUnicode(
+                  title = _('Service description'),
+                  help = _('Please make sure that this is unique per host '
+                           'and does not collide with other services.'),
+                  allow_empty = False,
+                  default_value = "Mailboxes")
+            ),
+            ('imap_parameters', imap_parameters),
+            ('connect_timeout', Integer(
+                title = _('Connect Timeout'),
+                minvalue = 1,
+                default_value = 10,
+                unit = _('sec'),
+            )),
+            ('age', Tuple(
+                title = _("Message Age"),
+                elements = [
+                    Age(title = _("Warning at")),
+                    Age(title = _("Critical at"))
+                ])),
+            ('count', Tuple(
+                title = _("Message Count"),
+                elements = [
+                    Integer(title = _("Warning at")),
+                    Integer(title = _("Critical at"))
+                ])),
+            ('mailboxes', ListOfStrings(
+                        title = _('Check only the listed mailboxes'),
+                        help = _('By default, all mailboxes are checked with these parameters. '
+                                 'If you specify mailboxes here, only those are monitored.')
+                    ))
+        ],
+        required_keys = [ 'service_description', 'imap_parameters' ]
     ),
     match = 'all'
 )

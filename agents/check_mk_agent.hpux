@@ -1,4 +1,5 @@
 #!/usr/bin/ksh
+# Check_MK Agent for HP/UX
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -18,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -48,7 +49,7 @@ fi
 
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.7i3
+echo Version: 1.4.0i2
 echo AgentOS: hpux
 echo PluginsDirectory: $PLUGINSDIR
 echo LocalDirectory: $LOCALDIR
@@ -58,7 +59,7 @@ echo AgentDirectory: $MK_CONFDIR
 # modern systems with vxfs only here. The filesystem type is currently
 # not used by the check anyway.
 echo '<<<df>>>'
-df -kP -F vxfs | sed 's/ / - /' | awk '/^(.*-.*)$/ { print $0 } /^([^-]+)$/ { printf $0 }' | grep -Ev "^/proc|^Filesystem|^/aha|:"
+df -kP | sed 's/ / - /' | awk '/^(.*-.*)$/ { print $0 } /^([^-]+)$/ { printf $0 }' | grep -Ev "^/proc|^Filesystem|^/aha|:"
 
 # Process table: HP-UX does not provide a resident size of processes.
 # We send a 0 here for RSZ.

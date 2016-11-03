@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -47,7 +47,7 @@
 
 
 def inv_solaris_pkginfo(info):
-    paclist = inv_tree("software.packages:")
+    paclist = inv_tree_list("software.packages:")
     entry = {}
     translation_dict = {
             "ARCH"      : "arch",
@@ -86,6 +86,8 @@ def inv_solaris_pkginfo(info):
             for tkey in translation_dict:
                 if key == tkey:
                     entry.update({ translation_dict[tkey] : value.strip()})
+    if entry:
+        paclist.append(entry)
 
 
 inv_info['solaris_pkginfo'] = {

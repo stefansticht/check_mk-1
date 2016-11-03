@@ -27,30 +27,7 @@ description:
  Currently, testing has been completed with the Dell PowerConnect 5448 and 5424 models,
  however the service check may work with other models.
 
-examples:
- It is possible to over-ride the default WARNING and CRITICAL threshold values
- defined above, by ensuring the following variable configuration is set in
- your local main.mk file.
-
- # Indicate warning at 30 degrees C, and indicate critical for 35 degrees C
- dell_powerconnect_temp_default_values = (30, 35)
-
-perfdata:
- The temperature chart uses a single variable, the temperature (0..200) representing
- the switchs internal temperature in degrees Celcius.
-
- The sensor chart uses a single variable to indicate the state (0..1), where a 1
- represents the sensor is "ON". A 0 represents the switch is is "OFF" any any other
- state where it is non-operational, or unavailable.
-
 inventory:
  During the inventory phase of check_mk, it will identify one service {Temperature},
  as long as the MIB defined above is supported on the switch.
 
-[parameters]
-warning (int): The temperature, in degrees Celcius, at which a warning state is triggered.
-critical (int): The temperature, in degrees Celcius, at which a critical state is triggered.
-
-[configuration]
-dell_powerconnect_cpu_default_levels(int, int): The Default percentage values used by the inventory checks.
- These variables are pre-set to {(35, 40)}.

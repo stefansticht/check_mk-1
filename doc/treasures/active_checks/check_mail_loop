@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# encoding: utf-8
+#!/usr/bin/env python
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -7,7 +7,7 @@
 # |           | |___| | | |  __/ (__|   <    | |  | | . \            |
 # |            \____|_| |_|\___|\___|_|\_\___|_|  |_|_|\_\           |
 # |                                                                  |
-# | Copyright Mathias Kettner 2013             mk@mathias-kettner.de |
+# | Copyright Mathias Kettner 2014             mk@mathias-kettner.de |
 # +------------------------------------------------------------------+
 #
 # This file is part of Check_MK.
@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -51,6 +51,7 @@ OPTIONS:
                           (leave empty for anonymous SMTP)
   --smtp-password PW      Password to authenticate SMTP
   --smtp-tls              Use TLS over SMTP (disabled by default)
+  --imap-tls              Use TLS for IMAP authentification (disabled by default)
 
   --fetch-protocol PROTO  Set to "IMAP" or "POP3", depending on your mailserver
                           (defaults to IMAP)
@@ -83,6 +84,8 @@ OPTIONS:
                           check plugin. This is disabled by default, which
                           might make your mailbox grow when you not clean it up
                           manually.
+  --subject SUBJECT       You can specify the subject text. If choosen the subject
+                          'Check_MK-Mail-Loop' will be replace by the stated text.
 
   -d, --debug             Enable debug mode
   -h, --help              Show this help message and exit
@@ -92,7 +95,7 @@ OPTIONS:
 
 short_options = 'dh'
 long_options  = ['smtp-server=', 'smtp-port=', 'smtp-username=', 'smtp-password=',
-    'smtp-tls', 'fetch-protocol=', 'fetch-server=', 'fetch-port=', 'fetch-username=',
+    'smtp-tls', 'imap-tls', 'fetch-protocol=', 'fetch-server=', 'fetch-port=', 'fetch-username=',
     'fetch-password=', 'fetch-ssl', 'mail-from=', 'mail-to=', 'warning=', 'critical=',
     'connect-timeout=', 'delete-messages', 'help', 'status-dir=', 'status-suffix=', "debug", ]
 
@@ -119,6 +122,7 @@ fetch_port      = None
 fetch_user      = None
 fetch_pass      = None
 fetch_ssl       = False
+imap_tls        = False
 mail_from       = None
 mail_to         = None
 warning         = None
@@ -127,7 +131,7 @@ conn_timeout    = 10
 delete_messages = False
 status_dir      = None
 status_suffix   = None
-
+subject         = 'Check_MK-Mail-Loop'
 for o,a in opts:
     if o in [ '-h', '--help' ]:
         usage()
@@ -153,6 +157,8 @@ for o,a in opts:
         fetch_user = a
     elif o == '--fetch-password':
         fetch_pass = a
+    elif o == '--imap-tls':
+        imap_tls = True
     elif o == '--fetch-ssl':
         fetch_ssl = True
     elif o == '--mail-from':
@@ -171,6 +177,8 @@ for o,a in opts:
         status_dir = a
     elif o == '--status-suffix':
         status_suffix = a
+    elif o == '--subject':
+        subject = a
 
 param_names = dict(opts).keys()
 for p in required_params:
@@ -201,6 +209,7 @@ socket.setdefaulttimeout(conn_timeout)
 
 g_expected = {}
 g_mails    = {}
+g_obsolete = {}
 g_M        = None
 
 def load_expected_mails():
@@ -220,8 +229,24 @@ def save_expected_mails():
         lines.append('%d %s' % (ts, key))
     file(status_path, 'w').write('\n'.join(lines) + '\n')
 
+def add_starttls_support(self, keyfile = None, certfile = None):
+    import ssl
+    name = "STARTTLS"
+    typ, dat = self._simple_command(name)
+    if typ != 'OK':
+        raise self.error(dat[-1])
+
+    self.sock = ssl.wrap_socket(self.sock)
+    self.file = self.sock.makefile()
+
+    cap = 'CAPABILITY'
+    self._simple_command(cap)
+    if not cap in self.untagged_responses:
+        raise self.error('no CAPABILITY response from server')
+    self.capabilities = tuple(self.untagged_responses[cap][-1].upper().split())
+
 def fetch_mails():
-    global g_M
+    global g_M, g_obsolete
     if not g_expected:
         return # not expecting any mail, do not check for mails
 
@@ -238,31 +263,41 @@ def fetch_mails():
 
             for i in range(num_messages):
                 index = i+1
-                lines = g_M.retr(index, 0)[1]
-                mails[i] = email.message_from_string("".join(lines))
+                lines = g_M.retr(index)[1]
+                mails[i] = email.message_from_string("\n".join(lines))
 
         else:
             # Get mails from IMAP mailbox
             fetch_class = fetch_ssl and imaplib.IMAP4_SSL or imaplib.IMAP4
-            g_M = fetch_class(fetch_server, fetch_port)
+
+            if imap_tls:
+                # starttls in imaplib is only available with python >= 3.2
+                # we are going to implement our own version
+                imaplib.Commands.update({"STARTTLS": ("NONAUTH")})
+                g_M = imaplib.IMAP4(fetch_server, fetch_port)
+                add_starttls_support(g_M)
+            else:
+                g_M = fetch_class(fetch_server, fetch_port)
+
             g_M.login(fetch_user, fetch_pass)
             g_M.select('INBOX', readonly=False) # select INBOX
             retcode, messages = g_M.search(None, 'NOT', 'DELETED')
             if retcode == 'OK' and messages[0].strip():
                 for num in messages[0].split(' '):
                     try:
-                        ty, data = g_M.fetch(num, '(RFC822)')
+                        data = g_M.fetch(num, '(RFC822)')[1]
                         mails[num] = email.message_from_string(data[0][1])
                     except Exception, e:
                         raise Exception('Failed to fetch mail %s (%s). Available messages: %r' % (num, parse_exception(e), messages))
 
         # Now filter out the messages for this check
-        pattern = re.compile('(?:Re: )?Check_MK-Mail-Loop ([^\s]+) ([^\s]+)')
+        pattern = re.compile('(?:Re: |WG: )?%s ([^\s]+) ([^\s]+)' % subject)
         for index, msg in mails.items():
             matches = pattern.match(msg.get('Subject', ''))
             if matches:
                 ts  = matches.group(1).strip()
                 key = matches.group(2).strip()
+
 
                 # extract received time
                 rx = msg.get('Received')
@@ -271,6 +306,12 @@ def fetch_mails():
                 else:
                     # use current time as fallback where no Received header could be found
                     rx_ts = int(time.time())
+
+                if "%s-%s" % (ts, key) not in g_expected:
+                    # Delete any "Check_MK-Mail-Loop" messages older than 24 hours, even if they are not in our list
+                    if delete_messages and int(time.time()) - rx_ts > 24 * 3600:
+                        g_obsolete[ts+'-'+key] = (index, rx_ts)
+                    continue
 
                 g_mails[ts+'-'+key] = (index, rx_ts)
 
@@ -287,7 +328,7 @@ def send_mail():
     mail = email.mime.text.MIMEText("")
     mail['From']    = mail_from
     mail['To']      = mail_from
-    mail['Subject'] = 'Check_MK-Mail-Loop %d %d' % (now, key)
+    mail['Subject'] = '%s %d %d' % (subject, now, key)
 
     try:
         S = smtplib.SMTP(smtp_server, smtp_port)
@@ -316,9 +357,9 @@ def check_mails():
     now          = time.time()
 
     # Loop all expected mails and check whether or not they have been received
-    for ident, (send_ts, key) in g_expected.items():
+    for ident, (send_ts, _unused_key) in g_expected.items():
         if ident in g_mails:
-            mail_index, recv_ts  = g_mails[ident]
+            recv_ts  = g_mails[ident][1]
 
             if duration == None:
                 duration = recv_ts - send_ts
@@ -370,14 +411,13 @@ def cleanup_mailbox():
     try:
         # Do not delete all messages in the inbox. Only the ones which were
         # processed before! In the meantime there might be occured new ones.
-        for ident, (mail_index, recv_ts) in g_mails.items():
+        for mail_index, _unused_recv_ts in g_mails.values() + g_obsolete.values():
             if fetch_proto == 'POP3':
-                response = g_M.dele(ident)
-                response = None
-                if response != "+OK":
+                response = g_M.dele(mail_index + 1)
+                if not response.startswith("+OK"):
                     raise Exception("Response from server: [%s]" % response)
             else:
-                ty, data = g_M.store(mail_index, '+FLAGS', '\\Deleted')
+                ty = g_M.store(mail_index, '+FLAGS', '\\Deleted')[0]
                 if ty != 'OK':
                     raise Exception("Response from server: [%s]" % response)
 

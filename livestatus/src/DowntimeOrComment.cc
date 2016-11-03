@@ -17,57 +17,45 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "DowntimeOrComment.h"
-#include "logger.h"
 
 DowntimeOrComment::DowntimeOrComment(nebstruct_downtime_struct *dt,
-        unsigned long id)
+                                     unsigned long id)
     : _type(dt->downtime_type)
     , _entry_time(dt->entry_time)
-    , _author_name(strdup(dt->author_name))
-    , _comment(strdup(dt->comment_data))
-      , _id(id)
-{
+    , _author_name(dt->author_name)
+    , _comment(dt->comment_data)
+    , _id(id) {
     _host = find_host(dt->host_name);
-    if (dt->service_description) {
+    if (dt->service_description != nullptr) {
         _service = find_service(dt->host_name, dt->service_description);
         _is_service = 1;
-    }
-    else {
-        _service = 0;
+    } else {
+        _service = nullptr;
         _is_service = 0;
     }
 }
 
+DowntimeOrComment::~DowntimeOrComment() = default;
 
-DowntimeOrComment::~DowntimeOrComment()
-{
-    free(_author_name);
-    free(_comment);
-}
-
-
-    Downtime::Downtime(nebstruct_downtime_struct *dt)
+Downtime::Downtime(nebstruct_downtime_struct *dt)
     : DowntimeOrComment(dt, dt->downtime_id)
     , _start_time(dt->start_time)
     , _end_time(dt->end_time)
     , _fixed(dt->fixed)
     , _duration(dt->duration)
-      , _triggered_by(dt->triggered_by)
-{
-}
+    , _triggered_by(dt->triggered_by) {}
 
-    Comment::Comment(nebstruct_comment_struct *co)
-    : DowntimeOrComment((nebstruct_downtime_struct *)co, co->comment_id)
+Comment::Comment(nebstruct_comment_struct *co)
+    : DowntimeOrComment(reinterpret_cast<nebstruct_downtime_struct *>(co),
+                        co->comment_id)
     , _expire_time(co->expire_time)
     , _persistent(co->persistent)
     , _source(co->source)
     , _entry_type(co->entry_type)
-      , _expires(co->expires)
-{
-}
+    , _expires(co->expires) {}

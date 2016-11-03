@@ -17,42 +17,53 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 
 SHELL         = /bin/bash
-VERSION       = 1.2.7i3
+VERSION       = 1.4.0i2
 VERSION_DUMMY = @@@@@CHECK_MK_VERSION@@@@@
-WINDRES       = i586-mingw32msvc-windres
-COPTIONS      = -s -O2 -Wall -Werror -static -DCHECK_MK_VERSION='"$(VERSION_DUMMY)"'
+WINDRES       = i686-w64-mingw32-windres
+GIT_REV       = $(shell git describe --abbrev=4 --dirty --always --tags)
+
+DEPDIR = depend
+DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.Td
+
+COMMON_OPTS   = -Wall -static -static-libgcc -static-libstdc++ -fno-rtti -std=c++11 -gdwarf-2 -DCHECK_MK_VERSION='"$(VERSION_DUMMY)"' -D__USE_MINGW_ANSI_STDIO -DVCS_REV=\"$(GIT_REV)\"
+COPTIONS      = -O2 -Wformat=2 -Werror $(COMMON_OPTS) $(DEPFLAGS)
+# for debug builds
+#COPTIONS      = -O0 $(COMMON_OPTS) $(DEPFLAGS)
+MKDIR         = mkdir -p
+
+POSTCOMPILE = mv -f -u $(DEPDIR)/$*.Td $(DEPDIR)/$*.d
 
 ifeq ($(shell uname),Linux)
-  CXX        = echo -e "\n\nWARNING: MinGW under Linux is broken! Use at your own risk!\n\n" ; i586-mingw32msvc-g++
+  CXX        = i686-w64-mingw32-g++
   CXX_64     = x86_64-w64-mingw32-g++
   WINDRES_64 = x86_64-w64-mingw32-windres
 else
   CXX = mingw32-g++
 endif
 
-all: fix_linebreaks install_agent.exe install_agent-64.exe msi_installer
+all: directories fix_linebreaks check_mk_agent.exe check_mk_agent-64.exe install_agent.exe install_agent-64.exe msi_installer
 
-.PHONY: inc_build_version fix_linebreaks
+.PHONY: directories inc_build_version fix_linebreaks
 
 setversion:
 	sed -i 's/!define CHECK_MK_VERSION .*/!define CHECK_MK_VERSION "'$(NEW_VERSION)'"/' installer*.nsi ; \
-	sed -ri 's/^(VERSION[[:space:]]*= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
+	sed -ri 's/^(VERSION[[:space:]]*:?= *).*/\1'"$(NEW_VERSION)/" Makefile ; \
 	rm check_mk_agent.exe check_mk_agent-64.exe check_mk_agent.msi ; \
-	make
+	make install_agent.exe install_agent-64.exe msi_installer
 
 # Converts all files which are targeted to a windows system to CRLF
 fix_linebreaks:
 	for F in mrpe/* plugins/* *.ini; do \
-	    if [ -f $$F ]; then \
-	        sed -i 's/\r//' $$F ; \
-	        sed -i 's/$$/\r/' $$F ; \
+	    if [ -f "$$F" ]; then \
+	        sed -i 's/\r//' "$$F" ; \
+	        sed -i 's/$$/\r/' "$$F" ; \
 	    fi ; \
 	done
 
@@ -74,35 +85,92 @@ check_mk_agent.res: check_mk_agent.rc
 check_mk_agent-64.res: check_mk_agent.rc
 	$(WINDRES_64) $< -O coff -o $@
 
+# -----------------------------------------------------------------------------
+# 2. Create directories for the object files
+# -----------------------------------------------------------------------------
+
+directories:
+	${MKDIR} obj
+	${MKDIR} obj/sections
+	${MKDIR} obj64
+	${MKDIR} obj64/sections
+	${MKDIR} $(DEPDIR)
+	${MKDIR} $(DEPDIR)/sections
+
 
 # -----------------------------------------------------------------------------
-# 2. Compile the Windows agent from the sources, without a specific version
-# number. Instead a placeholder is being used as version.
+# 3. Compile the Windows agent from the sources, without a specific version
+# number. Instead a placeholder is being used as version.a
 # -----------------------------------------------------------------------------
-check_mk_agent.unversioned.exe: check_mk_agent.cc
+
+SRCS = check_mk_agent.cc SettingsCollector.cc Configuration.cc Configurable.cc Environment.cc stringutil.cc\
+       types.cc wmiHelper.cc ListenSocket.cc PerfCounter.cc PerfCounterCommon.cc Thread.cc OutputProxy.cc\
+       logging.cc Crypto.cc OHMMonitor.cc EventLog.cc ExternalCmd.cc EventLogVista.cc IEventLog.cc\
+       crashhandling.cc SectionManager.cc Section.cc sections/SectionPS.cc sections/SectionWMI.cc\
+       sections/SectionUptime.cc sections/SectionCheckMK.cc sections/SectionSystemtime.cc\
+       sections/SectionDF.cc sections/SectionServices.cc sections/SectionMem.cc sections/SectionFileinfo.cc\
+       sections/SectionWinperf.cc sections/SectionLogwatch.cc sections/SectionGroup.cc\
+       sections/SectionSkype.cc sections/SectionOHM.cc sections/SectionPerfcounter.cc\
+       sections/SectionEventlog.cc sections/SectionPluginGroup.cc\
+       sections/SectionCrashDebug.cc sections/SectionSpool.cc sections/SectionMRPE.cc
+
+OBJS = $(addprefix obj/,$(SRCS:.cc=.o))
+OBJS64 = $(addprefix obj64/,$(SRCS:.cc=.o))
+
+
+obj/%.o: %.cc $(DEPDIR)/%.d
+	$(CXX) -c $(COPTIONS) -o $@  $<
+	$(POSTCOMPILE)
+
+obj64/%.o: %.cc
+	$(CXX_64) -c $(COPTIONS) -o $@  $<
+	$(POSTCOMPILE)
+
+check_mk_agent.unstripped.exe: $(OBJS)
 	$(MAKE) inc_build_version
 	$(MAKE) check_mk_agent.res
-	$(CXX) $(COPTIONS) -o $@ $< check_mk_agent.res -lwsock32
+	$(CXX) $(COPTIONS) -o $@ $^ check_mk_agent.res -lwsock32 -lws2_32 -lole32 -loleaut32 -lwbemuuid -lpsapi -lshlwapi -limagehlp
 
-check_mk_agent-64.unversioned.exe: check_mk_agent.cc
+check_mk_agent-64.unstripped.exe: $(OBJS64)
 	$(MAKE) inc_build_version
 	$(MAKE) check_mk_agent-64.res
-	$(CXX_64) $(COPTIONS) -o $@ $< check_mk_agent-64.res -lwsock32
+	$(CXX_64) $(COPTIONS) -o $@ $^ check_mk_agent-64.res -lwsock32 -lws2_32 -lole32 -loleaut32 -lwbemuuid -lpsapi -lshlwapi -limagehlp
 
 
+check_mk_agent.unversioned.exe: check_mk_agent.unstripped.exe
+	strip -o $@ $^
+
+check_mk_agent-64.unversioned.exe: check_mk_agent-64.unstripped.exe
+	strip -o $@ $^
+
+$(DEPDIR)/%.d: ;
+.PRECIOUS: $(DEPDIR)/%.d
+
+-include $(patsubst %,$(DEPDIR)/%.d,$(basename $(SRCS)))
 
 # -----------------------------------------------------------------------------
-# 3. Create final executable files by inserting actual version number. No
+# 4. Create final executable files by inserting actual version number. No
 # recompilation is thus needed during 'make version'
 # -----------------------------------------------------------------------------
-%.exe: %.unversioned.exe
-	./bin_replace $(VERSION_DUMMY) "$(VERSION)" < $< > $@
-	chmod 755 $@
+
+check_mk_agent.exe.versioned:
+	./bin_replace $(VERSION_DUMMY) "$(VERSION)" < check_mk_agent.unversioned.exe > check_mk_agent.exe
+	chmod 755 check_mk_agent.exe
+
+check_mk_agent-64.exe.versioned:
+	./bin_replace $(VERSION_DUMMY) "$(VERSION)" < check_mk_agent-64.unversioned.exe > check_mk_agent-64.exe
+	chmod 755 check_mk_agent-64.exe
+
+# important: %.exe.versioned must not depend on %.exe.unversioned because on the
+# automated build system, "make ...versioned" is called and that system doesn't
+# provide the right compiler to build this agent
+%.exe: %.unversioned.exe %.exe.versioned
+	true
 
 # -----------------------------------------------------------------------------
 # NSIS installer will be removed and replaced by multiarch MSI installer
 # -----------------------------------------------------------------------------
-install_agent.exe: check_mk_agent.exe crash.exe nowin.exe
+install_agent.exe: check_mk_agent.exe.versioned crash.exe nowin.exe
 	if ! which makensis; then \
 	    echo "ERROR: makensis missing. Please install the nsis package." ; \
 	    exit 1 ; \
@@ -110,7 +178,7 @@ install_agent.exe: check_mk_agent.exe crash.exe nowin.exe
 	makensis installer.nsi
 	chmod +x install_agent.exe
 
-install_agent-64.exe: check_mk_agent-64.exe crash.exe nowin.exe
+install_agent-64.exe: check_mk_agent-64.exe.versioned crash.exe nowin.exe
 	if ! which makensis; then \
 	    echo "ERROR: makensis missing. Please install the nsis package." ; \
 	    exit 1 ; \
@@ -130,11 +198,11 @@ nowin.exe: nowin.cc
 	$(CXX) -o $@ $<
 
 clean:
-	rm -f *.o *~ svn-*.tmp *.rc *.res
+	rm -f *.o *.exe *~ svn-*.tmp *.rc *.res obj/*.o obj64/*.o
 	make -C msibuild clean
 
 mrproper: clean
 	rm -f *.exe
 
 setup:
-	sudo apt-get install nsis lcab binutils-mingw-w64-i686 binutils-mingw-w64-x86-64
+	sudo apt-get install nsis lcab binutils-mingw-w64-i686 binutils-mingw-w64-x86-64 g++-mingw-w64-i686 g++-mingw-w64-x86-64

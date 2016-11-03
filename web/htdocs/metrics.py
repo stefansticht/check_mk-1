@@ -19,13 +19,13 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 # Frequently used variable names:
-# perf_data_string:   Raw performance data as sent by the core, e.g "foor=17M;1;2;4;5"
+# perf_data_string:   Raw performance data as sent by the core, e.g "foo=17M;1;2;4;5"
 # perf_data:          Split performance data, e.g. [("foo", "17", "M", "1", "2", "4", "5")]
 # translated_metrics: Completely parsed and translated into metrics, e.g. { "foo" : { "value" : 17.0, "unit" : { "render" : ... }, ... } }
 # color:              RGB color representation ala HTML, e.g. "#ffbbc3" or "#FFBBC3", len() is always 7!
@@ -34,12 +34,19 @@
 # unit:               The definition-dict of a unit like in unit_info
 # graph_template:     Template for a graph. Essentially a dict with the key "metrics"
 
-import math, time, colorsys
-import config, defaults, pagetypes, table
+import math, time, colorsys, shlex, operator, random
+import config, pagetypes, table
+import sites
+import traceback
 from lib import *
 from valuespec import *
-import livestatus
+from livestatus import MKLivestatusNotFoundError
+from cmk.regex import regex
 
+try:
+    import simplejson as json
+except ImportError:
+    import json
 
 #   .--Plugins-------------------------------------------------------------.
 #   |                   ____  _             _                              |
@@ -54,10 +61,9 @@ import livestatus
 # Datastructures and functions needed before plugins can be loaded
 loaded_with_language = False
 
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     global unit_info       ; unit_info       = {}
@@ -67,6 +73,15 @@ def load_plugins():
     global graph_info      ; graph_info      = []
     load_web_plugins("metrics", globals())
     loaded_with_language = current_language
+
+    fixup_unit_into()
+
+
+def fixup_unit_into():
+    # create back link from each unit to its id.
+    for unit_id, unit in unit_info.items():
+        unit["id"] = unit_id
+        unit.setdefault("description", unit["title"])
 
 
 #.
@@ -197,6 +212,17 @@ def get_palette_color_by_index(i, shading='a'):
     return "%s/%s" % (color_key, shading)
 
 
+def get_next_random_palette_color():
+    keys = cmk_color_palette.keys()
+    if html.is_cached("random_color_index"):
+        last_index = html.get_cached("random_color_index")
+    else:
+        last_index = random.randint(0, len(keys))
+    index = (last_index + 1) % len(keys)
+    html.set_cache("random_color_index", index)
+    return parse_color_into_hexrgb("%s/a" % keys[index])
+
+
 # 23/c -> #ff8040
 # #ff8040 -> #ff8040
 def parse_color_into_hexrgb(color_string):
@@ -231,7 +257,10 @@ def hsv_to_hexrgb(hsv):
 
 # "#ff0080" -> (1.0, 0.0, 0.5)
 def parse_color(color):
-    return tuple([ int(color[a:a+2], 16) / 255.0 for a in (1,3,5) ])
+    try:
+        return tuple([ int(color[a:a+2], 16) / 255.0 for a in (1,3,5) ])
+    except Exception, e:
+        raise MKGeneralException(_("Invalid color specification '%s'") % color)
 
 
 def render_color(color_rgb):
@@ -259,6 +288,8 @@ def mix_colors(a, b):
        in zip(a, b)
     ])
 
+def render_color_icon(color):
+    return "<div class=color style=\"background-color: %s\"></div>" % color
 
 #.
 #   .--Evaluation----------------------------------------------------------.
@@ -272,15 +303,31 @@ def mix_colors(a, b):
 #   |  Parsing of performance data into metrics, evaluation of expressions |
 #   '----------------------------------------------------------------------'
 
+
+def split_perf_data(perf_data_string):
+    # In python < 2.5 shlex.split can not deal with unicode strings. But we always
+    # have unicode strings. So encode and decode again.
+    return map(lambda s: s.decode('utf-8'), shlex.split(perf_data_string.encode('utf-8')))
+
+
 # Convert perf_data_string into perf_data, extract check_command
+# This methods must not return None or anything else. It mustr strictly
+# return a tuple of perf_data list and the check_command. In case of
+# errors during parsing it returns an empty list for the perf_data.
 def parse_perf_data(perf_data_string, check_command=None):
     # Strip away arguments like in "check_http!-H mathias-kettner.de"
+    # FIXME: check_command=None? Fails here!
     check_command = check_command.split("!")[0]
 
     if not perf_data_string:
-        return None, check_command
+        return [], check_command
 
-    parts = perf_data_string.split()
+    # Split the perf data string into parts. Preserve quoted strings!
+    try:
+        parts = split_perf_data(perf_data_string)
+    except ValueError, e:
+        html.log("Failed to parse perfdata string: %s" % perf_data_string)
+        return [], check_command
 
     # Try if check command is appended to performance data
     # in a PNP like style
@@ -294,28 +341,63 @@ def parse_perf_data(perf_data_string, check_command=None):
         return x in [ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' ]
 
     # Parse performance data, at least try
-    try:
-        perf_data = []
-        for part in parts:
-            varname, values = part.split("=")
+    perf_data = []
+    for part in parts:
+        try:
+            varname, values = part.split("=", 1)
+            varname = pnp_cleanup(varname.replace("\"", "").replace("\'", ""))
+
             value_parts = values.split(";")
             while len(value_parts) < 5:
                 value_parts.append(None)
-            value, warn, crit, min, max = value_parts[0:5]
+            value_text, warn, crit, min, max = value_parts[0:5]
+            if value_text == "":
+                continue # ignore useless empty variable
+
             # separate value from unit
             i = 0
-            while i < len(value) and (isdigit(value[i]) or value[i] in ['.', ',', '-']):
+            while i < len(value_text) and (isdigit(value_text[i])
+                                           or value_text[i] in ['.', ',', '-']):
                 i += 1
-            unit_name = value[i:]
-            value = value[:i]
+
+            unit_name = value_text[i:]
+            value = float_or_int(value_text[:i])
+
             perf_data.append((varname, value, unit_name, warn, crit, min, max))
-    except:
-        if config.debug:
-            raise
-        perf_data = None
+        except:
+            html.log("Failed to parse perfdata: %s" % perf_data_string)
+            if config.debug:
+                raise
 
     return perf_data, check_command
 
+
+# Get translation info for one performance var.
+def perfvar_translation(perfvar_nr, perfvar_name, check_command):
+    cm = check_metrics.get(check_command, {})
+    translation_entry = {} # Default: no translation neccessary
+
+    if perfvar_name in cm:
+        translation_entry = cm[perfvar_name]
+    else:
+        for orig_varname, te in cm.items():
+            if orig_varname[0] == "~" and regex(orig_varname[1:]).match(perfvar_name): # Regex entry
+                translation_entry = te
+                break
+
+    metric_name = translation_entry.get("name", perfvar_name)
+    scale = translation_entry.get("scale", 1.0)
+
+    return {
+        "name"       : metric_name,
+        "scale"      : scale,
+        "auto_graph" : translation_entry.get("auto_graph", True)
+    }
+
+
+def translate_perf_data(perf_data_string, check_command=None):
+    perf_data, check_command = parse_perf_data(perf_data_string, check_command)
+    return translate_metrics(perf_data, check_command)
 
 
 # Convert Ascii-based performance data as output from a check plugin
@@ -324,26 +406,15 @@ def parse_perf_data(perf_data_string, check_command=None):
 # Result for this example:
 # { "temp" : "value" : 48.1, "warn" : 70, "crit" : 80, "unit" : { ... } }
 def translate_metrics(perf_data, check_command):
-    cm = check_metrics.get(check_command, {})
-
     translated_metrics = {}
     color_index = 0
     for nr, entry in enumerate(perf_data):
         varname = entry[0]
+        value = entry[1]
 
-        translation_entry = {} # Default: no translation neccessary
+        translation_entry = perfvar_translation(nr, varname, check_command)
+        metric_name = translation_entry["name"]
 
-        if varname in cm:
-            translation_entry = cm[varname]
-        else:
-            for orig_varname, te in cm.items():
-                if orig_varname[0] == "~" and regex(orig_varname[1:]).match(varname): # Regex entry
-                    translation_entry = te
-                    break
-
-
-        # Translate name
-        metric_name = translation_entry.get("name", varname)
         if metric_name in translated_metrics:
             continue # ignore duplicate value
 
@@ -359,19 +430,15 @@ def translate_metrics(perf_data, check_command):
             mi = metric_info[metric_name].copy()
             mi["color"] = parse_color_into_hexrgb(mi["color"])
 
-        # Optional scaling
-        scale = translation_entry.get("scale", 1.0)
-
-
         new_entry = {
-            "value"      : float_or_int(entry[1]) * scale,
+            "value"      : value * translation_entry["scale"],
             "orig_name"  : varname,
-            "scale"      : scale, # needed for graph definitions
+            "scale"      : translation_entry["scale"], # needed for graph definitions
             "scalar"     : {},
         }
 
         # Do not create graphs for ungraphed metrics if listed here
-        new_entry["auto_graph"] = translation_entry.get("auto_graph", True)
+        new_entry["auto_graph"] = translation_entry["auto_graph"]
 
         # Add warn, crit, min, max
         for index, key in [ (3, "warn"), (4, "crit"), (5, "min"), (6, "max") ]:
@@ -380,7 +447,7 @@ def translate_metrics(perf_data, check_command):
             elif entry[index]:
                 try:
                     value = float_or_int(entry[index])
-                    new_entry["scalar"][key] = value * scale
+                    new_entry["scalar"][key] = value * translation_entry["scale"]
                 except:
                     if config.debug:
                         raise
@@ -389,6 +456,7 @@ def translate_metrics(perf_data, check_command):
 
         new_entry.update(mi)
         new_entry["unit"] = unit_info[new_entry["unit"]]
+
         translated_metrics[metric_name] = new_entry
         # TODO: warn, crit, min, max
         # if entry[2]:
@@ -551,7 +619,10 @@ def evaluate_literal(expression, translated_metrics):
         unit = translated_metrics[varname]["unit"]
 
     if color == None:
-        color = parse_color_into_hexrgb(metric_info[varname]["color"])
+        if varname in metric_info:
+            color = parse_color_into_hexrgb(metric_info[varname]["color"])
+        else:
+            color = "#808080"
     return value, unit, color
 
 
@@ -896,7 +967,7 @@ def graph_possible(graph_template, translated_metrics):
     for metric_definition in graph_template["metrics"]:
         try:
             evaluate(metric_definition[0], translated_metrics)
-        except Exception, e:
+        except Exception:
             return False
 
     # Allow graphs to be disabled if certain (better) metrics
@@ -955,42 +1026,55 @@ def generic_graph_template(metric_name):
 
 
 def get_graph_range(graph_template, translated_metrics):
-    if "range" in graph_template:
-        min_value, max_value = [
-            evaluate(r, translated_metrics)[0]
-            for r in graph_template["range"]
-        ]
+    if "range" not in graph_template:
+        return None, None # Compute range of displayed data points
 
-    else:
-        # Compute range of displayed data points
-        max_value = None
-        min_value = None
+    try:
+        return evaluate(graph_template["range"][0], translated_metrics)[0], \
+               evaluate(graph_template["range"][1], translated_metrics)[0]
+    except:
+        return None, None
 
-    return min_value, max_value
 
+#.
+#   .--PNP Templates-------------------------------------------------------.
+#   |  ____  _   _ ____    _____                    _       _              |
+#   | |  _ \| \ | |  _ \  |_   _|__ _ __ ___  _ __ | | __ _| |_ ___  ___   |
+#   | | |_) |  \| | |_) |   | |/ _ \ '_ ` _ \| '_ \| |/ _` | __/ _ \/ __|  |
+#   | |  __/| |\  |  __/    | |  __/ | | | | | |_) | | (_| | ||  __/\__ \  |
+#   | |_|   |_| \_|_|       |_|\___|_| |_| |_| .__/|_|\__,_|\__\___||___/  |
+#   |                                        |_|                           |
+#   +----------------------------------------------------------------------+
+#   |  Core for creating templates for PNP4Nagios from CMK graph defi-     |
+#   |  nitions.                                                            |
+#   '----------------------------------------------------------------------'
 
 # Called with exactly one variable: the template ID. Example:
 # "check_mk-kernel.util:guest,steal,system,user,wait".
 def page_pnp_template():
-    template_id = html.var("id")
+    try:
+        template_id = html.var("id")
 
-    check_command, perf_var_string = template_id.split(":", 1)
-    perf_var_names = perf_var_string.split(",")
+        check_command, perf_var_string = template_id.split(":", 1)
+        perf_var_names = perf_var_string.split(",")
 
-    # Fake performance values in order to be able to find possible graphs
-    perf_data = [ ( varname, 1, "", 1, 1, 1, 1 ) for varname in perf_var_names ]
-    translated_metrics = translate_metrics(perf_data, check_command)
-    if not translated_metrics:
-        return # check not supported
+        # Fake performance values in order to be able to find possible graphs
+        perf_data = [ ( varname, 1, "", 1, 1, 1, 1 ) for varname in perf_var_names ]
+        translated_metrics = translate_metrics(perf_data, check_command)
+        if not translated_metrics:
+            return # check not supported
 
-    # Collect output in string. In case of an exception to not output
-    # any definitions
-    output = ""
-    for graph_template in get_graph_templates(translated_metrics):
-        graph_code = render_graph_pnp(graph_template, translated_metrics)
-        output += graph_code
+        # Collect output in string. In case of an exception to not output
+        # any definitions
+        output = ""
+        for graph_template in get_graph_templates(translated_metrics):
+            graph_code = render_graph_pnp(graph_template, translated_metrics)
+            output += graph_code
 
-    html.write(output)
+        html.write(output)
+
+    except Exception, e:
+        html.write("An error occured:\n%s\n" % traceback.format_exc())
 
 
 # TODO: some_value.max not yet working
@@ -1007,14 +1091,13 @@ def render_graph_pnp(graph_template, translated_metrics):
     # Define one RRD variable for each of the available metrics.
     # Note: We need to use the original name, not the translated one.
     for var_name, metrics in translated_metrics.items():
-        rrd = "$RRDBASE$_" + pnp_cleanup(metrics["orig_name"]) + ".rrd"
+        rrd = "$RRDBASE$_" + metrics["orig_name"] + ".rrd"
         scale = metrics["scale"]
         unit = metrics["unit"]
-        render_scale = unit.get("render_scale", 1)
 
-        if scale != 1.0 or render_scale != 1.0:
+        if scale != 1.0:
             rrdgraph_commands += "DEF:%s_UNSCALED=%s:1:MAX " % (var_name, rrd)
-            rrdgraph_commands += "CDEF:%s=%s_UNSCALED,%f,* " % (var_name, var_name, scale * render_scale)
+            rrdgraph_commands += "CDEF:%s=%s_UNSCALED,%f,* " % (var_name, var_name, scale)
 
         else:
             rrdgraph_commands += "DEF:%s=%s:1:MAX " % (var_name, rrd)
@@ -1098,14 +1181,21 @@ def render_graph_pnp(graph_template, translated_metrics):
             # TODO: beware of division by zero. All metrics are set to 1 here.
             value, unit, color = evaluate(metric_name, translated_metrics)
 
+            if "@" in metric_name:
+                expression, explicit_unit_name = metric_name.rsplit("@", 1) # isolate expression
+            else:
+                expression = metric_name
+
             # Choose a unique name for the derived variable and compute it
-            commands += "CDEF:DERIVED%d=%s " % (nr , metric_name)
+            commands += "CDEF:DERIVED%d=%s " % (nr , expression)
             if upside_down:
                 commands += "CDEF:DERIVED%d_NEG=DERIVED%d,-1,* " % (nr, nr)
 
             metric_name = "DERIVED%d" % nr
             # Scaling and upsidedown handling for legend
-            commands += "CDEF:%s_LEGSCALED%s=%s,%f,/ " % (metric_name, upside_down_suffix, metric_name, legend_scale * upside_down_factor)
+            commands += "CDEF:%s_LEGSCALED=%s,%f,/ " % (metric_name, metric_name, legend_scale)
+            if upside_down:
+                commands += "CDEF:%s_LEGSCALED%s=%s,%f,/ " % (metric_name, upside_down_suffix, metric_name, legend_scale * upside_down_factor)
 
         else:
             mi = translated_metrics[metric_name]
@@ -1175,6 +1265,7 @@ def render_graph_pnp(graph_template, translated_metrics):
     return graph_title + "\n" + rrdgraph_arguments + "\n" + rrdgraph_commands + "\n"
 
 
+
 #.
 #   .--Hover-Graph---------------------------------------------------------.
 #   |     _   _                           ____                 _           |
@@ -1186,91 +1277,257 @@ def render_graph_pnp(graph_template, translated_metrics):
 #   '----------------------------------------------------------------------'
 
 
-def new_style_graphs_possible():
-    return browser_supports_canvas() and not html.is_mobile()
+def cmk_graphs_possible(site_id = None):
+    try:
+        render_graph_html # Will throw exception if missing
+        return not config.force_pnp_graphing \
+           and browser_supports_canvas() \
+           and site_is_running_cmc(site_id)
+    except:
+        return False
+
+
+# If site_id is None then we return True if at least
+# one site is running CMC
+def site_is_running_cmc(site_id):
+    if site_id:
+        return sites.state(site_id, {}).get("program_version", "").startswith("Check_MK")
+    else:
+        for status in sites.states().values():
+            if status.get("program_version").startswith("Check_MK"):
+                return True
+        return False
 
 
 def browser_supports_canvas():
     user_agent = html.get_user_agent()
+
     if 'MSIE' in user_agent:
         matches = regex('MSIE ([0-9]{1,}[\.0-9]{0,})').search(user_agent)
-        return not matches or float(matches.group(1)) >= 9.0
+        if matches:
+            ie_version = float(matches.group(1))
+            if ie_version >= 9.0:
+                return True
+
+        # Trying to deal with the IE compatiblity mode to detect the real IE version
+        matches = regex('Trident/([0-9]{1,}[\.0-9]{0,})').search(user_agent)
+        if matches:
+            trident_version = float(matches.group(1))+4
+            if trident_version >= 9.0:
+                return True
+
+        return False
     else:
         return True
 
 
-def page_show_graph():
-    site = html.var('site')
-    host_name = html.var('host_name')
-    service = html.var('service')
+# CLEANUP: Make this function being used only by create_graph_definition_from_template.
+# Then rename it and move it over there.
+def get_graph_data_from_livestatus(site, host_name, service):
+    if service == "_HOST_":
+        query = "GET hosts\n" \
+                "Filter: host_name = %s\n" \
+                "Columns: perf_data metrics check_command\n" % host_name
 
-    if new_style_graphs_possible():
-        # FIXME HACK TODO We don't have the current perfata and check command
-        # here, but we only need it till metrics.render_svc_time_graph() does
-        # not need these information anymore.
-        if service == "_HOST_":
-            query = "GET hosts\n" \
-                    "Filter: host_name = %s\n" \
-                    "Columns: perf_data metrics check_command\n" % host_name
-
-        else:
-            query = "GET services\n" \
-                    "Filter: host_name = %s\n" \
-                    "Filter: service_description = %s\n" \
-                    "Columns: perf_data metrics check_command\n" % (host_name, service)
-
-        html.live.set_only_sites([site])
-        try:
-            data = html.live.query_row(query)
-        except livestatus.MKLivestatusNotFoundError:
-            html.write('<div class="error">%s</div>' %
-                _('Failed to fetch data for graph. Maybe the site is not reachable?'))
-            return
-        html.live.set_only_sites(None)
-
-        if service == "_HOST_":
-            row = {
-                'site'                  : site,
-                'host_name'             : host_name,
-                'host_perf_data'        : data[0],
-                'host_metrics'          : data[1],
-                'host_check_command'    : data[2],
-            }
-        else:
-            row = {
-                'site'                  : site,
-                'host_name'             : host_name,
-                'service_description'   : service,
-                'service_perf_data'     : data[0],
-                'service_metrics'       : data[1],
-                'service_check_command' : data[2],
-            }
-
-        # now try to render the graph with our graphing. If it is not possible,
-        # add JS code to let browser fetch the PNP graph
-        try:
-            # Currently always displaying 24h graph
-            end_time = time.time()
-            start_time = end_time - 8 * 3600
-
-            htmlcode = render_time_graph(row, start_time, end_time, size=(30, 10), font_size=8, show_legend=False, graph_id_prefix="hover")
-            if htmlcode:
-                html.write(htmlcode)
-                return
-        except NameError:
-            if config.debug:
-                raise
-            pass
-
-    # Fallback to PNP graph rendering
-    host = pnp_cleanup(host_name)
-    svc = pnp_cleanup(service)
-    site = html.site_status[site]["site"]
-    if html.mobile:
-        url = site["url_prefix"] + ("pnp4nagios/index.php?kohana_uri=/mobile/popup/%s/%s" % \
-            (html.urlencode(host), html.urlencode(svc)))
     else:
-        url = site["url_prefix"] + ("pnp4nagios/index.php/popup?host=%s&srv=%s" % \
-            (html.urlencode(host), html.urlencode(svc)))
+        query = "GET services\n" \
+                "Filter: host_name = %s\n" \
+                "Filter: service_description = %s\n" \
+                "Columns: perf_data metrics check_command\n" % (host_name, service)
+
+    if site:
+        sites.live().set_only_sites([site])
+    sites.live().set_prepend_site(True)
+    data = sites.live().query_row(query)
+    sites.live().set_prepend_site(False)
+
+    if site:
+        sites.live().set_only_sites(None)
+
+    if service == "_HOST_":
+        return {
+            'site'                  : data[0],
+            'host_name'             : host_name,
+            'host_perf_data'        : data[1],
+            'host_metrics'          : data[2],
+            'host_check_command'    : data[3],
+        }
+    else:
+        return {
+            'site'                  : data[0],
+            'host_name'             : host_name,
+            'service_description'   : service,
+            'service_perf_data'     : data[1],
+            'service_metrics'       : data[2],
+            'service_check_command' : data[3],
+        }
+
+
+def get_graph_template_by_source(graph_templates, source):
+    graph_template = None
+    for source_nr, template in enumerate(graph_templates):
+        if source == source_nr + 1:
+            graph_template = template
+            break
+    return graph_template
+
+
+# This page is called for the popup of the graph icon of hosts/services.
+def page_host_service_graph_popup():
+    site_id = html.var('site')
+    host_name = html.var('host_name')
+    service_description = html.var_utf8('service')
+
+    if cmk_graphs_possible(site_id):
+        host_service_graph_popup_cmk(site_id, host_name, service_description)
+    else:
+        host_service_graph_popup_pnp(site_id, host_name, service_description)
+
+
+
+def host_service_graph_popup_pnp(site, host_name, service_description):
+    pnp_host   = pnp_cleanup(host_name)
+    pnp_svc    = pnp_cleanup(service_description)
+    url_prefix = config.site(site)["url_prefix"]
+
+    if html.mobile:
+        url = url_prefix + ("pnp4nagios/index.php?kohana_uri=/mobile/popup/%s/%s" % \
+            (html.urlencode(pnp_host), html.urlencode(pnp_svc)))
+    else:
+        url = url_prefix + ("pnp4nagios/index.php/popup?host=%s&srv=%s" % \
+            (html.urlencode(pnp_host), html.urlencode(pnp_svc)))
 
     html.write(url)
+
+
+#.
+#   .--Graph Dashlet-------------------------------------------------------.
+#   |    ____                 _       ____            _     _      _       |
+#   |   / ___|_ __ __ _ _ __ | |__   |  _ \  __ _ ___| |__ | | ___| |_     |
+#   |  | |  _| '__/ _` | '_ \| '_ \  | | | |/ _` / __| '_ \| |/ _ \ __|    |
+#   |  | |_| | | | (_| | |_) | | | | | |_| | (_| \__ \ | | | |  __/ |_     |
+#   |   \____|_|  \__,_| .__/|_| |_| |____/ \__,_|___/_| |_|_|\___|\__|    |
+#   |                  |_|                                                 |
+#   +----------------------------------------------------------------------+
+#   |  This page handler is called by graphs embedded in a dashboard.      |
+#   '----------------------------------------------------------------------'
+
+def page_graph_dashlet():
+    spec = html.var("spec")
+    if not spec:
+        raise MKUserError("spec", _("Missing spec parameter"))
+    graph_specification = json.loads(html.var("spec"))
+
+    render = html.var("render")
+    if not render:
+        raise MKUserError("render", _("Missing render parameter"))
+    custom_graph_render_options = json.loads(html.var("render"))
+
+    if cmk_graphs_possible():
+        host_service_graph_dashlet_cmk(graph_specification, custom_graph_render_options)
+    elif graph_specification[0] == "template":
+        host_service_graph_dashlet_pnp(graph_specification)
+    else:
+        html.write(_("This graph can not be rendered."))
+
+
+def host_service_graph_dashlet_cmk(graph_specification, custom_graph_render_options):
+    size = (int(((float(html.var("width")) - 49 - 5)/html_size_per_ex)),
+            int((float(html.var("height")) - 23)/html_size_per_ex))
+
+    graph_render_options = {
+        "size"          : size,
+        "font_size"     : 8,
+        "show_legend"   : False,
+        "show_controls" : False,
+        "resizable"     : False,
+    }
+    graph_render_options.update(custom_graph_render_options)
+
+    # The timerange is specified in PNP like manner.
+    range_secs = {
+        "0" : 4 * 3600,
+        "1" : 25 * 3600,
+        "2" : 7 * 86400,
+        "3" : 31 * 86400,
+        "4" : 366 * 86400,
+    }
+
+    secs = range_secs.get(html.var("timerange"), 4 * 3600)
+    end_time = time.time()
+    start_time = end_time - secs
+    graph_data_range = {
+        "time_range" : (start_time, end_time),
+    }
+
+    graph_data_range["step"] = estimate_graph_step_for_html(graph_data_range["time_range"],
+                                                            graph_render_options)
+
+    try:
+        graph_definitions = create_graph_definitions_from_specification(graph_specification)
+        if graph_definitions:
+            graph_definition = graph_definitions[0]
+        else:
+            raise MKGeneralException(_("Failed to calculate a graph definition."))
+    except MKLivestatusNotFoundError:
+        html.write("<div class=error>%s</div>" % html.attrencode(_("Cannot render graphs: cannot fetch data via Livestatus")))
+        return
+
+    # When the legend is enabled, we need to reduce the height by the height of the legend to
+    # make the graph fit into the dashlet area.
+    if graph_render_options["show_legend"]:
+        # TODO FIXME: This abstract graph is calulated twice. Once here and once in render_graphs_from_specification_html()
+        abstract_graph = compute_abstract_graph(graph_definition, graph_data_range, graph_render_options)
+        graph_render_options["size"] = (size[0], size[1] - graph_legend_height_ex(graph_render_options, abstract_graph))
+
+    html_code = render_graphs_from_definitions([graph_definition], graph_data_range, graph_render_options)
+    html.write(html_code)
+
+
+def host_service_graph_dashlet_pnp(graph_specification):
+    site = graph_specification[1]["site"]
+    source = int(graph_specification[1]["graph_index"])
+
+    pnp_host   = pnp_cleanup(graph_specification[1]["host_name"])
+    pnp_svc    = pnp_cleanup(graph_specification[1]["service_description"])
+    url_prefix = config.site(site)["url_prefix"]
+
+    html.write(url_prefix + "pnp4nagios/index.php/image?host=%s&srv=%s&source=%d&view=%s&theme=multisite" % \
+        (html.urlencode(pnp_host), html.urlencode(pnp_svc), source, html.var("timerange")))
+
+
+#.
+#   .--Metrics Table-------------------------------------------------------.
+#   |      __  __      _        _            _____     _     _             |
+#   |     |  \/  | ___| |_ _ __(_) ___ ___  |_   _|_ _| |__ | | ___        |
+#   |     | |\/| |/ _ \ __| '__| |/ __/ __|   | |/ _` | '_ \| |/ _ \       |
+#   |     | |  | |  __/ |_| |  | | (__\__ \   | | (_| | |_) | |  __/       |
+#   |     |_|  |_|\___|\__|_|  |_|\___|___/   |_|\__,_|_.__/|_|\___|       |
+#   |                                                                      |
+#   +----------------------------------------------------------------------+
+#   |  Renders a simple table with all metrics of a host or service        |
+#   '----------------------------------------------------------------------'
+
+def render_metrics_table(translated_metrics, host_name, service_description):
+    output = "<table class=metricstable>"
+    for metric_name, metric in sorted(translated_metrics.items(), cmp=lambda a,b: cmp(a[1]["title"], b[1]["title"])):
+        output += "<tr>"
+        output += "<td class=color>%s</td>" % render_color_icon(metric["color"])
+        output += "<td>%s:</td>" % metric["title"]
+        output += "<td class=value>%s</td>" % metric["unit"]["render"](metric["value"])
+        if cmk_graphs_possible():
+            output += "<td>"
+            output += html.render_popup_trigger(
+                html.render_icon("custom_graph", help=_("Add this metric to a custom graph"), cssclass="iconbutton"),
+                ident = "add_metric_to_graph_" + host_name + ";" + service_description,
+                what = "add_metric_to_custom_graph",
+                url_vars = [
+                    ("host", host_name),
+                    ("service", service_description),
+                    ("metric", metric_name),
+                ]
+            )
+            output += "</td>"
+        output += "</tr>"
+    output += "</table>"
+    return output

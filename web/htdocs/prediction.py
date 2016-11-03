@@ -19,53 +19,48 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
-import defaults
 import os
 import time
 
+import cmk.paths
+import config
+import sites
 from lib import *
+import cmk.store as store
+
+try:
+    import simplejson as json
+except ImportError:
+    import json
+
 
 graph_size = 2000, 700
 
-# Import helper functions from check_mk module prediction.py. Maybe we should
-# find some more clean way some day for creating common Python code between
-# Check_MK CCE and Multisite.
-execfile(defaults.modules_dir + "/prediction.py")
-rrd_path = defaults.rrd_path
-rrdcached_socket = None
-omd_root = None
-try:
-    omd_root = default.omd_root
-    if omd_root:
-        rrdcached_socket = omd_root + "/tmp/run/rrdcached.sock"
-    else:
-        try:
-            rrdcached_socket = config.rrdcached_socket
-        except:
-            pass
-except:
-    pass
 
 def page_graph():
-    host = html.var("host")
+    host    = html.var("host")
     service = html.var("service")
-    dsname = html.var("dsname")
+    dsname  = html.var("dsname")
+
     html.header(_("Prediction for %s - %s - %s") %
             (host, service, dsname),
             javascripts=["prediction"],
             stylesheets=["pages", "prediction"])
 
     # Get current value from perf_data via Livestatus
-    current_value = \
-       get_current_perfdata(host, service, dsname)
+    current_value = get_current_perfdata(host, service, dsname)
 
     dir = "%s/prediction/%s/%s/%s" % (
-            defaults.var_dir, host, pnp_cleanup(service), pnp_cleanup(dsname))
+            cmk.paths.var_dir, host, pnp_cleanup(service), pnp_cleanup(dsname))
+
+    if not os.path.exists(dir):
+        raise MKGeneralException(_("There is currently no prediction information "
+                                   "available for this service."))
 
     # Load all prediction information, sort by time of generation
     tg_name = html.var("timegroup")
@@ -73,22 +68,32 @@ def page_graph():
     timegroups = []
     now = time.time()
     for f in os.listdir(dir):
-        if f.endswith(".info"):
-            tg_info = eval(file(dir + "/" + f).read())
-            tg_info["name"] = f[:-5]
-            timegroups.append(tg_info)
-            if tg_info["name"] == tg_name or \
-                (tg_name == None and now >= tg_info["range"][0] and now <= tg_info["range"][1]):
-                timegroup = tg_info
-                tg_name = tg_info["name"]
+        file_path = dir + "/" + f
+        if not f.endswith(".info"):
+            continue
+
+        tg_info = store.load_data_from_file(dir + "/" + f)
+        if tg_info == None:
+            continue
+
+        tg_info["name"] = f[:-5]
+        timegroups.append(tg_info)
+        if tg_info["name"] == tg_name or \
+            (tg_name == None and now >= tg_info["range"][0] and now <= tg_info["range"][1]):
+            timegroup = tg_info
+            tg_name = tg_info["name"]
 
     timegroups.sort(cmp = lambda a,b: cmp(a["range"][0], b["range"][0]))
-    if not timegroup:
-        timegroup  = timegroups[0]
-        tg_name = choices[0][0]
 
     choices = [ (tg_info["name"], tg_info["name"].title())
                 for tg_info in timegroups ]
+
+    if not timegroup:
+        if timegroups:
+            timegroup  = timegroups[0]
+            tg_name = choices[0][0]
+        else:
+            raise MKGeneralException(_("Missing prediction information."))
 
     html.begin_form("prediction")
     html.write(_("Show prediction for "))
@@ -97,7 +102,11 @@ def page_graph():
     html.end_form()
 
     # Get prediction data
-    tg_data = eval(file(dir + "/" + timegroup["name"]).read())
+    path = dir + "/" + timegroup["name"]
+    tg_data = store.load_data_from_file(path)
+    if tg_data == None:
+        raise MKGeneralException(_("Missing prediction data."))
+
     swapped = swap_and_compute_levels(tg_data, timegroup)
     vertical_range = compute_vertical_range(swapped)
     legend = [
@@ -136,7 +145,6 @@ def page_graph():
         render_curve(swapped["upper_crit"], "#f0b0b0", square=True)
     render_curve(swapped["average"], "#000000")
     render_curve(swapped["average"], "#000000")
-    # render_curve(stack(swapped["average"], swapped["stdev"], -1),  "#008040")
 
     # Try to get current RRD data and render it also
     from_time, until_time = timegroup["range"]
@@ -206,13 +214,46 @@ def compute_vertical_scala(low, high):
 
     return vert_scala
 
+
 def get_current_perfdata(host, service, dsname):
-    perf_data = html.live.query_value("GET services\nFilter: host_name = %s\nFilter: description = %s\nColumns: perf_data" % (
-            lqencode(host), lqencode(service)))
+    perf_data = sites.live().query_value(
+                    "GET services\nFilter: host_name = %s\nFilter: description = %s\n"
+                    "Columns: perf_data" % (lqencode(host), lqencode(service)))
+
     for part in perf_data.split():
         name, rest = part.split("=")
         if name == dsname:
             return float(rest.split(";")[0])
+
+
+# Fetch RRD historic metrics data of a specific service. returns a tuple
+# of (step, [value1, value2, ...])
+# IMPORTANT: Until we have a central library, keep this function in sync with
+# the function get_rrd_data() from modules/prediction.py.
+def get_rrd_data(hostname, service_description, varname, cf, fromtime, untiltime):
+    step = 1
+    rpn = "%s.%s" % (varname, cf.lower()) # "MAX" -> "max"
+    query = "GET services\n" \
+          "Columns: rrddata:m1:%s:%d:%d:%d\n" \
+          "Filter: host_name = %s\n" \
+          "Filter: description = %s\n" % (
+             rpn, fromtime, untiltime, step,
+             lqencode(hostname), lqencode(service_description))
+
+    try:
+        response = sites.live().query_row(query)[0]
+    except Exception, e:
+        if config.debug:
+            raise
+        raise MKGeneralException("Cannot get historic metrics via Livestatus: %s" % e)
+
+    if not response:
+        raise MKGeneralException("Got no historic metrics")
+
+    real_fromtime, real_untiltime, step = response[:3]
+    values = response[3:]
+    return step, values
+
 
 # Compute check levels from prediction data and check parameters
 def swap_and_compute_levels(tg_data, tg_info):
@@ -247,28 +288,34 @@ def stack(apoints, bpoints, scale):
 # copy&paste. This was neccessary since there is currently no common
 # code between Check_MK CCE and Multisite.
 def compute_levels(params, ref_value, stdev):
-    levels = []
-    for what, sig in [ ( "upper", 1 ), ( "lower", -1 )]:
-        p = "levels_" + what
-        if p in params:
-            how, (warn, crit) = params[p]
-            if how == "absolute":
-                this_levels = (ref_value + (sig * warn), ref_value + (sig * crit))
+    return compute_level(params, ref_value, stdev, "levels_upper", 1), \
+           compute_level(params, ref_value, stdev, "levels_lower", -1)
 
-            elif how == "relative":
-                this_levels = (ref_value + sig * (ref_value * warn / 100),
-                               ref_value + sig * (ref_value * crit / 100))
 
-            else: #  how == "stdev":
-                this_levels = (ref_value + sig * (stdev * warn),
-                              ref_value + sig * (stdev * crit))
-            if what == "upper" and "levels_upper_min" in params:
-                limit_warn, limit_crit = params["levels_upper_min"]
-                this_levels = (max(limit_warn, this_levels[0]), max(limit_crit, this_levels[1]))
-            levels.append(this_levels)
-        else:
-            levels.append((None, None))
+def compute_level(params, ref_value, stdev, param, sig):
+    if param not in params:
+        return None, None
+
+    how, (warn, crit) = params[param]
+    if how == "absolute":
+        levels = (ref_value + (sig * warn),
+                  ref_value + (sig * crit))
+
+    elif how == "relative":
+        levels = (ref_value + sig * (ref_value * warn / 100),
+                  ref_value + sig * (ref_value * crit / 100))
+
+    else: #  how == "stdev":
+        levels = (ref_value + sig * (stdev * warn),
+                  ref_value + sig * (stdev * crit))
+
+    if param == "levels_upper" and "levels_upper_min" in params:
+        limit_warn, limit_crit = params["levels_upper_min"]
+        levels = (max(limit_warn, levels[0]),
+                  max(limit_crit, levels[1]))
+
     return levels
+
 
 def compute_vertical_range(swapped):
     mmin, mmax = 0.0, 0.0
@@ -290,21 +337,23 @@ def create_graph(name, size, range, v_range, legend):
                  name, range[0], range[1], v_range[0], v_range[1]))
 
 def render_coordinates(v_scala, t_scala):
-    html.javascript('render_coordinates(%r, %r);' % (v_scala, t_scala))
+    html.javascript('render_coordinates(%s, %s);' % (json.dumps(v_scala), json.dumps(t_scala)))
 
 
 def render_curve(points, color, width=1, square=False):
-    html.javascript('render_curve(%r, %r, %d, %d);' % (
-              points, color, width, square and 1 or 0))
+    html.javascript('render_curve(%s, %s, %d, %d);' % (
+              json.dumps(points), json.dumps(color), width, square and 1 or 0))
 
 def render_point(t, v, color):
-    html.javascript('render_point(%r, %r, %r);' % (t, v, color))
+    html.javascript('render_point(%s, %s, %s);' % (json.dumps(t), json.dumps(v), json.dumps(color)))
 
 def render_area(points, color, alpha=1.0):
-    html.javascript('render_area(%r, %r, %f);' % (points, color, alpha))
+    html.javascript('render_area(%s, %s, %f);' % (json.dumps(points), json.dumps(color), alpha))
 
 def render_area_reverse(points, color, alpha=1.0):
-    html.javascript('render_area_reverse(%r, %r, %f);' % (points, color, alpha))
+    html.javascript('render_area_reverse(%s, %s, %f);' %
+        (json.dumps(points), json.dumps(color), alpha))
 
 def render_dual_area(lower_points, upper_points, color, alpha=1.0):
-    html.javascript('render_dual_area(%r, %r, %r, %f);' % (lower_points, upper_points, color, alpha))
+    html.javascript('render_dual_area(%s, %s, %s, %f);' %
+        (json.dumps(lower_points), json.dumps(upper_points), json.dumps(color), alpha))

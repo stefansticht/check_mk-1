@@ -1,4 +1,5 @@
 #!/usr/bin/ksh93
+# Check_MK Agent for AIX
 # +------------------------------------------------------------------+
 # |             ____ _               _        __  __ _  __           |
 # |            / ___| |__   ___  ___| | __   |  \/  | |/ /           |
@@ -18,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -26,7 +27,7 @@
 # force load of environment
 if [ -e $HOME/.profile ]
 then
-    . $HOME/.profile
+    . $HOME/.profile >/dev/null 2>&1
 fi
 
 # Remove locale settings to eliminate localized outputs where possible
@@ -90,12 +91,14 @@ function waitmax
 
 function run_cached {
     NAME=$1
+    # Be aware: Maxage was expected to be given in minutes but this was
+    # confusing because all other agents use seconds here. So this has
+    # been changed to be compatible.
     MAXAGE=$2
     shift 2
     CMDLINE=$*
-    MAXAGE=$MAXAGE*60
 
-    if [ ! -e $MK_VARDIR/cache ] ; then mkdir $MK_VARDIR/cache ; fi
+    if [ ! -e $MK_VARDIR/cache ] ; then mkdir -p $MK_VARDIR/cache ; fi
     CACHE_FILE=$MK_VARDIR/cache/$NAME.cache
 
     USE_CACHE_FILE=""
@@ -118,7 +121,7 @@ function run_cached {
 }
 
 echo '<<<check_mk>>>'
-echo Version: 1.2.7i3
+echo Version: 1.4.0i2
 echo AgentOS: aix
 echo Hostname: $(hostname)
 
@@ -175,7 +178,7 @@ mpstat -a | tail -n1
 echo '<<<cpu>>>'
 load=`uptime|sed -e 's;.*average: \([[:digit:]]\{1,\}\.[[:digit:]]\{1,\}\), \([[:digit:]]\{1,\}\.[[:digit:]]\{1,\}\), \([[:digit:]]\{1,\}\.[[:digit:]]\{1,\}\);\1 \2 \3;'`
 ps=`ps -eo thcount | awk '{SUM+=$1} END {print SUM}'`
-procs=`vmstat|grep lcpu|sed -e 's;.* lcpu=\([[:digit:]]\{1,4\}\) .*;\1;'`
+procs=`vmstat|grep lcpu|sed -e 's;.*lcpu=\([[:digit:]]\{1,4\}\).*;\1;'`
 echo $load 1/$ps $$ $procs
 
 
@@ -216,9 +219,24 @@ then
   $(which trd) -s
 fi
 
+if [ -x /usr/sbin/sendmail ] ; then
+    echo '<<<postfix_mailq>>>';
+    mailq 2>&1 | tail -n 6
+fi
 
+# uptime formats
+# 12:55pm  up 105 days, 21 hrs, 2 users, load average: 0.26, 0.26, 0.26 --> 9147600
+# 1:41pm   up 105 days, 21:46,  2 users, load average: 0.28, 0.28, 0.27 --> 9150360
+# 05:26PM  up           1:16,   1 user,  load average: 0.33, 0.21, 0.20 --> 4560
+# 06:13PM  up           2:03,   1 user,  load average: 1.16, 1.07, 0.91 --> 7380
+# 08:43AM  up 29 mins,          1 user,  load average: 0.09, 0.18, 0.21 --> 1740
+# 08:47AM  up 66 days,  18:34,  1 user,  load average: 2.25, 2.43, 2.61 --> 5769240
 echo '<<<uptime>>>'
-uptime | awk '{print $3,$5}' | tr ":" " " | sed 's/,//' | awk '{a=86400*int($1)+3600*int($2)+60*int($3);printf("%d\n",a)}'
+uptime | sed -e 's/^.*up//g' -e 's/user.*$//g' -e 's/hrs/0/g' -e 's/:/ /g' \
+             -e 's/days,//g' -e 's/mins//g'    -e 's/.[^,]*$//' \
+       | awk '{if (NF == 3) a=86400*int($1)+3600*int($2)+60*int($3); \
+               else if (NF == 2) a=3600*int($1)+60*int($2); \
+               else a=60*int($1); printf("%d\n",a)}'
 
 
 if cd $PLUGINSDIR 2>/dev/null
@@ -243,7 +261,9 @@ if [ -r "$MK_CONFDIR/fileinfo.cfg" ]; then
    echo '<<<fileinfo:sep(124)>>>'
    date +%s
    # simulate output of the Linux "stat -c "%n|%s|%Y" command
-   /usr/bin/perl -e 'printf "$_|%s|%s\n", (stat) [7,9] for @ARGV' $(cat "$MK_CONFDIR/fileinfo.cfg")
+   # TODO: feel free to improve this command. It opens the perl interpreter for every file found...
+   for pattern in $(cat "$MK_CONFDIR/fileinfo.cfg" 2>/dev/null); do if [ -f $pattern ]; then ls -1 "$pattern" ; fi; done |\
+   while read file ; do /usr/bin/perl -e 'printf "$_|%s|%s\n", (stat) [7,9] for @ARGV' "$file" ; done
 fi
 
 # powerHA

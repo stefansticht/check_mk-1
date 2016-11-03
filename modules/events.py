@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -28,6 +28,11 @@
 # only) by the alert handling
 
 import pprint, urllib, select, subprocess, socket
+
+from cmk.regex import regex
+
+import cmk_base.rulesets as rulesets
+
 
 def event_keepalive(event_function, log_function, call_every_loop=None, loop_interval=None, shutdown_function=None):
     last_config_timestamp = config_timestamp()
@@ -71,7 +76,7 @@ def event_keepalive(event_function, log_function, call_every_loop=None, loop_int
                     except IOError, e:
                         new_data = ""
                     except Exception, e:
-                        if opt_debug:
+                        if cmk.debug.enabled():
                             raise
                         log_function("Cannot read data from CMC: %s" % e)
 
@@ -86,7 +91,7 @@ def event_keepalive(event_function, log_function, call_every_loop=None, loop_int
                     context = raw_context_from_string(data.rstrip('\n'))
                     event_function(context)
                 except Exception, e:
-                    if opt_debug:
+                    if cmk.debug.enabled():
                         raise
                     log_function("ERROR %s\n%s" % (e, format_exception()))
 
@@ -99,7 +104,7 @@ def event_keepalive(event_function, log_function, call_every_loop=None, loop_int
         except SystemExit, e:
             sys.exit(e)
         except Exception, e:
-            if opt_debug:
+            if cmk.debug.enabled():
                 raise
             log_function("ERROR %s\n%s" % (e, format_exception()))
 
@@ -107,13 +112,13 @@ def event_keepalive(event_function, log_function, call_every_loop=None, loop_int
             try:
                 call_every_loop()
             except Exception, e:
-                if opt_debug:
+                if cmk.debug.enabled():
                     raise
                 log_function("ERROR %s\n%s" % (e, format_exception()))
 
 
 def event_data_available(loop_interval):
-    readable, writeable, exceptionable = select.select([0], [], [], loop_interval)
+    readable = select.select([0], [], [], loop_interval)[0]
     return not not readable
 
 
@@ -123,19 +128,26 @@ def raw_context_from_string(data):
     try:
         for line in data.split('\n'):
             varname, value = line.strip().split("=", 1)
-            context[varname] = value.replace(r"\n", "\n").replace("\\\\", "\\")
-    except Exception, e: # line without '=' ignored or alerted
-        if opt_debug:
+            context[varname] = expand_backslashes(value)
+    except Exception: # line without '=' ignored or alerted
+        if cmk.debug.enabled():
             raise
     return context
-
 
 def raw_context_from_stdin():
     context = {}
     for line in sys.stdin:
         varname, value = line.strip().split("=", 1)
-        context[varname] = value.replace(r"\n", "\n").replace("\\\\", "\\")
+        context[varname] = expand_backslashes(value)
     return context
+
+
+def expand_backslashes(value):
+    # We cannot do the following:
+    # value.replace(r"\n", "\n").replace("\\\\", "\\")
+    # \\n would be exapnded to \<LF> instead of \n. This was a bug
+    # in previous versions.
+    return value.replace("\\\\", "\0").replace("\\n", "\n").replace("\0", "\\")
 
 
 def convert_context_to_unicode(context):
@@ -160,6 +172,8 @@ def render_context_dump(raw_context):
 
 
 def event_log(logfile_path, message):
+    if isinstance(message, str):
+        message = message.decode("utf-8")
     formatted = u"%s %s\n" % (time.strftime("%F %T", time.localtime()), message)
     file(logfile_path, "a").write(formatted.encode("utf-8"))
 
@@ -180,9 +194,8 @@ def complete_raw_context(raw_context, with_dump, event_log):
         raw_context["WHAT"] = raw_context.get("SERVICEDESC") and "SERVICE" or "HOST"
         raw_context["MONITORING_HOST"] = socket.gethostname()
         raw_context["LOGDIR"] = notification_logdir
-        if omd_root:
-            raw_context["OMD_ROOT"] = omd_root
-            raw_context["OMD_SITE"] = os.getenv("OMD_SITE", "")
+        raw_context["OMD_ROOT"] = cmk.paths.omd_root
+        raw_context["OMD_SITE"] = omd_site()
         raw_context["MAIL_COMMAND"] = notification_mail_command
 
         # The Check_MK Micro Core sends the MICROTIME and no other time stamps. We add
@@ -277,19 +290,22 @@ def complete_raw_context(raw_context, with_dump, event_log):
 
 def event_match_rule(rule, context):
     return \
-        event_match_folder(rule, context)                or \
-        event_match_hosttags(rule, context)              or \
-        event_match_hostgroups(rule, context)            or \
-        event_match_servicegroups(rule, context)         or \
-        event_match_contacts(rule, context)              or \
-        event_match_contactgroups(rule, context)         or \
-        event_match_hosts(rule, context)                 or \
-        event_match_exclude_hosts(rule, context)         or \
-        event_match_services(rule, context)              or \
-        event_match_exclude_services(rule, context)      or \
-        event_match_plugin_output(rule, context)         or \
-        event_match_checktype(rule, context)             or \
-        event_match_timeperiod(rule)                     or \
+        event_match_folder(rule, context)                                 or \
+        event_match_hosttags(rule, context)                               or \
+        event_match_hostgroups(rule, context)                             or \
+        event_match_servicegroups(rule, context)                          or \
+        event_match_exclude_servicegroups(rule, context)                  or \
+        event_match_servicegroups(rule, context, is_regex = True)         or \
+        event_match_exclude_servicegroups(rule, context, is_regex = True) or \
+        event_match_contacts(rule, context)                               or \
+        event_match_contactgroups(rule, context)                          or \
+        event_match_hosts(rule, context)                                  or \
+        event_match_exclude_hosts(rule, context)                          or \
+        event_match_services(rule, context)                               or \
+        event_match_exclude_services(rule, context)                       or \
+        event_match_plugin_output(rule, context)                          or \
+        event_match_checktype(rule, context)                              or \
+        event_match_timeperiod(rule)                                      or \
         event_match_servicelevel(rule, context)
 
 
@@ -319,15 +335,23 @@ def event_match_hosttags(rule, context):
     required = rule.get("match_hosttags")
     if required:
         tags = context.get("HOSTTAGS", "").split()
-        if not hosttags_match_taglist(tags, required):
+        if not rulesets.hosttags_match_taglist(tags, required):
             return "The host's tags %s do not match the required tags %s" % (
                 "|".join(tags), "|".join(required))
 
 
-def event_match_servicegroups(rule, context):
+def event_match_servicegroups(rule, context, is_regex = False):
+    if is_regex:
+        match_type, required_groups = rule.get("match_servicegroups_regex", (None, None))
+    else:
+        required_groups = rule.get("match_servicegroups")
+
     if context["WHAT"] != "SERVICE":
-        return
-    required_groups = rule.get("match_servicegroups")
+        if required_groups:
+            return "This rule requires membership in a service group, but this is a host notification"
+        else:
+            return
+
     if required_groups != None:
         sgn = context.get("SERVICEGROUPNAMES")
         if sgn == None:
@@ -336,15 +360,61 @@ def event_match_servicegroups(rule, context):
         if sgn:
             servicegroups = sgn.split(",")
         else:
-            return "The service is in no group, but %s is required" % (
+            return "The service is in no service group, but %s%s is required" % ((is_regex and "regex " or ""),
                  " or ".join(required_groups))
 
         for group in required_groups:
-            if group in servicegroups:
+            if is_regex:
+                r = regex(group)
+                for sg in servicegroups:
+                    match_value = match_type == "match_alias" and define_servicegroups[sg] or sg
+                    if r.search(match_value):
+                        return
+            elif group in servicegroups:
                 return
 
-        return "The service is only in the groups %s, but %s is required" % (
-              sgn, " or ".join(required_groups))
+        if is_regex:
+            if match_type == "match_alias":
+                return "The service is only in the groups %s. None of these patterns match: %s" % (
+                      '"' + '", "'.join(map(lambda x: define_servicegroups[x], servicegroups)) + '"',
+                      '"' + '" or "'.join(required_groups)) + '"'
+            else:
+                return "The service is only in the groups %s. None of these patterns match: %s" % (
+                      '"' + '", "'.join(servicegroups) + '"', '"' + '" or "'.join(required_groups)) + '"'
+        else:
+            return "The service is only in the groups %s, but %s is required" % (
+                  sgn, " or ".join(required_groups))
+
+def event_match_exclude_servicegroups(rule, context, is_regex = False):
+    if is_regex:
+        match_type, excluded_groups = rule.get("match_exclude_servicegroups_regex", (None, None))
+    else:
+        excluded_groups = rule.get("match_exclude_servicegroups")
+
+    if context["WHAT"] != "SERVICE":
+        # excluded_groups do not apply to a host notification
+        return
+
+    if excluded_groups != None:
+        context_sgn = context.get("SERVICEGROUPNAMES")
+        if context_sgn == None:
+            # No actual groups means no possible negative match
+            return
+
+        servicegroups = context_sgn.split(",")
+
+        for group in excluded_groups:
+            if is_regex:
+                r = regex(group)
+                for sg in servicegroups:
+                    match_value         = match_type == "match_alias" and define_servicegroups[sg] or sg
+                    match_value_inverse = match_type == "match_alias" and sg or define_servicegroups[sg]
+
+                    if r.search(match_value):
+                        return "The service group \"%s\" (%s) is excluded per regex pattern: %s" %\
+                             (match_value, match_value_inverse, group)
+            elif group in servicegroups:
+                    return "The service group %s is excluded" % group
 
 def event_match_contacts(rule, context):
     if "match_contacts" in rule:
@@ -372,9 +442,9 @@ def event_match_contactgroups(rule, context):
 
     if required_groups != None:
         if cgn == None:
-            notify_log("Warning: No information about contact groups in the context. " \
-                       "Seams that you don't use the Check_MK Microcore. ")
-            return
+            return "No information about contact groups is in the context, but " \
+                   "must be in group %s" % (" or ".join(required_groups))
+
         if cgn:
             contactgroups = cgn.split(",")
         else:
@@ -429,8 +499,8 @@ def event_match_services(rule, context):
             return "The rule specifies a list of services, but this is a host notification."
         servicelist = rule["match_services"]
         service = context["SERVICEDESC"]
-        if not in_extraconf_servicelist(servicelist, service):
-            return "The service's description '%s' dows not match by the list of " \
+        if not rulesets.in_extraconf_servicelist(servicelist, service):
+            return "The service's description '%s' does not match by the list of " \
                    "allowed services (%s)" % (service, ", ".join(servicelist))
 
 
@@ -439,7 +509,7 @@ def event_match_exclude_services(rule, context):
         return
     excludelist = rule.get("match_exclude_services", [])
     service = context["SERVICEDESC"]
-    if in_extraconf_servicelist(excludelist, service):
+    if rulesets.in_extraconf_servicelist(excludelist, service):
         return "The service's description '%s' matches the list of excluded services" \
           % context["SERVICEDESC"]
 
@@ -498,3 +568,38 @@ def remove_context_from_environment(plugin_context, prefix):
     for key in plugin_context:
         os.unsetenv(prefix + key)
 
+
+# recursively turns a python object (with lists, dictionaries and pods) containing parameters
+#  into a flat contextlist for use as environment variables in plugins
+#
+# this: { "LVL1": [{"VALUE": 42}, {"VALUE": 13}] }
+# would be added as:
+#   PARAMETER_LVL1_1_VALUE = 42
+#   PARAMETER_LVL1_2_VALUE = 13
+def add_to_event_context(plugin_context, prefix, param):
+    if isinstance(param, list):
+        plugin_context[prefix + "S"] = " ".join(param)
+        for nr, value in enumerate(param):
+            add_to_event_context(plugin_context, "%s_%d" % (prefix, nr + 1), value)
+    elif isinstance(param, dict):
+        for key, value in param.items():
+            add_to_event_context(plugin_context, "%s_%s" % (prefix, key.upper()), value)
+    else:
+        plugin_context[prefix] = plugin_param_to_string(param)
+
+
+def plugin_param_to_string(value):
+    if type(value) in ( str, unicode ):
+        return value
+    elif type(value) in ( int, float ):
+        return str(value)
+    elif value == None:
+        return ""
+    elif value == True:
+        return "yes"
+    elif value == False:
+        return ""
+    elif type(value) in ( tuple, list ):
+        return "\t".join(value)
+    else:
+        return repr(value) # Should never happen

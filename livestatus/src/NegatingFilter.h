@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,20 +25,20 @@
 #ifndef NegatingFilter_h
 #define NegatingFilter_h
 
-#include "config.h"
+#include "config.h"  // IWYU pragma: keep
 #include "Filter.h"
 
-class NegatingFilter : public Filter
-{
+class NegatingFilter : public Filter {
     Filter *_filter;
+
 public:
-    NegatingFilter(Filter *filter) : _filter(filter) {}
-    ~NegatingFilter() { delete _filter; }
-    bool isNegatingFilter() { return true; }
+    explicit NegatingFilter(Filter *filter) : _filter(filter) {}
+    virtual ~NegatingFilter() { delete _filter; }
+    void accept(FilterVisitor &v) override { v.visit(*this); }
     Filter *subfilter() { return _filter; }
-    bool accepts(void *data) { return !_filter->accepts(data); }
+    bool accepts(void *row, contact *auth_user, int timezone_offset) override {
+        return !_filter->accepts(row, auth_user, timezone_offset);
+    }
 };
 
-
-#endif // NegatingFilter_h
-
+#endif  // NegatingFilter_h

@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -34,6 +34,9 @@
 # <<<lnx_distro:sep(124)>>>
 # /etc/redhat-release|Red Hat Enterprise Linux Server release 6.5 (Santiago)
 
+# <<<lnx_distro:sep(124)>>>
+# /etc/redhat-release|Oracle VM server release x.x.x
+
 # <<<lnx_distro:sep(124):persist(1399310551)>>>
 # /etc/SuSE-release|SUSE Linux Enterprise Server 11 (x86_64)|VERSION = 11|PATCHLEVEL = 2
 
@@ -42,36 +45,59 @@ def inv_lnx_distro(info):
     node = inv_tree("software.os.")
     for line in info:
         if line[0] == '/etc/lsb-release':
-             inv_lnx_parse_lsb_release(node, line[1:])
+            inv_lnx_parse_lsb_release(node, line[1:])
         elif line[0] == '/etc/debian_version':
             inv_lnx_parse_debian(node, line[1])
         elif line[0] == '/etc/redhat-release':
-            inv_lnx_parse_redhat_release(node, line[1])
+            if line[1].startswith("Oracle"):
+                inv_lnx_parse_oracle_vm_server_release(node, line[1])
+            else:
+                inv_lnx_parse_redhat_release(node, line[1])
         elif line[0] == '/etc/SuSE-release':
             inv_lnx_parse_suse_release(node, line[1:])
+        elif line[0] == '/usr/share/cma/version':
+            inv_lnx_parse_cma(node, line[1])
+
 
 def inv_lnx_parse_suse_release(node, line):
     node["type"] = "linux"
     node["vendor"] = "SuSE"
+
+    version = line[1].split()[-1]
+
     if len(line) == 3:
-        version = "%s.%s" % (line[1].split()[-1], line[2].split()[-1])
+        patchlevel = line[2].split()[-1]
     else:
-        version = "%s.0" % line[1].split()[-1]
-    node["version"] = version
-    if version == "11.2":
+        patchlevel = "0"
+
+    node["version"] = "%s.%s" % (version, patchlevel)
+    node["name"] = "%s.%s" % (line[0].split('(')[0].strip(), patchlevel)
+
+    if node["version"] == "11.2":
         node["code_name"] = "Emerald"
-    elif version == "11.3":
+    elif node["version"] == "11.3":
         node["code_name"] = "Teal"
-    elif version == "11.4":
+    elif node["version"] == "11.4":
         node["code_name"] = "Celadon"
-    elif version == "12.1":
+    elif node["version"] == "12.1":
         node["code_name"] = "Asparagus"
-    elif version == "12.2":
+    elif node["version"] == "12.2":
         node["code_name"] = "Mantis"
-    elif version == "12.3":
+    elif node["version"] == "12.3":
         node["code_name"] = "Darthmouth"
-    elif version == "13.1":
+    elif node["version"] == "13.1":
         node["code_name"] = "Bottle"
+
+
+# <<<lnx_distro:sep(124)>>>
+# /etc/redhat-release|Oracle VM server release x.x.x
+def inv_lnx_parse_oracle_vm_server_release(node, line):
+    node["type"] = "linux"
+    parts = line.split(" ")
+    node["vendor"] = parts.pop(0)
+    node["version"] = parts.pop(-1)
+    node["name"] = " ".join(parts[:-1])
+
 
 def inv_lnx_parse_redhat_release(node, line):
     node["type"] = "linux"
@@ -98,6 +124,7 @@ def inv_lnx_parse_lsb_release(node, lines):
             node["code_name"] = value.title()
         elif varname == "DISTRIB_DESCRIPTION":
             node["name"] = value
+
 
 def inv_lnx_parse_debian(node, line):
     node["type"] = "linux"
@@ -126,6 +153,14 @@ def inv_lnx_parse_debian(node, line):
         elif line.startswith("8."):
             node["code_name"] = "Jessie"
 
+
+def inv_lnx_parse_cma(node, line):
+    node["type"] = "linux"
+    node["name"] = "Check_MK Appliance " + line
+    node["vendor"] = "Mathias Kettner GmbH"
+    node["version"] = line
+    if "code_name" in node:
+        del node["code_name"]
 
 
 inv_info['lnx_distro'] = {

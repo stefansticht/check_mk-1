@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -38,9 +38,9 @@ loaded_with_language = False
 #   | Declare general permissions for Multisite                            |
 #   '----------------------------------------------------------------------'
 
-def load():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     config.declare_permission_section("general", _('General Permissions'), 10)
@@ -51,7 +51,7 @@ def load():
          [ "admin", "user", "guest" ])
 
     config.declare_permission("general.see_all",
-         _("See all Nagios objects"),
+         _("See all host and services"),
          _("See all objects regardless of contacts and contact groups. "
            "If combined with 'perform commands' then commands may be done on all objects."),
          [ "admin", "guest" ])
@@ -139,6 +139,29 @@ def load():
     config.declare_permission("general.ignore_hard_limit",
          _("Ignore hard query limit"),
          _("Allows to ignore the hard query limit imposed upon the number of datasets returned by a query"),
+         [ "admin" ])
+
+    config.declare_permission("general.acknowledge_werks",
+         _("Acknowledge Incompatible Werks"),
+         _("In the change log of the Check_MK software version the administrator can manage change log entries "
+           "(Werks) that requrire user interaction. These <i>incompatible Werks</i> can be acknowledged only "
+           "if the user has this permission."),
+         [ "admin" ])
+
+    config.declare_permission("general.see_failed_notifications_24h",
+         _("See failed Notifications (last 24 hours)"),
+         _("If check_mk is unable to notify users about problems, the site will warn about this situation "
+           "very visibly inside the UI (both in the Tactical Overview and the Dashboard). This affects only "
+           "users with this permission. Users with this permission will only see failed notifications "
+           "that occured within the last 24 hours."),
+         [ "user" ])
+
+    config.declare_permission("general.see_failed_notifications",
+         _("See failed Notifications (all)"),
+         _("If check_mk is unable to notify users about problems, the site will warn about this situation "
+           "very visibly inside the UI (both in the Tactical Overview and the Dashboard). This affects only "
+           "users with this permission. Users with this permission will also see failed notifications "
+           "older than 24 hours."),
          [ "admin" ])
 
     loaded_with_language = current_language

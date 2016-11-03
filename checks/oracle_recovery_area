@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -60,7 +60,7 @@ def check_oracle_recovery_area(item, params, info):
                 state = 0
 
             mb = 1024*1024
-            return state, "%s out of %s used (%.1f%%, levels at %s%%/%s%%), %s reclaimable" \
+            return state, "%s out of %s used (%.1f%%, warn/crit at %s%%/%s%%), %s reclaimable" \
                 % (get_bytes_human_readable(used_mb*mb), get_bytes_human_readable(size_mb*mb), \
                    perc_used, warn, crit, get_bytes_human_readable(reclaimable_mb*mb)), \
                    [('used', used_mb, warn_mb, crit_mb, 0, size_mb), ('reclaimable', reclaimable_mb)]

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,29 +25,46 @@
 #ifndef TableLog_h
 #define TableLog_h
 
-#include <map>
-#include <time.h>
-#include "config.h"
+#include "config.h"  // IWYU pragma: keep
+#include <ctime>
+#include <string>
 #include "Table.h"
-
+#include "nagios.h"  // IWYU pragma: keep
+class Column;
+#ifdef CMC
+#include <mutex>
+#include "Notes.h"
+class Core;
+#else
+class DowntimesOrComments;
+class Logger;
+#endif
 class Logfile;
+class LogCache;
+class Query;
 
-class TableLog : public Table
-{
-
+class TableLog : public Table {
 public:
-    TableLog();
-    ~TableLog();
-    const char *name() { return "log"; }
-    const char *prefixname() { return "logs"; }
-    bool isAuthorized(contact *ctc, void *data);
-    void handleNewMessage(Logfile *logfile, time_t since, time_t until, unsigned logclasses);
-    void addColumns(Table *, string prefix, int indirect_offset, bool add_host = true, bool add_service = true);
-    void answerQuery(Query *query);
-    Column *column(const char *colname); // override in order to handle current_
+#ifdef CMC
+    TableLog(LogCache *log_cache, const Downtimes &downtimes_holder,
+             const Comments &comments_holder, std::recursive_mutex &holder_lock,
+             Core *core);
+#else
+    TableLog(LogCache *log_cache, const DowntimesOrComments &downtimes_holder,
+             const DowntimesOrComments &comments_holder, Logger *logger);
+#endif
+    std::string name() const override;
+    std::string namePrefix() const override;
+    void answerQuery(Query *query) override;
+    bool isAuthorized(contact *ctc, void *data) override;
+    Column *column(std::string colname) override;
 
 private:
+#ifdef CMC
+    Core *_core;
+#endif
+    LogCache *_log_cache;
     bool answerQuery(Query *, Logfile *, time_t, time_t);
 };
 
-#endif // TableLog_h
+#endif  // TableLog_h

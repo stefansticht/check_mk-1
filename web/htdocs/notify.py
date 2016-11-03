@@ -19,23 +19,21 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import config, forms, time, lib, userdb
+import subprocess
 from valuespec import *
+import cmk.store as store
 
 def get_gui_messages(user_id = None):
     if user_id is None:
-        user_id = config.user_id
-    path = config.config_dir + "/" + user_id + '/messages.mk'
-
-    try:
-        messages = eval(file(path).read())
-    except IOError:
-        messages = [] # Initialize list of messages
+        user_id = config.user.id
+    path = config.config_dir + "/" + user_id.encode("utf-8") + '/messages.mk'
+    messages = store.load_data_from_file(path, [])
 
     # Delete too old messages
     updated = False
@@ -60,15 +58,15 @@ def delete_gui_message(msg_id):
 
 def save_gui_messages(messages, user_id = None):
     if user_id is None:
-        user_id = config.user_id
-    path = config.config_dir + "/" + user_id + '/messages.mk'
+        user_id = config.user.id
+    path = config.config_dir + "/" + user_id.encode("utf-8") + '/messages.mk'
     make_nagios_directory(os.path.dirname(path))
-    file(path, 'w').write(repr(messages) + "\n")
+    store.save_data_to_file(path, messages)
 
 loaded_with_language = False
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     global notify_methods
@@ -84,6 +82,10 @@ def load_plugins():
         'mail': {
             'title':  _('Send an E-Mail'),
             'handler': notify_mail,
+        },
+        'dashlet': {
+            'title':  _('Send hint to dashlet'),
+            'handler': notify_gui_msg,
         },
     }
 
@@ -139,7 +141,7 @@ def load_plugins():
 
 
 def page_notify():
-    if not config.may("general.notify"):
+    if not config.user.may("general.notify"):
         raise MKAuthException(_("You are not allowed to use the notification module."))
 
     html.header(_('Notify Users'), stylesheets = ['pages', 'status', 'views'])
@@ -256,7 +258,6 @@ def notify_gui_msg(user_id, msg):
 
 
 def notify_mail(user_id, msg):
-    import subprocess, time
     users = userdb.load_users(lock = False)
     user = users.get(user_id)
 
@@ -270,7 +271,7 @@ def notify_mail(user_id, msg):
     if not recipient_name:
         recipient_name = user_id
 
-    sender_name = users[config.user_id].get('alias')
+    sender_name = users[config.user.id].get('alias')
     if not sender_name:
         sender_name = user_id
 
@@ -293,8 +294,9 @@ def notify_mail(user_id, msg):
         )
 
     # FIXME: Maybe use the configured mail command for Check_MK-Notify one day
-    command = u"mail -s '$SUBJECT$' '$CONTACTEMAIL$'"
-    command_utf8 = command.replace('$SUBJECT$', subject).replace('$CONTACTEMAIL$', user['email']).encode("utf-8")
+    # TODO: mail does not accept umlauts: "contains invalid character '\303'" in mail
+    #       addresses. handle this correctly.
+    command = ["mail", "-s", subject.encode("utf-8"), user['email'].encode("utf-8")]
 
     # Make sure that mail(x) is using UTF-8. Otherwise we cannot send notifications
     # with non-ASCII characters. Unfortunately we do not know whether C.UTF-8 is
@@ -312,11 +314,18 @@ def notify_mail(user_id, msg):
     else:
         raise MKInternalError(_('No UTF-8 encoding found in your locale -a! Please provide C.UTF-8 encoding.'))
 
-    p = subprocess.Popen(command_utf8, shell=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-    stdout_txt, stderr_txt = p.communicate(body.encode("utf-8"))
+    try:
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, stdin=subprocess.PIPE,
+                         close_fds=True)
+    except OSError, e:
+        raise MKInternalError(_('Mail could not be delivered. '
+                                'Failed to execute command "%s": %s') % (" ".join(command), e))
+
+    output = p.communicate(body.encode("utf-8"))[0]
     exitcode = p.returncode
     if exitcode != 0:
-        raise MKInternalError(_('Mail could not be delivered. Exit code of command is %r') % exitcode)
+        raise MKInternalError(_('Mail could not be delivered. Exit code of command is %r. '
+                                'Output is: %s') % (exitcode, output))
     else:
         return True

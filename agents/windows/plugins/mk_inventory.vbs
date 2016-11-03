@@ -10,7 +10,9 @@ exePaths = Array("")
 regPaths = Array("Software\Microsoft\Windows\CurrentVersion\Uninstall","Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall")
 
 Set fso = CreateObject("Scripting.FileSystemObject")
-Set objStdout = WScript.Stdout
+' request unicode stdout and add a bom so the agent knows we send utf-16
+Set objStdout = fso.GetStandardStream(1, True)
+objStdout.Write(chrW(&HFEFF))
 Set objClass = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
 Set wshShell = WScript.CreateObject( "WScript.Shell" )
 remote_host = wshShell.ExpandEnvironmentStrings( "%REMOTE_HOST%" )
@@ -31,22 +33,34 @@ Sub outPut(strOut)
     objStdout.WriteLine strOut
 End Sub
 
-timestamp = state_dir & "\mk_inventory." & remote_host
+timestamp = state_dir & "\mk_inventory." & Replace(remote_host, ":", "_")
 
 ' does timestamp exist?
 If (fso.FileExists(timestamp)) Then
     Set objTimestamp = fso.GetFile(timestamp)
     fileDate = objTimestamp.DateLastModified
-    earlier = Now - delay
-    ' exit if timestamp to young
-    If filedate > earlier Then
+    ' exit if timestamp is too young
+    If DateAdd("s", delay, filedate) >= Now Then
         WScript.Quit
     End If
 End If
 
+
+' handle error message ourselves so this script can also be run directly, for testing
+On Error Resume Next
+
+
 ' create new timestamp file
 ' only allowed when script runs as administrator user
 Set stampo = fso.CreateTextFile(timestamp)
+
+If Err.Number <> 0 Then
+    outPut "Failed to create time stamp: " & Err.Description & " (" & Err.Number & ")" 
+    Err.Clear
+End If
+
+On Error Goto 0
+
 
 ' determine the timezone offset w/t GMT
 Set systemParams = objClass.ExecQuery("Select * from Win32_ComputerSystem")
@@ -118,6 +132,22 @@ Sub RecurseForExecs(strFolderPath)
     Next
 End Sub
 
+Sub SoftwareFromInstaller(fields)
+    Dim installer
+    Set installer = CreateObject("WindowsInstaller.Installer")
+    Dim productCode, productName
+    For Each productCode In installer.Products
+        values = fields  ' copy
+        idx = 0
+
+        For Each field In fields
+            values(idx) = installer.ProductInfo(productCode, field)
+            idx = idx + 1
+        Next
+        outPut(Join(values, "|"))
+    Next
+End Sub
+
 ' Processor
 Call startSection("win_cpuinfo",58,timeUntil)
 cpuVars = Array( "Name","Manufacturer","Caption","DeviceID","MaxClockSpeed","AddressWidth","L2CacheSize","L3CacheSize","Architecture","NumberOfCores","NumberOfLogicalProcessors","CurrentVoltage","Status" )
@@ -144,17 +174,17 @@ Call getWMIObject("Win32_SystemEnclosure",systemVars)
 ' Hard-Disk
 Call startSection("win_disks",58,timeUntil)
 diskVars = Array( "Manufacturer","InterfaceType","Model","Name","SerialNumber","Size","MediaType","Signature" )
-Call getWMIObject("Win32_diskDrive",systemVars)
+Call getWMIObject("Win32_diskDrive",diskVars)
 
 ' Graphics Adapter
 Call startSection("win_video",58,timeUntil)
 adapterVars = Array( "Name", "Description", "Caption", "AdapterCompatibility", "VideoModeDescription", "VideoProcessor", "DriverVersion", "DriverDate", "MaxMemorySupported")
-Call getWMIObject("Win32_VideoController",systemVars)
+Call getWMIObject("Win32_VideoController",adapterVars)
 
 ' Installed Software
 Call startSection("win_wmi_software",124,timeUntil)
-swVars = Array( "Name", "Vendor", "Version", "InstallDate", "Language")
-Call getWMIObject2("Win32_Product",swVars)
+swVars = Array( "ProductName", "Publisher", "VersionString", "InstallDate", "Language")
+Call SoftwareFromInstaller(swVars)
 
 ' Search Registry
 Call startSection("win_reg_uninstall",124,timeUntil)

@@ -17,105 +17,170 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
-#include <time.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <unistd.h>
-#include <stddef.h>
-
-#include "nagios.h"
-#include "logger.h"
 #include "TableLog.h"
+#include <cstdint>
+#include <ctime>
+#include <map>
+#include <mutex>
+#include <string>
+#include <utility>
+#include "LogCache.h"
 #include "LogEntry.h"
-#include "OffsetIntColumn.h"
-#include "OffsetTimeColumn.h"
-#include "OffsetStringColumn.h"
-#include "Query.h"
 #include "Logfile.h"
-#include "tables.h"
-#include "TableServices.h"
-#include "TableHosts.h"
+#include "OffsetIntColumn.h"
+#include "OffsetStringColumn.h"
+#include "OffsetTimeColumn.h"
+#include "Query.h"
 #include "TableCommands.h"
 #include "TableContacts.h"
-#include "auth.h"
-#include "Store.h"
+#include "TableHosts.h"
+#include "TableServices.h"
 
+#ifdef CMC
+#include "Core.h"
+#else
+#include "auth.h"
+#endif
+
+using std::lock_guard;
+using std::mutex;
+using std::string;
 
 #define CHECK_MEM_CYCLE 1000 /* Check memory every N'th new message */
 
-// watch nagios' logfile rotation
-extern Store *g_store;
-
-TableLog::TableLog()
-{
-    addColumns(this, "", -1);
-}
-
-void TableLog::addColumns(Table *table, string prefix, int indirect_offset, bool add_host, bool add_services)
-{
-    LogEntry *ref = 0;
-    table->addColumn(new OffsetTimeColumn(prefix + "time",
-            "Time of the log event (UNIX timestamp)", (char *)&(ref->_time) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetIntColumn(prefix + "lineno",
-            "The number of the line in the log file", (char *)&(ref->_lineno) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetIntColumn(prefix + "class",
-            "The class of the message as integer (0:info, 1:state, 2:program, 3:notification, 4:passive, 5:command)", (char *)&(ref->_logclass) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "message",
-            "The complete message line including the timestamp", (char *)&(ref->_complete) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "type",
-            "The type of the message (text before the colon), the message itself for info messages", (char *)&(ref->_text) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "options",
-            "The part of the message after the ':'", (char *)&(ref->_options) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "comment",
-            "A comment field used in various message types", (char *)&(ref->_comment) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "plugin_output",
-            "The output of the check, if any is associated with the message", (char *)&(ref->_check_output) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetIntColumn(prefix + "state",
-            "The state of the host or service in question", (char *)&(ref->_state) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "state_type",
-            "The type of the state (varies on different log classes)", (char *)&(ref->_state_type) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetIntColumn(prefix + "attempt",
-            "The number of the check attempt", (char *)&(ref->_attempt) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "service_description",
-            "The description of the service log entry is about (might be empty)",
-            (char *)&(ref->_svc_desc) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "host_name",
-            "The name of the host the log entry is about (might be empty)",
-            (char *)&(ref->_host_name) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "contact_name",
-            "The name of the contact the log entry is about (might be empty)",
-            (char *)&(ref->_contact_name) - (char *)ref, indirect_offset));
-    table->addColumn(new OffsetStringColumn(prefix + "command_name",
-            "The name of the command of the log entry (e.g. for notifications)",
-            (char *)&(ref->_command_name) - (char *)ref, indirect_offset));
-
+TableLog::TableLog(LogCache *log_cache,
+#ifdef CMC
+                   const Downtimes &downtimes_holder,
+                   const Comments &comments_holder,
+                   std::recursive_mutex &holder_lock, Core *core
+#else
+                   const DowntimesOrComments &downtimes_holder,
+                   const DowntimesOrComments &comments_holder, Logger *logger
+#endif
+                   )
+#ifdef CMC
+    : Table(core->_logger_livestatus)
+    , _core(core)
+#else
+    : Table(logger)
+#endif
+    , _log_cache(log_cache) {
+    LogEntry *ref = nullptr;
+    addColumn(new OffsetTimeColumn("time",
+                                   "Time of the log event (UNIX timestamp)",
+                                   reinterpret_cast<char *>(&(ref->_time)) -
+                                       reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetIntColumn("lineno",
+                                  "The number of the line in the log file",
+                                  reinterpret_cast<char *>(&(ref->_lineno)) -
+                                      reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetIntColumn(
+        "class",
+        "The class of the message as integer (0:info, 1:state, 2:program, "
+        "3:notification, 4:passive, 5:command)",
+        reinterpret_cast<char *>(&(ref->_logclass)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "message", "The complete message line including the timestamp",
+        reinterpret_cast<char *>(&(ref->_complete)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "type",
+        "The type of the message (text before the colon), the message itself "
+        "for info messages",
+        reinterpret_cast<char *>(&(ref->_text)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "options", "The part of the message after the ':'",
+        reinterpret_cast<char *>(&(ref->_options)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "comment", "A comment field used in various message types",
+        reinterpret_cast<char *>(&(ref->_comment)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "plugin_output",
+        "The output of the check, if any is associated with the message",
+        reinterpret_cast<char *>(&(ref->_check_output)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetIntColumn(
+        "state", "The state of the host or service in question",
+        reinterpret_cast<char *>(&(ref->_state)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "state_type", "The type of the state (varies on different log classes)",
+        reinterpret_cast<char *>(&(ref->_state_type)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetIntColumn("attempt", "The number of the check attempt",
+                                  reinterpret_cast<char *>(&(ref->_attempt)) -
+                                      reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "service_description",
+        "The description of the service log entry is about (might be empty)",
+        reinterpret_cast<char *>(&(ref->_svc_desc)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "host_name",
+        "The name of the host the log entry is about (might be empty)",
+        reinterpret_cast<char *>(&(ref->_host_name)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "contact_name",
+        "The name of the contact the log entry is about (might be empty)",
+        reinterpret_cast<char *>(&(ref->_contact_name)) -
+            reinterpret_cast<char *>(ref)));
+    addColumn(new OffsetStringColumn(
+        "command_name",
+        "The name of the command of the log entry (e.g. for notifications)",
+        reinterpret_cast<char *>(&(ref->_command_name)) -
+            reinterpret_cast<char *>(ref)));
 
     // join host and service tables
-    if (add_host)
-        g_table_hosts->addColumns(table, "current_host_",    (char *)&(ref->_host)    - (char *)ref);
-    if (add_services)
-        g_table_services->addColumns(table, "current_service_", (char *)&(ref->_service) - (char *)ref, false /* no hosts table */);
-    g_table_contacts->addColumns(table, "current_contact_", (char *)&(ref->_contact) - (char *)ref);
-    g_table_commands->addColumns(table, "current_command_", (char *)&(ref->_command) - (char *)ref);
+    TableHosts::addColumns(
+        this, "current_host_",
+        reinterpret_cast<char *>(&(ref->_host)) - reinterpret_cast<char *>(ref),
+        -1, downtimes_holder, comments_holder
+#ifdef CMC
+        ,
+        holder_lock, core
+#endif
+        );
+    TableServices::addColumns(
+        this, "current_service_", reinterpret_cast<char *>(&(ref->_service)) -
+                                      reinterpret_cast<char *>(ref),
+        false /* no hosts table */, downtimes_holder, comments_holder
+#ifdef CMC
+        ,
+        holder_lock, core
+#endif
+        );
+    TableContacts::addColumns(this, "current_contact_",
+                              reinterpret_cast<char *>(&(ref->_contact)) -
+                                  reinterpret_cast<char *>(ref));
+    TableCommands::addColumns(this, "current_command_",
+                              reinterpret_cast<char *>(&(ref->_command)) -
+                                  reinterpret_cast<char *>(ref));
 }
 
-TableLog::~TableLog()
-{
-}
+string TableLog::name() const { return "log"; }
 
+string TableLog::namePrefix() const { return "log_"; }
 
-void TableLog::answerQuery(Query *query)
-{
-    g_store->logCache()->lockLogCache();
-    g_store->logCache()->logCachePreChecks();
+void TableLog::answerQuery(Query *query) {
+    lock_guard<mutex> lg(_log_cache->_lock);
+    _log_cache->logCachePreChecks(
+#ifdef CMC
+        _core
+#endif
+        );
 
     int since = 0;
-    int until = time(0) + 1;
+    int until = time(nullptr) + 1;
     // Optimize time interval for the query. In log querys
     // there should always be a time range in form of one
     // or two filter expressions over time. We use that
@@ -128,7 +193,6 @@ void TableLog::answerQuery(Query *query)
     uint32_t classmask = LOGCLASS_ALL;
     query->optimizeBitmask("class", &classmask);
     if (classmask == 0) {
-        g_store->logCache()->unlockLogCache();
         return;
     }
 
@@ -138,61 +202,60 @@ void TableLog::answerQuery(Query *query)
 
     /* NEW CODE - NEWEST FIRST */
     _logfiles_t::iterator it;
-    it = g_store->logCache()->logfiles()->end(); // it now points beyond last log file
-    --it; // switch to last logfile (we have at least one)
+    it = _log_cache->logfiles()->end();  // it now points beyond last log file
+    --it;  // switch to last logfile (we have at least one)
 
     // Now find newest log where 'until' is contained. The problem
     // here: For each logfile we only know the time of the *first* entry,
     // not that of the last.
-    while (it != g_store->logCache()->logfiles()->begin() && it->first > until) // while logfiles are too new...
-        --it; // go back in history
-    if (it->first > until) { // all logfiles are too new
-        g_store->logCache()->unlockLogCache();
-        return;
+    while (it != _log_cache->logfiles()->begin() &&
+           it->first > until) {  // while logfiles are too new...
+        --it;                    // go back in history
+    }
+    if (it->first > until) {
+        return;  // all logfiles are too new
     }
 
     while (true) {
         Logfile *log = it->second;
-        if (!log->answerQueryReverse(query, g_store->logCache(), since, until, classmask))
-            break; // end of time range found
-        if (it == g_store->logCache()->logfiles()->begin())
-            break; // this was the oldest one
+        if (!log->answerQueryReverse(query, _log_cache, since, until,
+                                     classmask)) {
+            break;  // end of time range found
+        }
+        if (it == _log_cache->logfiles()->begin()) {
+            break;  // this was the oldest one
+        }
         --it;
     }
-    g_store->logCache()->unlockLogCache();
 }
 
-
-bool TableLog::isAuthorized(contact *ctc, void *data)
-{
-    LogEntry *entry = (LogEntry *)data;
+bool TableLog::isAuthorized(contact *ctc, void *data) {
+    LogEntry *entry = static_cast<LogEntry *>(data);
     service *svc = entry->_service;
     host *hst = entry->_host;
 
-    if (hst || svc)
+    if ((hst != nullptr) || (svc != nullptr)) {
         return is_authorized_for(ctc, hst, svc);
-    // suppress entries for messages that belong to
-    // hosts that do not exist anymore.
-    else if (entry->_logclass == LOGCLASS_ALERT
-            || entry->_logclass == LOGCLASS_NOTIFICATION
-            || entry->_logclass == LOGCLASS_PASSIVECHECK
-            || entry->_logclass == LOGCLASS_STATE)
-        return false;
-    else
-        return true;
+        // suppress entries for messages that belong to hosts that do not exist
+        // anymore.
+    }
+    return !(entry->_logclass == LOGCLASS_ALERT ||
+             entry->_logclass == LOGCLASS_NOTIFICATION ||
+             entry->_logclass == LOGCLASS_PASSIVECHECK ||
+             entry->_logclass == LOGCLASS_ALERT_HANDLERS ||
+             entry->_logclass == LOGCLASS_STATE);
 }
 
-Column *TableLog::column(const char *colname)
-{
+Column *TableLog::column(string colname) {
     // First try to find column in the usual way
-    Column *col = Table::column(colname);
-    if (col) return col;
+    if (Column *col = Table::column(colname)) {
+        return col;
+    }
 
     // Now try with prefix "current_", since our joined
     // tables have this prefix in order to make clear that
     // we access current and not historic data and in order
     // to prevent mixing up historic and current fields with
     // the same name.
-    string with_current = string("current_") + colname;
-    return Table::column(with_current.c_str());
+    return Table::column(string("current_") + colname);
 }

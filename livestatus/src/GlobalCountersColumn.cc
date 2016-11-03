@@ -17,21 +17,21 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
 
 #include "GlobalCountersColumn.h"
-#include "Query.h"
+#include <cstdint>
+#include "Renderer.h"
+#include "global_counters.h"
 
-void GlobalCountersColumn::output(void *, Query *query)
-{
-    if (_do_average)
-        query->outputDouble(g_counter_rate[_counter_index]);
-    else
-        query->outputCounter(g_counters[_counter_index]);
+void GlobalCountersColumn::output(void * /* row */, RowRenderer &r,
+                                  contact * /* auth_user */) {
+    if (_do_average) {
+        r.output(g_counter_rate[_counter_index]);
+    } else {
+        r.output(g_counters[_counter_index]);
+    }
 }
-
-
-

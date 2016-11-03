@@ -1,0 +1,10 @@
+Title: Improved error handling when trying to edit not existing rules/rule packs
+Level: 1
+Component: ec
+Class: fix
+Compatible: compat
+State: unknown
+Version: 1.4.0i1
+Date: 1459257862
+
+

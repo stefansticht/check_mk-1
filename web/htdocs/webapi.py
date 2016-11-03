@@ -19,21 +19,16 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 from lib import *
-from wato import API
 import config
 
-# Python 2.3 does not have 'set' in normal namespace.
-# But it can be imported from 'sets'
-try:
-    set()
-except NameError:
-    from sets import Set as set
+from watolib import *
+from valuespec import *
 
 try:
     import simplejson as json
@@ -43,9 +38,9 @@ except ImportError:
 api_actions = {}
 loaded_with_language = False
 
-def load_plugins():
+def load_plugins(force):
     global loaded_with_language
-    if loaded_with_language == current_language:
+    if loaded_with_language == current_language and not force:
         return
 
     load_web_plugins("webapi", globals())
@@ -61,50 +56,54 @@ def load_plugins():
                                                     "for automation users."),
                               config.builtin_role_ids)
 
-g_api = None
 
 def page_api():
-    global g_api
-
     try:
-        if not config.user.get("automation_secret"):
+        # The API uses JSON format by default and python as optional alternative
+        output_format = html.var("output_format", "json")
+        if output_format not in [ "json", "python" ]:
+            raise MKUserError(None, "Only \"json\" and \"python\" are supported as output formats")
+        else:
+            html.set_output_format(output_format)
+
+        if not config.user.get_attribute("automation_secret"):
             raise MKAuthException("The WATO API is only available for automation users")
 
-        config.need_permission("wato.use")
-        config.need_permission("wato.api_allowed")
+        config.user.need_permission("wato.use")
+        config.user.need_permission("wato.api_allowed")
 
         action = html.var('action')
         if action not in api_actions:
             raise MKUserError(None, "Unknown API action %s" % html.attrencode(action))
 
-        # Create API instance
-        g_api = API()
+        # Initialize host and site attributes
+        init_watolib_datastructures()
 
         # Prepare request_object
         # Most of the time the request is given as json
         # However, the plugin may have an own mechanism to interpret the request
         request_object = {}
-        if html.var("request"):
-            if api_actions[action].get("dont_eval_request"):
+        if api_actions[action].get("dont_eval_request"):
+            if html.var("request"):
                 request_object = html.var("request")
-            else:
-                request = html.var("request")
-                request_object = json.loads(request)
         else:
-            request_object = {}
+            request_object = html.get_request(exclude_vars=["action"])
 
         if api_actions[action].get("locking", True):
-            g_api.lock_wato()
-
+            lock_exclusive() # unlock is done automatically
 
         action_response = api_actions[action]["handler"](request_object)
         response = { "result_code": 0, "result": action_response }
-    except Exception, e:
-        response = { "result_code": 1, "result": str(e) }
 
-    output_format = html.var("output_format", "json")
-    if output_format == "json":
+    except MKException, e:
+        response = { "result_code": 1, "result": "%s" % e }
+
+    except Exception, e:
+        if config.debug:
+            raise
+        response = { "result_code": 1, "result": "%s" % e }
+
+    if html.output_format == "json":
         html.write(json.dumps(response))
     else:
         html.write(repr(response))
-

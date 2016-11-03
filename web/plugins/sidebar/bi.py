@@ -19,26 +19,19 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 import bi
 
-# Python 2.3 does not have 'set' in normal namespace.
-# But it can be imported from 'sets'
-try:
-    set()
-except NameError:
-    from sets import Set as set
-
 def render_bi_groups():
-    html.write("<ul>")
+    html.open_ul()
     for group in bi.aggregation_groups():
         bulletlink(group, "view.py?view_name=aggr_group&aggr_group=%s" %
               html.urlencode(group))
-    html.write("</ul>")
+    html.close_ul()
 
 sidebar_snapins["biaggr_groups"] = {
     "title"       : _("BI Aggregation Groups"),

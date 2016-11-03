@@ -17,45 +17,150 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
 
 bin_PROGRAMS = unixcat
-unixcat_SOURCES = unixcat.c
+
+unixcat_SOURCES = unixcat.cc
 unixcat_LDADD = -lpthread
+unixcat_LDFLAGS = -static-libstdc++
 
 pkglib_LIBRARIES = livestatus.so
 
 livestatus_so_SOURCES = \
-	AndingFilter.cc ClientQueue.cc Column.cc ColumnsColumn.cc CustomVarsExplicitColumn.cc \
-	ContactsColumn.cc CustomVarsColumn.cc CustomVarsFilter.cc DoubleColumn.cc \
-	DoubleColumnFilter.cc DowntimeOrComment.cc DownCommColumn.cc EmptyColumn.cc NullColumn.cc \
-	Filter.cc GlobalCountersColumn.cc HostContactsColumn.cc HostgroupsColumn.cc \
-	HostlistColumn.cc HostlistColumnFilter.cc HostlistStateColumn.cc MetricsColumn.cc \
-	HostSpecialIntColumn.cc ServiceSpecialIntColumn.cc InputBuffer.cc IntColumn.cc IntColumnFilter.cc \
-	ListColumn.cc ListColumnFilter.cc OffsetDoubleColumn.cc OffsetIntColumn.cc \
-	OffsetStringColumn.cc OffsetTimeperiodColumn.cc OringFilter.cc OutputBuffer.cc \
-	OffsetTimeColumn.cc TimePointerColumn.cc TimeColumnFilter.cc PerfdataAggregator.cc \
-	Query.cc ServiceContactsColumn.cc ServicegroupsColumn.cc ServicelistColumn.cc \
-	ServicelistColumnFilter.cc ServicelistStateColumn.cc store_c.cc Store.cc \
-	StringColumn.cc StringColumnFilter.cc strutil.cc Table.cc TableColumns.cc StatusSpecialIntColumn.cc \
-	HostSpecialDoubleColumn.cc TableCommands.cc TableContacts.cc TableDownComm.cc TableHostgroups.cc \
-	ServiceSpecialDoubleColumn.cc TableHosts.cc TableServicegroups.cc TableServices.cc TableStatus.cc  \
-	LogEntry.cc LogCache.cc Logfile.cc TableStateHistory.cc TableLog.cc TableTimeperiods.cc TableContactgroups.cc \
-	ContactgroupsMemberColumn.cc OffsetStringMacroColumn.cc OffsetStringServiceMacroColumn.cc \
-	OffsetStringHostMacroColumn.cc StatsColumn.cc IntAggregator.cc CountAggregator.cc \
-	DoubleAggregator.cc AttributelistColumn.cc AttributelistFilter.cc BlobColumn.cc HostFileColumn.cc \
-	global_counters.c  module.c  logger.c waittriggers.c TimeperiodsCache.cc pnp4nagios.cc mk_inventory.cc \
-	ContactgroupsColumn.cc CustomTimeperiodColumn.cc HostServiceState.cc opids.cc auth.cc
+        AndingFilter.cc \
+        AttributelistColumn.cc \
+        AttributelistFilter.cc \
+        BlobColumn.cc \
+        ClientQueue.cc \
+        Column.cc \
+        ColumnsColumn.cc \
+        CommandsHolderNagios.cc \
+        ContactgroupsColumn.cc \
+        ContactgroupsMemberColumn.cc \
+        ContactsColumn.cc \
+        CountAggregator.cc \
+        CustomTimeperiodColumn.cc \
+        CustomVarsColumn.cc \
+        CustomVarsDictColumn.cc \
+        CustomVarsExplicitColumn.cc \
+        CustomVarsFilter.cc \
+        CustomVarsNamesColumn.cc \
+        CustomVarsValuesColumn.cc \
+        DoubleAggregator.cc \
+        DoubleColumn.cc \
+        DoubleFilter.cc \
+        DownCommColumn.cc \
+        DowntimeOrComment.cc \
+        DowntimesOrComments.cc \
+        DynamicColumn.cc \
+        DynamicEventConsoleReplicationColumn.cc \
+        DynamicLogwatchFileColumn.cc \
+        EmptyColumn.cc \
+        EventConsoleConnection.cc \
+        Filter.cc \
+        GlobalCountersColumn.cc \
+        HostContactsColumn.cc \
+        HostFileColumn.cc \
+        HostServiceState.cc \
+        HostSpecialDoubleColumn.cc \
+        HostSpecialIntColumn.cc \
+        HostgroupsColumn.cc \
+        HostlistColumn.cc \
+        HostlistFilter.cc \
+        HostlistStateColumn.cc \
+        InputBuffer.cc \
+        IntAggregator.cc \
+        IntColumn.cc \
+        IntFilter.cc \
+        ListColumn.cc \
+        ListFilter.cc \
+        LogCache.cc \
+        LogEntry.cc \
+        Logfile.cc \
+        Logger.cc \
+        LogwatchListColumn.cc \
+        MetricsColumn.cc \
+        NullColumn.cc \
+        OffsetDoubleColumn.cc \
+        OffsetIntColumn.cc \
+        OffsetSStringColumn.cc \
+        OffsetStringColumn.cc \
+        OffsetStringHostMacroColumn.cc \
+        OffsetStringMacroColumn.cc \
+        OffsetStringServiceMacroColumn.cc \
+        OffsetTimeColumn.cc \
+        OffsetTimeperiodColumn.cc \
+        OringFilter.cc \
+        OutputBuffer.cc \
+        PerfdataAggregator.cc \
+        Query.cc \
+        Renderer.cc \
+        RendererBrokenCSV.cc \
+        RendererCSV.cc \
+        RendererJSON.cc \
+        RendererPython.cc \
+        RendererPython3.cc \
+        ServiceContactsColumn.cc \
+        ServiceSpecialDoubleColumn.cc \
+        ServiceSpecialIntColumn.cc \
+        ServicegroupsColumn.cc \
+        ServicelistColumn.cc \
+        ServicelistFilter.cc \
+        ServicelistStateColumn.cc \
+        StatsColumn.cc \
+        StatusSpecialIntColumn.cc \
+        Store.cc \
+        StringColumn.cc \
+        StringFilter.cc \
+        StringUtils.cc \
+        Table.cc \
+        TableColumns.cc \
+        TableCommands.cc \
+        TableComments.cc \
+        TableContactgroups.cc \
+        TableContacts.cc \
+        TableDowntimes.cc \
+        TableEventConsole.cc \
+        TableEventConsoleEvents.cc \
+        TableEventConsoleHistory.cc \
+        TableEventConsoleReplication.cc \
+        TableEventConsoleStatus.cc \
+        TableHostgroups.cc \
+        TableHosts.cc \
+        TableHostsByGroup.cc \
+        TableLog.cc \
+        TableServicegroups.cc \
+        TableServices.cc \
+        TableServicesByGroup.cc \
+        TableServicesByHostGroup.cc \
+        TableStateHistory.cc \
+        TableStatus.cc \
+        TableTimeperiods.cc \
+        TimeFilter.cc \
+        TimePointerColumn.cc \
+        TimeperiodsCache.cc \
+        VariadicFilter.cc \
+        WorldNagios.cc \
+        auth.cc \
+        global_counters.cc \
+        mk_inventory.cc \
+        mk_logwatch.cc \
+        module.cc \
+        opids.cc \
+        pnp4nagios.cc \
+        strutil.cc \
+        waittriggers.cc
 
-livestatus_so_CXXFLAGS = -I$(top_srcdir)/$(nagios_headers) -fPIC
-livestatus_so_CFLAGS   = $(livestatus_so_CXXFLAGS)
+livestatus_so_CXXFLAGS = -fPIC
+livestatus_so_CFLAGS   = -fPIC
 
 livestatus.o: $(livestatus_so_OBJECTS) $(livestatus_so_DEPENDENCIES)
 	-rm -f plugin.so
-	$(CXX) $(LDFLAGS) -s -fPIC -shared $(livestatus_so_OBJECTS) -o $@ -lpthread -lstdc++
+	$(CXX) $(LDFLAGS) -s -fPIC -shared $(livestatus_so_OBJECTS) -o $@ -lpthread -static-libstdc++
 
 all-local: livestatus.o
 

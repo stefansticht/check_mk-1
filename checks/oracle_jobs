@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -107,12 +107,16 @@ def check_oracle_jobs(item, params, info):
         raise MKCounterWrapped("Login not possible for check %s" % item)
 
     if not service_found:
-        return (2, 'Job is missing')
+        state = 2
+        infotext = "Job is missing"
+        if "status_missing_jobs" in params:
+            state = params["status_missing_jobs"]
+            infotext += " (configured through WATO)"
+        return state, infotext
 
     state = 0
     output = []
     perfdata = []
-
 
     txt = "Job-State: %s" % job_state
     if job_state == "BROKEN":
@@ -139,7 +143,7 @@ def check_oracle_jobs(item, params, info):
     if "run_duration" in params:
         warn, crit = params["run_duration"]
 
-        output.append(" levels at (%ds/%ds)" % (warn, crit))
+        output.append(" (warn/crit at %ds/%ds)" % (warn, crit))
 
         if last_duration >= crit:
             output.append("(!!)")

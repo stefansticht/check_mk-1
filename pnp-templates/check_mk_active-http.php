@@ -18,7 +18,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -50,5 +50,27 @@ $def[2] .= ""
  . "GPRINT:size:MAX:\"%3.0lf Bytes MAX \" "
  . "GPRINT:size:AVERAGE:\"%3.0lf Bytes AVERAGE \" "
 ;
+
+for ( $idx = 3; $idx < count ( $RRDFILE ); $idx++ ) {
+  preg_match ( "/(?<=_time_)[a-z]*(?=.rrd)/", $RRDFILE[$idx], $matches );
+  if ( strtolower ( $matches[0] ) == "ssl" ) {
+    $ds_name = strtoupper ( $matches[0] ) . " Time";
+  }
+  else {
+    $ds_name = ucwords ( $matches[0] ) . " Time";
+  }
+
+  $opt[$idx] = "-X0 --vertical-label \"" . $ds_name . " (ms)\"  --title \"" . $ds_name . " (ms)\" ";
+  $def[$idx] = ""
+   . "DEF:var1=" . $RRDFILE[$idx] . ":" . $DS[$idx] . ":MAX "
+   . "CDEF:ms=var1,1000,* "
+   . "AREA:ms#66ccff:\"" . $ds_name . " \" "
+   . "LINE1:ms#000000:\"\" "
+   . "GPRINT:ms:LAST:\"%3.3lg ms LAST \" "
+   . "GPRINT:ms:MAX:\"%3.3lg ms MAX \" "
+   . "GPRINT:ms:AVERAGE:\"%3.3lg ms AVERAGE \" "
+  ;
+}
+
 
 ?>

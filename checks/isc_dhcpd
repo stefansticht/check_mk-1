@@ -19,7 +19,7 @@
 # in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 # out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 # PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-# ails.  You should have  received  a copy of the  GNU  General Public
+# tails. You should have  received  a copy of the  GNU  General Public
 # License along with GNU Make; see the file  COPYING.  If  not,  write
 # to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 # Boston, MA 02110-1301 USA.
@@ -46,8 +46,13 @@ isc_dhcpd_default_levels = (15.0, 5.0)
 # 10.0.1.57
 
 def parse_isc_dhcpd(info):
-    parsed = {}
+    parsed = {
+        "pids"   : [],
+        "pools"  : [],
+        "leases" : [],
+    }
 
+    mode = None
     for line in info:
         if line[0] == '[general]':
             mode = "general"
@@ -59,10 +64,12 @@ def parse_isc_dhcpd(info):
         elif mode == "general":
             if line[0] == "PID:":
                 parsed["pids"] = map(int, line[1:])
+
         elif mode == "pools":
-            parsed.setdefault("pools", []).append((line[0], line[1]))
+            parsed["pools"].append((line[0], line[1]))
+
         elif mode == "leases":
-            parsed.setdefault("leases", []).append(line[0])
+            parsed["leases"].append(line[0])
 
     return parsed
 
@@ -114,28 +121,8 @@ def check_isc_dhcpd(item, params, parsed):
         if lease_dec >= range_from and lease_dec <= range_to:
             num_used += 1
 
-    num_free = num_leases - num_used
-    perc_free = float(num_free) / num_leases * 100.0
-    perc_warn, perc_crit = params # for free
-    warn = perc_warn / 100 * num_leases
-    crit = perc_crit / 100 * num_leases
-    perf_data = [ ("used_dhcp_leases", num_used, num_leases - warn, num_leases - crit, 0, num_leases) ]
-
-    if num_free <= crit:
-        state = 2
-    elif num_free <= warn:
-        state = 1
-    else:
-        state = 0
-        levels_text = ""
-
-    if state:
-        levels_text = " (levels at %d%%/%d%%)" % (perc_warn, perc_crit)
-
-    yield state, "%d leases used, %d leases free (%s)%s" % (
-        num_used, num_free, get_percent_human_readable(perc_free), levels_text), \
-        perf_data
-
+    for check_result in check_dhcp_pools_levels(num_leases - num_used, num_used, None, num_leases, params):
+        yield check_result
 
 
 check_info["isc_dhcpd"] = {
@@ -145,4 +132,5 @@ check_info["isc_dhcpd"] = {
     'service_description':     'DHCP Pool %s',
     'group':                   'win_dhcp_pools',
     'has_perfdata':            True,
+    'includes':                ["dhcp_pools.include"],
 }

@@ -17,7 +17,7 @@
 // in the hope that it will be useful, but WITHOUT ANY WARRANTY;  with-
 // out even the implied warranty of  MERCHANTABILITY  or  FITNESS FOR A
 // PARTICULAR PURPOSE. See the  GNU General Public License for more de-
-// ails.  You should have  received  a copy of the  GNU  General Public
+// tails. You should have  received  a copy of the  GNU  General Public
 // License along with GNU Make; see the file  COPYING.  If  not,  write
 // to the Free Software Foundation, Inc., 51 Franklin St,  Fifth Floor,
 // Boston, MA 02110-1301 USA.
@@ -25,16 +25,19 @@
 #ifndef StringPointerColumn_h
 #define StringPointerColumn_h
 
+#include "config.h"  // IWYU pragma: keep
 #include "StringColumn.h"
 
-class StringPointerColumn : public StringColumn
-{
-    char *_string;
+class StringPointerColumn : public StringColumn {
+    const char *_string;
+
 public:
-    StringPointerColumn(string name, string description, char *string)
-        : StringColumn(name, description, -1), _string(string) {}
-    char* getValue(void* ) { return _string; }
+    StringPointerColumn(const std::string &name, const std::string &description,
+                        const char *string, int indirect_offset = -1,
+                        int extra_offset = -1)
+        : StringColumn(name, description, indirect_offset, extra_offset)
+        , _string(string) {}
+    std::string getValue(void *) const override { return _string; }
 };
 
-
-#endif // StringPointerColumn_h
+#endif  // StringPointerColumn_h
